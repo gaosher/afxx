@@ -197,6 +197,7 @@ def parse_arguments():
             cmd.add_argument("--since", help="cursor from previous status; requires --wait")
             cmd.add_argument("--timeout", type=float, help="wait timeout in seconds, default 30, maximum 50")
         if name == "replay":
+            cmd.add_argument("--dump", action="store_true", help="为本次 replay 开启定位 dump，不修改配置文件")
             reference = cmd.add_mutually_exclusive_group(required=True)
             reference.add_argument(
                 "--job-id", "--job", dest="job", help="deploy job ID"
@@ -366,6 +367,8 @@ def main():
         return workflow_jobs.localize_replay(c, args.job, data) if args.attempt is None else data
     values = []
     if args.command == "replay":
+        if args.dump:
+            c["replay"]["dump"] = True
         if args.job:
             args.deployment = str(
                 Path(c["remote"]["state_dir"]) / args.job / "deployment.json"

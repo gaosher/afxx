@@ -135,7 +135,7 @@ MCP 默认读取同一固定配置；需要覆盖时，通过调用的 `config` 
 
 ## Replay 定位采集
 
-普通 replay 默认 `replay.dump: false`。修复 skill 在任务配置中默认开启以下选项，无需更新 Python 环境：
+普通 replay 默认 `replay.dump: false`。修复 skill 使用 `replay --dump` 为本次任务开启以下选项，无需修改配置或更新 Python 环境：
 
 ```yaml
 replay:

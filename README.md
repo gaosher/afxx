@@ -312,3 +312,5 @@ cp -R skills/af-forge-repair "${CODEX_HOME:-$HOME/.codex}/skills/"
 调用示例：`使用 $af-forge-repair 修复 AFX issue F152，验证和回归通过后 commit，等待检视。`
 
 replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/af-forge-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 单个执行可用 `status --attempt <id> --fields ...` 按字段查询。详见 [证据读取说明](docs/AGENT_USAGE.md#status-概要字段查询与等待)。
+
+定位复现可使用 `af-forge replay --dump --job-id <deploy-job-id> --seed <seed>`；`--dump` 仅覆盖本次任务并保存到 job 配置，原配置文件不变。

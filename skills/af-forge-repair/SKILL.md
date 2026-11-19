@@ -31,7 +31,7 @@ af-forge issue claim --request-id <本次领取请求ID>
 af-forge issue preview --issue-id <issue-id> --full
 ```
 
-读取复现信息、失败摘要和 related_knowledge。preview 是受影响用例，不等于平台回归候选集。当前目标平台的问题租约已延长为 5 天，日常修复不安排定时续租；以 claim 返回的 lease_expires_at 为准，不将 5 天写死为所有平台的保证。仅在恢复长期搁置的任务、临近到期或收到租约错误时检查，仍由当前持有者继续处理且租约有效时按需调用 `issue renew`。租约已失效或被接管时先确认所有权，不继续该问题的写操作。Forge 内部已有的自动续租不需要 skill 重复编排。
+读取复现信息、失败摘要和 related_knowledge。preview 是受影响用例，不等于平台回归候选集。不另安排定时续租；恢复搁置任务或遇到租约错误时核对所有权和到期时间，必要时执行 `issue renew`。租约失效或被接管后停止写操作。
 
 ## 2. 复现并收集定位信息
 
@@ -47,21 +47,16 @@ TASK_CONFIG="/absolute/path/to/task-config.yaml"
 
 以下示例按 worktree 任务配置编写；未创建任务配置且使用默认配置时，省略 `--config "$TASK_CONFIG"`。
 
-复现阶段默认在任务专用 `$TASK_CONFIG` 中设置 `replay.dump: true`，保留其他 replay 配置；不修改用户的原始配置，无需 env update。基线与候选的定位复测使用相同采集设置。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集证据。
-
-```yaml
-replay:
-  dump: true
-```
+基线和候选复现均使用 `replay --dump`，由 Forge 开启本次任务的定位采集，无需修改 `replay.dump`。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集和读取证据。
 
 对 nnsmith seed 使用 Forge replay：
 
 ```bash
-af-forge replay --config "$TASK_CONFIG" --job-id <基线deploy-job-id> --seed <原始seed> --request-id <复现请求ID>
+af-forge replay --config "$TASK_CONFIG" --dump --job-id <基线deploy-job-id> --seed <原始seed> --request-id <复现请求ID>
 af-forge status --config "$TASK_CONFIG" --job-id <replay-job-id>
 ```
 
-异步提交成功不等于复现完成；用 status/wait 等到 success/failed，Forge 自动下载全量现场到 /tmp，返回 evidence_path 和失败基础信息。先读取本地 evidence.json 的 files/skipped，再按需读取 job/report.json 的 runtime、attempts 和诊断字段及失败对应日志/IR；不要将整份报告或全部 dump 放入上下文。使用清单中的 local_path，按报告中的明确关联连接 attempt 与产物，不按文件名猜测 Shape 归属。需要额外执行信息时用 `status --attempt <id> --fields ...`。下载失败时重查同一 job，不重新 replay；缓存完整则复用。按复现证据清单记录输入、环境、包身份、失败阶段和实际文件路径；缺失证据注明原因。保持原输入和精度语义，不能换 seed 或放宽正确性判定制造通过。
+用 status/wait 等到终态并取得 evidence_path，再按 [复现证据清单](references/replay-evidence.md#replay-自动返回的证据) 读取必要的本地报告、日志和 dump。缺失证据注明原因；保持原 seed、输入和精度语义。
 
 非 nnsmith 用例使用平台给出的复现方式和目标环境，不强行传入 Forge seed 接口。失败无法复现时，先比较环境、包版本和用例条件；明确“未复现”及缺失证据，不直接宣称修复。
 

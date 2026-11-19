@@ -1144,3 +1144,22 @@ def test_missing_local_source_does_not_fall_back_to_script_location(cfg):
     del raw["local"]
     with pytest.raises(ValueError, match="local.source_dir"):
         workflow_config.validate_config(workflow_config.normalize_config(raw))
+
+
+@pytest.mark.parametrize("configured,flag,expected", [(False, False, False), (True, False, True), (False, True, True)])
+def test_replay_dump_override_is_frozen_without_editing_config(cfg, tmp_path, configured, flag, expected):
+    import yaml
+    cfg["replay"]["dump"] = configured
+    path = tmp_path / "replay.yaml"
+    original = yaml.safe_dump(cfg)
+    path.write_text(original)
+    result = subprocess.run(
+        [sys.executable, "-m", "af_forge.cli", "replay", "--config", str(path),
+         "--deployment", "/remote/deployment.json", "--seed", "F0SQR0HF7D3QEYXA8AE8QS7927Z", "--dry-run",
+         *(["--dump"] if flag else [])], capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    data = json.loads(result.stdout)["data"]
+    frozen = yaml.safe_load((Path(data["local"]) / "config.yaml").read_text())
+    assert frozen["replay"]["dump"] is expected
+    assert path.read_text() == original

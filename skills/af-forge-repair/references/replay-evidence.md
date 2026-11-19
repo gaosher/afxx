@@ -1,6 +1,6 @@
 # 复现证据清单
 
-复现前在任务配置启用 `replay.dump: true`。普通 replay 默认 false；这些设置仅作用于本次 Forge replay，不改变平台常驻 client。读取 job 的终态、`report.json` 和 `job.log`；以 report 的 results_dir、runtime、resources、replay_environment 为实际记录，不能仅引用配置期望值。
+定位复现使用 `af-forge replay --dump ...`，覆盖本次任务的 replay.dump 并冻结到 job 配置，不修改原配置。未传 --dump 时沿用配置，普通 replay 默认 false；这些设置仅作用于本次 Forge replay，不改变平台常驻 client。读取 job 的终态、`report.json` 和 `job.log`；以 report 的 results_dir、runtime、resources、replay_environment 为实际记录，不能仅引用配置期望值。
 
 ## 必需信息
 

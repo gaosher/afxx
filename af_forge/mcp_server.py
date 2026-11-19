@@ -97,6 +97,7 @@ def create_server(default_config=None):
         arguments are CLI tokens, never a shell command.
         status returns compact progress; terminal replay automatically downloads complete evidence to /tmp.
         Terminal replies contain evidence_path and basic failures, not dump contents.
+        replay --dump enables diagnostic dumps for that job without editing the config file.
         --attempt selects an execution, --fields selects dotted fields.
         --wait --since <cursor> returns changes/end or a tiny timeout receipt (default 30 seconds).
 
