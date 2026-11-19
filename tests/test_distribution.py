@@ -72,7 +72,7 @@ def test_mcp_stdio(tmp_path):
             assert grouped.isError
             assert grouped.structuredContent["command"] == "issue claim"
             assert grouped.structuredContent["error"]["code"] == "CONFIG_INVALID"
-            for command in ("init", "update"):
+            for command in ("env init", "env update"):
                 no_config = await session.call_tool("af_forge_run", {"command": command})
                 assert no_config.isError
                 assert no_config.structuredContent["error"]["code"] == "INVALID_ARGUMENT"
@@ -192,12 +192,12 @@ def test_env_requires_explicit_config_even_with_defaults(tmp_path, monkeypatch, 
     monkeypatch.chdir(tmp_path)
     (tmp_path / "af-forge-config.yaml").write_text("{}")
     monkeypatch.setenv("AF_FORGE_CONFIG", str(tmp_path / "af-forge-config.yaml"))
-    monkeypatch.setattr(sys, "argv", ["af-forge", command])
+    monkeypatch.setattr(sys, "argv", ["af-forge", "env", command])
     assert cli.cli() == 2
     result = json.loads(capsys.readouterr().out)
     assert result["error"]["code"] == "INVALID_ARGUMENT"
     assert "--config" in result["error"]["message"]
-    monkeypatch.setattr(sys, "argv", ["af-forge", command, "--config", "/chosen/config.yaml"])
+    monkeypatch.setattr(sys, "argv", ["af-forge", "env", command, "--config", "/chosen/config.yaml"])
     assert cli.parse_arguments().config == "/chosen/config.yaml"
-    monkeypatch.setattr(sys, "argv", ["af-forge", "check"])
+    monkeypatch.setattr(sys, "argv", ["af-forge", "env", "check"])
     assert cli.parse_arguments().config == tmp_path / "af-forge-config.yaml"
