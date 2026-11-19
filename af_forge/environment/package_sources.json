@@ -1,0 +1,9 @@
+{
+  "torch_cpu_index": "https://download.pytorch.org/whl/cpu",
+  "torch_npu_daily": "https://pytorch-package.obs.cn-north-4.myhuaweicloud.com/pta/Daily/v{version}/{date}.1/pytorch_v{version}_{python_tag}.tar.gz",
+  "cann_repository": "https://ascend.devcloud.huaweicloud.com/artifactory/cann-run-mirror/software/master/",
+  "ops_compatibility": {
+    "Ascend910_9362": "A3"
+  },
+  "uv_metadata": "https://pypi.org/pypi/uv/{version}/json"
+}

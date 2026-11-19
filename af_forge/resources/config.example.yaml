@@ -1,0 +1,41 @@
+# 日常配置；路径填写绝对路径。local.source_dir 和 build 中的 null 必填。
+local:
+  source_dir: null  # 本地 graph-autofusion 源码仓库绝对路径，不再按脚本位置推导
+connection:
+  environment: "DevEnv_**"  # npussh 环境名或 ID
+workflow_root: "/path/to/af-forge"  # 远端统一根目录；使用独立目录
+# 自动派生 python/、venv/、Ascend/cann/、graph-autofusion/ 及任务/结果目录。
+# build 位于 graph-autofusion/build/，沿用 build.sh 的目录约定。
+build:
+  llvm_build_dir: null  # LLVM/MLIR 根目录
+  lld_bin: null         # ld.lld 绝对路径；编译默认 -j 8
+
+# 日常 Python 环境初始化与更新；稳定依赖由脚本提供。
+python_env:
+  # 自动准备 workflow_root/python/ 内的 Python 3.11，检查合格后创建 venv；无需填写 base_python 或 uv_bin。
+  torch_version: "2.10.0+cpu"  # 示例版本；按此安装 torch 并选择同系列 torch_npu Daily
+  index_url: null       # 普通包 HTTPS 索引；null 使用 uv 默认索引
+  torch_npu:
+    date: "latest"     # 自动选最新 Daily；也可填带引号的 YYYYMMDD
+  afx:
+    version: "latest"  # 默认从 PyPI 获取最新兼容正式版，也可指定精确版本；使用未发布包时删除 version，改填 wheel: "/远端路径/包.whl" 或 HTTPS URL
+
+# init 在 CANN 安装根目录为空时自动安装；完整环境直接复用。
+cann:
+  install_root: null  # 可填远端安装根目录，如 "/mnt/workspace/pkg/Ascend"；默认 <workflow_root>/Ascend
+  ops: null  # 留空按设备型号查映射(package_sources.json)；指定包系列如 "A3"、"910b"、"950"，或用 "none" 跳过 OPS
+  date: "latest"  # 最新完整发布，或指定日期如 "20261116"；仅在安装缺失的 CANN 时使用
+  nnal: false          # 需要 ATB/SiP 时开启
+  driver_library_dirs: [] # 仅在 npu-smi 找不到驱动动态库时填写库目录
+
+# 默认 replay.devices / workers 为 auto：使用可见逻辑 NPU，每卡一个 worker。
+# 批量 seed 分配到多卡；单 seed 使用第一张可见卡。
+# 需要限制资源时可增加 replay: {devices: ["npu:0"], workers: 1}。
+
+# 接入提供 /api/issues（F152 等编号）或 /api/agent/repairs（issue_key）的 AFX 平台时添加此节；两个 token 文件属于同一平台用户。
+# platform:
+#   url: "https://autofuse.online"
+#   agent_id: "af-repair-agent"
+#   # 使用平台用户 Bearer token；远端 token 文件权限须为 0600。
+#   token_file: "/absolute/local/path/afx.token"
+#   remote_token_file: "/absolute/remote/path/afx.token"
