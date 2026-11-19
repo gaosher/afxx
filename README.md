@@ -155,7 +155,29 @@ af-forge issue regression-preview --issue-id F152
 af-forge execution show --exec-uuid <exec_uuid>
 ```
 
-`detail` 返回生命周期、租约、轮次和事件；`tasks` 查询实际验证或回归轮次，返回 issue_id、round_no 和 tasks。回归候选预览不等于最终执行集。`execution show` 使用执行 UUID（不是数值 exec_id），返回环境、Shape、日志及平台的 log_truncated/log_missing 标记；不将截断日志标为完整。修复总结先在本地整理，等待人工检视。
+`detail` 返回生命周期、租约、轮次和事件；`tasks` 查询实际验证或回归轮次，返回 issue_id、round_no 和 tasks。回归候选预览不等于最终执行集。`execution show` 使用执行 UUID（不是数值 exec_id），返回环境、Shape、日志及平台的 log_truncated/log_missing 标记；不将截断日志标为完整。修复总结先在本地整理、人工检视，再通过独立的 `issue summarize` 显式发布。
+
+### 检视后提交修复总结
+
+先将已检视的总结保存为本地 `summary.yaml`（直接填写知识字段，不加 knowledge 外层）。YAML 是 Forge 的本地输入格式，便于编辑和检视；平台接收的是 Forge 转换后的 JSON 请求，并不要求 YAML：
+
+```yaml
+kind: bugfix_function
+title: "修复调度边界条件"
+symptom: "原始 seed 在指定 Shape 下编译失败"
+root_cause: "边界条件处理不完整"
+solution: "修正边界条件，并补充对应回归测试"
+fix_ref: "实际修复 commit SHA"
+```
+
+```bash
+af-forge issue summarize --issue-id F152 \
+  --summary-file /absolute/path/summary.yaml --request-id summary-F152-001
+```
+
+这是本地发起的平台写操作，不连接 NPU。需要本地领取记录、有效租约、knowledge 权限和平台 summarizing 状态。成功返回 issue_id、status=resolved 和 knowledge_id。网络失败重试同一命令；同一 request-id 固定总结内容、租约和平台，改变内容会报 REQUEST_CONFLICT。verify、回归及修复 skill 都不会自动调用它。
+
+必填字段为 kind/title/symptom/root_cause/solution。kind 使用 AFX 类型，如 bugfix_function、bugfix_accuracy 或 perf_tuning；可选字段包括 keywords、ops、dtypes、backends、graph_pattern、applicability、version_range、fix_ref、body_md。具体类型和长度由平台校验。提交后知识会发布，不只是保存草稿。
 
 ## AFX 常驻客户端
 
@@ -269,7 +291,7 @@ uv pip install -e '.[dev]'
 
 - **远端环境**：`env init`、`env update`、`env check`
 - **远端工作流**：`deploy`、`replay`、`status`
-- **问题验证**：`issue claim|preview|detail|tasks|regression-preview|status|wait|verify|renew`、`execution show`
+- **问题验证**：`issue claim|preview|detail|tasks|regression-preview|status|wait|verify|renew|summarize`、`execution show`
 - **本地操作**：`doctor`、`config init`
 
 `af-forge help` 显示带分类前缀的顶层命令；`af-forge issue --help` 显示问题处理操作，`af-forge config --help` 显示配置操作。旧的连字符子命令不再作为 CLI 入口。

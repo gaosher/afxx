@@ -14,6 +14,7 @@
 | status | 查询远端 job | 查询成功后继续检查返回的任务 state |
 | issue claim / issue preview / issue renew | 本地直接调用平台 HTTPS | 保存领取响应、预览或续租到期时间 |
 | issue detail / issue tasks / issue regression-preview / execution show | 本地只读查询平台，不要求租约或 NPU 连接 | ok=true 后读取 data；空 tasks/cases 不代表通过 |
+| issue summarize | 本地显式发布已检视总结；不创建远端 job | 返回 status=resolved 和 knowledge_id |
 | issue verify | 通过 npussh 在远端提交平台请求 | 返回 state=submitted，保存 round_no |
 | issue status | 本地查询平台指定验证轮次 | 检查 terminal 和 outcome |
 | issue wait | 本地持续查询平台并续租 | terminal=true 且 outcome=passed |
@@ -118,4 +119,14 @@ Python 更新失败时同时读取 result.json.error 和 rollback，分别确认
 
 保留平台日志的 log_truncated/log_missing 标记；缺失日志不合成为空日志。任务接口不保证包含 exec_uuid，未拿到可核验执行 ID 时，使用已有 claim 复现信息、任务 detail、客户端日志或平台界面继续定位，不猜测 ID。
 
-当前不提供 knowledge 查询命令。修复总结先保留本地并等待人工检视，不能因为本地 commit 完成就声称平台已经 resolved。
+当前不提供 knowledge 查询命令。修复总结先保留本地并等待人工检视，检视后显式调用 issue summarize；不能因为本地 commit 完成就声称平台已经 resolved。
+
+## 独立总结提交
+
+`issue summarize --issue-id F152 --summary-file /absolute/path/summary.yaml --request-id summary-F152-001` 读取 YAML 知识字段，使用本地平台 token 和领取记录中的租约提交。MCP 命令路径为 `issue summarize`，参数与 CLI 一致。仅在用户明确要求提交已检视总结时调用，不从修复循环自动发布。
+
+本地必需 kind、title、symptom、root_cause、solution 五个非空字符串；未知字段拒绝，平台继续校验字段类型、长度、状态及权限。文件必须是 YAML，不能仅传自由文本 Markdown。body_md 可作为 YAML 多行字段携带完整正文。
+
+记录存于 local.state_dir/issues/<issue-id>/summaries/<request-id摘要>.json，保存固定请求及成功回执，不保存 token。响应不确定时重试原命令；即使平台已变为 resolved，也会复用相同请求，避免重复发布。成功的本地重试直接返回回执。修改总结、租约或平台后重用同一 request-id 返回 REQUEST_CONFLICT；不要通过更换键盲目重试已发布总结。
+
+SUMMARY_INVALID 表示本地文件或字段有误；PLATFORM_WRONG_STATE、PLATFORM_LEASE_LOST、PLATFORM_UNAUTHORIZED 等平台错误保持透传。平台检查失败不视为归档成功，不自动释放租约或修改 issue 状态。

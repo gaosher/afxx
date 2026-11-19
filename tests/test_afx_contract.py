@@ -125,6 +125,7 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     number = issues.list_issues(store)["issues"][0]["issue_id"]
     agent = principal()
     verify_keys = []
+    summary_keys = []
 
     def api(c, method, path, body=None, **opts):
         if method == "GET":
@@ -142,6 +143,13 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
             return issues.claim(store, agent, dict(body))
         if path == f"/api/issues/{number}/renew":
             return issues.renew(store, agent, number, dict(body))
+        if path == f"/api/issues/{number}/knowledge":
+            assert not opts.get("remote")
+            summary_keys.append(body["request_key"])
+            value = issues.submit_knowledge(store, agent, number, dict(body))
+            if len(summary_keys) == 1:
+                raise workflow_common.WorkflowError("PLATFORM_UNAVAILABLE", "summary response lost")
+            return value
         assert path == f"/api/issues/{number}/verify" and opts["remote"]
         verify_keys.append(body["request_key"])
         value = issues.verify(store, agent, number, dict(body))
@@ -199,3 +207,18 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     execution = af_forge.cli.main()
     assert execution["log"] == "schedule failed: test execution log"
     assert execution["log_truncated"] is False
+
+    # Complete this fixture's verification without regression candidates, then publish via the real service.
+    with store.write() as conn:
+        conn.execute("UPDATE retest_tasks SET status='done', result='pass' WHERE issue_id=?", (number,))
+        retests._maybe_finish(conn, number, 1)
+    assert issues.issue_detail(store, number)["status"] == "summarizing"
+    summary = tmp_path / "summary.yaml"
+    summary.write_text("kind: bugfix_function\ntitle: Fix scheduling\nsymptom: Compile failed\nroot_cause: Incorrect boundary\nsolution: Correct the boundary\nfix_ref: abc123\n")
+    with pytest.raises(workflow_common.WorkflowError, match="summary response lost"):
+        cli("issue summarize", "--summary-file", str(summary), "--request-id", "summary-1")
+    assert issues.issue_detail(store, number)["status"] == "resolved"
+    published = cli("issue summarize", "--summary-file", str(summary), "--request-id", "summary-1")
+    assert published["status"] == "resolved" and published["knowledge_id"].startswith("K")
+    assert cli("issue summarize", "--summary-file", str(summary), "--request-id", "summary-1") == published
+    assert summary_keys == ["summary-1", "summary-1"]

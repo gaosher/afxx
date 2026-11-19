@@ -102,6 +102,7 @@ def parse_arguments():
         "issue-detail",
         "issue-tasks",
         "issue-regression-preview",
+        "issue-summarize",
     )
     descriptions = {
         "init": "远端环境：初始化 Python 和 CANN 环境",
@@ -119,6 +120,7 @@ def parse_arguments():
         "issue-detail": "问题查询：查看生命周期、租约和历史轮次",
         "issue-tasks": "问题查询：查看指定轮次的任务与失败信息",
         "issue-regression-preview": "问题查询：预览平台回归候选集",
+        "issue-summarize": "问题归档：提交已检视的本地修复总结",
         "execution-show": "执行查询：查看执行详情、Shape 和日志",
         "doctor": "本地检查：检查配置、连接工具及登录状态",
     }
@@ -151,8 +153,8 @@ def parse_arguments():
         )
         if name in (*env_jobs, *jobs) or name == "doctor":
             cmd.add_argument("--dry-run", action="store_true")
-        if name in (*env_jobs, *jobs) or name == "issue-claim":
-            cmd.add_argument("--request-id")
+        if name in (*env_jobs, *jobs) or name in ("issue-claim", "issue-summarize"):
+            cmd.add_argument("--request-id", required=name == "issue-summarize")
         if name in ("init", "update"):
             cmd.add_argument("--detach", action="store_true")
         if name == "issue-preview":
@@ -164,6 +166,8 @@ def parse_arguments():
                              help="AFX platform issue, e.g. F152")
         if name in ("issue-wait", "issue-status"):
             cmd.add_argument("--round-no", type=int, required=True, help="verification round returned by issue verify")
+        if name == "issue-summarize":
+            cmd.add_argument("--summary-file", required=True, help="reviewed local YAML knowledge fields")
         if name == "issue-tasks":
             cmd.add_argument("--round-no", type=int, required=True, help="verify or regression round number")
         if name == "execution-show":
@@ -259,6 +263,8 @@ def main():
             if args.request_id is None:
                 print(f"issue claim --request-id {request_id}", file=sys.stderr, flush=True)
             return platform.claim(c, request_id, issue_id=args.issue_id)
+        if args.command == "issue-summarize":
+            return platform.summarize(c, args.issue_id, args.summary_file, args.request_id)
         if args.command == "issue-detail":
             return platform.issue_detail(c, args.issue_id)
         if args.command == "issue-tasks":

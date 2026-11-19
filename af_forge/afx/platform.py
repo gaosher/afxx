@@ -154,6 +154,50 @@ def claim(c, request_key, *, issue_id=None):
     return value
 
 
+def summarize(c, issue_id, summary_file, request_id):
+    validate_issue_id(issue_id)
+    workflow_common.require(isinstance(request_id, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id),
+                            "summarize requires a valid request-id")
+    try:
+        knowledge = workflow_config.read_config(summary_file)
+    except (OSError, ValueError, TypeError) as error:
+        raise workflow_common.WorkflowError("SUMMARY_INVALID", f"cannot read summary YAML: {error}") from error
+    required = {"kind", "title", "symptom", "root_cause", "solution"}
+    optional = {"keywords", "ops", "dtypes", "backends", "graph_pattern", "applicability", "version_range", "fix_ref", "body_md"}
+    workflow_common.require_code(
+        isinstance(knowledge, dict)
+        and all(isinstance(knowledge.get(k), str) and knowledge[k].strip() for k in required)
+        and set(knowledge) <= required | optional,
+        "SUMMARY_INVALID", "summary must contain kind/title/symptom/root_cause/solution and only supported knowledge fields",
+    )
+    lease = claimed(c, issue_id)
+    body = {"request_key": request_id, "lease_id": lease["lease_id"], "knowledge": knowledge}
+    context = {"platform_url": workflow_config.platform_settings(c)["url"], "agent_id": c["platform"]["agent_id"]}
+    path = record_path(c, issue_id).with_suffix("") / "summaries" / (workflow_common.digest(request_id) + ".json")
+    with workflow_common.lock(path.with_suffix(".lock")):
+        state = workflow_common.read(path) if path.exists() else {}
+        if state:
+            workflow_common.require_code(state["body"] == body and state["context"] == context,
+                                         "REQUEST_CONFLICT", "summary request-id already binds another summary, lease or platform")
+            if state["state"] == "submitted":
+                return state["response"]
+        else:
+            state = {"state": "prepared", "issue_id": issue_id, "context": context, "body": body}
+            workflow_common.write(path, state)
+        # Let the platform enforce summarizing, lease and knowledge permission.
+        # Do not pre-check state: a lost successful response must remain retryable after resolved.
+        value = call(c, "POST", f"/api/issues/{issue_id}/knowledge", state["body"])
+        workflow_common.require_code(
+            isinstance(value, dict) and value.get("issue_id") == issue_id
+            and value.get("status") == "resolved" and isinstance(value.get("knowledge_id"), str)
+            and re.fullmatch(r"K[0-9]{1,9}", value["knowledge_id"]),
+            "PLATFORM_RESPONSE_INVALID", "invalid summary publication response",
+        )
+        state.update(state="submitted", response=value)
+        workflow_common.write(path, state)
+        return value
+
+
 def numbered_seeds(c, issue_id, repro):
     if not repro["truncated"]:
         return list(

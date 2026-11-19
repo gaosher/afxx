@@ -119,6 +119,13 @@ def test_mcp_stdio(tmp_path):
                 assert response.isError
                 assert response.structuredContent["command"] == command
                 assert response.structuredContent["error"]["code"] == "CONFIG_INVALID"
+            summary_help = await session.call_tool("af_forge_help", {"command": "issue summarize"})
+            assert "--summary-file" in summary_help.content[0].text
+            summary_missing_key = await session.call_tool("af_forge_run", {
+                "command": "issue summarize", "arguments": ["--issue-id", "F152", "--summary-file", "summary.yaml"],
+            })
+            assert summary_missing_key.isError
+            assert summary_missing_key.structuredContent["error"]["code"] == "INVALID_ARGUMENT"
             rejected = await session.call_tool("af_forge_run", {"command": "_worker"})
             assert rejected.isError
 

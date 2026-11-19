@@ -37,6 +37,7 @@ Command = Literal[
     "issue detail",
     "issue tasks",
     "issue regression-preview",
+    "issue summarize",
     "execution show",
     "config init",
 ]
