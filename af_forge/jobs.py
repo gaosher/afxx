@@ -509,3 +509,31 @@ def submit(c, request, request_id, dry_run):
             raise workflow_common.WorkflowError(
                 "PREPARATION_FAILED", str(error), data
             ) from error
+
+
+def query_evidence(c, job_id, action, *, path=None, offset=0, limit=8192, sha256=None):
+    import inspect
+    from af_forge.afx import replay
+    workflow_common.require_code(offset >= 0 and 1 <= limit <= 65536,
+                                 "INVALID_ARGUMENT", "offset >= 0; limit must be 1..65536")
+    code = "import json,os,re,sys\nfrom pathlib import Path\n"
+    for function in (replay.collect_evidence, replay.failure_index, replay.associate_evidence, replay.read_evidence):
+        code += inspect.getsource(function) + "\n"
+    code += """
+job = Path(sys.argv[1])
+options = json.loads(sys.argv[2])
+try:
+ if options['action'] == 'read':
+  value = read_evidence(job, options['path'], options['offset'], options['limit'], options['sha256'])
+ else:
+  report = json.loads((job/'report.json').read_text())
+  value = collect_evidence(job, Path(report['results_dir']), report.get('resources',{}).get('dump', False), options['offset'])
+  associate_evidence(value, report.get('attempts', []))
+ print(json.dumps({'state':'success','evidence':value}))
+except (OSError, ValueError, KeyError) as error:
+ print(json.dumps({'state':'failed','error_code':'EVIDENCE_UNAVAILABLE','error':str(error)}))
+"""
+    value = remote(c, ["python3", "-c", code, str(Path(c["remote"]["state_dir"]) / job_id),
+                       json.dumps(dict(action=action, path=path, offset=offset, limit=limit, sha256=sha256))])
+    workflow_common.require_code(value['state'] == 'success', value.get('error_code', 'EVIDENCE_UNAVAILABLE'), value.get('error', 'evidence unavailable'))
+    return value['evidence']

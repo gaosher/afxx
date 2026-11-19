@@ -231,3 +231,60 @@ def test_auto_devices_rejects_no_or_invalid_devices(value):
 def test_auto_devices_uses_logical_runtime_count():
     assert adapter.visible_device_count("driver diagnostic\n2\n") == 2
     assert "torch.npu.device_count()" in adapter.device_command("/target/python")[2]
+
+
+@pytest.mark.parametrize("dump", [False, True])
+def test_diagnostics_are_scoped_to_replay(tmp_path, monkeypatch, dump):
+    import os
+    monkeypatch.setenv("AUTOFUSE_DFX_FLAGS", "parent-flags")
+    before = dict(os.environ)
+    results = tmp_path / "results"
+    env = adapter.replay_environment(results, dump)
+    assert dict(os.environ) == before
+    assert env["TORCHINDUCTOR_CACHE_DIR"] == str(results / "cache")
+    if dump:
+        assert env["TORCH_COMPILE_DEBUG"] == "1"
+        assert env["DUMP_GE_GRAPH"] == "1"
+        assert env["DUMP_GRAPH_LEVEL"] == "1"
+        assert Path(env["DUMP_GRAPH_PATH"]) == results / "dump" / "ge"
+        assert Path(env["DUMP_GRAPH_PATH"]).is_dir()
+        assert "--codegen_compile_debug=true;" in env["AUTOFUSE_DFX_FLAGS"]
+        assert f"--debug_dir={results / 'dump'};" in env["AUTOFUSE_DFX_FLAGS"]
+        assert env["ASCEND_GLOBAL_LOG_LEVEL"] == "0"
+        assert env["ASCEND_SLOG_PRINT_TO_STDOUT"] == "1"
+    else:
+        assert not results.exists()
+        assert set(env) == {"AUTOFUSEX_HOME", "TORCHINDUCTOR_CACHE_DIR", "AUTOFUSE_DFX_FLAGS"}
+    assert "ASCEND_LAUNCH_BLOCKING" not in env
+    assert "TORCHINDUCTOR_FORCE_DISABLE_CACHES" not in env
+
+
+def test_evidence_returns_text_and_missing_directories(tmp_path):
+    job = tmp_path / "job"
+    results = tmp_path / "results"
+    job.mkdir()
+    (job / "job.log").write_text("failure stack")
+    (results / "dump").mkdir(parents=True)
+    (results / "dump" / "lowering.mlir").write_text("module {}")
+    (results / "sync.json").write_text('SECRET')
+    (results / "dump" / "outside.log").symlink_to(job / "job.log")
+    data = adapter.collect_evidence(job, results, True)
+    assert {row["excerpt"] for row in data["files"]} == {"failure stack", "module {}"}
+    assert not data["directories"]["torch_debug"]["exists"]
+    assert not data["truncated"]
+    assert all(Path(row["path"]).is_absolute() for row in data["files"])
+
+
+def test_evidence_bounds_output_and_preserves_log_tail(tmp_path):
+    job = tmp_path / "job"
+    results = tmp_path / "results"
+    job.mkdir()
+    results.mkdir()
+    (job / "job.log").write_text("x" * 10000 + "last error")
+    for index in range(150):
+        (results / f"{index:03}.log").write_text("a" * 10000)
+    data = adapter.collect_evidence(job, results, True)
+    assert len(data["files"]) == 128 and data["truncated"]
+    assert sum(len(row.get("excerpt", "")) for row in data["files"]) <= 65536
+    assert data["files"][0]["excerpt"].endswith("last error")
+    assert data["files"][0]["excerpt_truncated"]

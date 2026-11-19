@@ -70,7 +70,7 @@ def response(command, data=None, error=None):
     return {
         "schema_version": 1,
         "ok": error is None,
-        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-")) else command,
+        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-")) else command,
         "data": data,
         "error": None if error is None else {"code": error.code, "message": str(error)},
     }
@@ -122,12 +122,14 @@ def parse_arguments():
         "issue-regression-preview": "问题查询：预览平台回归候选集",
         "issue-summarize": "问题归档：提交已检视的本地修复总结",
         "execution-show": "执行查询：查看执行详情、Shape 和日志",
+        "evidence-list": "定位证据：分页列出远端复测产物与失败关联",
+        "evidence-read": "定位证据：按字节分页读取日志、IR 和代码",
         "doctor": "本地检查：检查配置、连接工具及登录状态",
     }
-    for name in (*env_jobs, *jobs, *issues, "execution-show", "status", "doctor"):
+    for name in (*env_jobs, *jobs, *issues, "execution-show", "evidence-list", "evidence-read", "status", "doctor"):
         parent = commands
         leaf = name
-        if name in env_jobs or name.startswith(("issue-", "execution-", "config-")):
+        if name in env_jobs or name.startswith(("issue-", "execution-", "config-", "evidence-")):
             group = "env" if name in env_jobs else name.split("-", 1)[0]
             leaf = name if group == "env" else name.split("-", 1)[1]
             if group not in groups:
@@ -135,6 +137,7 @@ def parse_arguments():
                     "env": "管理远端 Python、CANN 和依赖环境",
                     "issue": "领取问题、提交验证及查询回归结果",
                     "execution": "查询平台执行详情和日志",
+                    "evidence": "读取远端 replay 定位证据",
                 }[group]
                 group_parser = commands.add_parser(
                     group, help=summary, description=summary,
@@ -174,8 +177,14 @@ def parse_arguments():
             cmd.add_argument("--exec-uuid", required=True, help="AFX execution UUID, not numeric exec_id")
         if name == "issue-wait":
             cmd.add_argument("--timeout", type=float, default=3600)
-        if name in ("status", "issue-verify"):
+        if name in ("status", "issue-verify", "evidence-list", "evidence-read"):
             cmd.add_argument("--job-id", "--job", dest="job", required=True)
+        if name in ("evidence-list", "evidence-read"):
+            cmd.add_argument("--offset", type=int, default=0)
+        if name == "evidence-read":
+            cmd.add_argument("--path", required=True, help="absolute remote artifact path")
+            cmd.add_argument("--limit", type=int, default=8192, help="bytes, maximum 65536")
+            cmd.add_argument("--sha256", help="hash from previous read; reject changed file")
         if name == "replay":
             reference = cmd.add_mutually_exclusive_group(required=True)
             reference.add_argument(
@@ -299,7 +308,7 @@ def main():
         )
         return result["verification"]
     workflow_jobs.local_preflight(
-        "deploy" if args.command == "doctor" else args.command, args.dry_run
+        "deploy" if args.command == "doctor" else "status" if args.command.startswith("evidence-") else args.command, args.dry_run
     )
     if args.command == "doctor":
         return {
@@ -311,6 +320,10 @@ def main():
                 key: c[key] for key in ("local", "remote", "runtime", "build", "replay")
             },
         }
+    if args.command in ("evidence-list", "evidence-read"):
+        return workflow_jobs.query_evidence(c, args.job, args.command.split("-", 1)[1],
+            path=getattr(args, "path", None), offset=args.offset,
+            limit=getattr(args, "limit", 8192), sha256=getattr(args, "sha256", None))
     if args.command == "status":
         data = workflow_jobs.query_job(c, args.job)
         workflow_common.require_code(
@@ -397,7 +410,7 @@ def main():
 
 def cli():
     command = sys.argv[1] if len(sys.argv) > 1 else None
-    if command in ("issue", "execution", "config") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
+    if command in ("issue", "execution", "config", "evidence") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()

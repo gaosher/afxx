@@ -132,3 +132,20 @@ deploy/replay 的配置、当前环境清单与实际包版本不一致时，输
 恢复使用内嵌 Python 依赖锁、实际 Daily 日期、CANN 发布号及包哈希。基础 Python 版本必须匹配，包源或共享 wheel 需仍可访问。外部 CANN 缺少安装收据时，只记录可探测的版本信息，恢复需准备相应安装。源码、seed 和运行结果按各自产物保存。
 
 MCP 调用 init/update 时，也必须显式指定配置：通过调用的 `config` 字段、`arguments` 中的 `--config`，或启动 `af-forge-mcp --config ...` 提供。
+
+## Replay 定位采集
+
+普通 replay 默认 `replay.dump: false`。修复 skill 在任务配置中默认开启以下选项，无需更新 Python 环境：
+
+```yaml
+replay:
+  dump: true
+```
+
+开启后，Forge 设置 AF `codegen_compile_debug=true`（debug_dir 为结果目录下的 dump/）、`TORCH_COMPILE_DEBUG=1`、`DUMP_GE_GRAPH=1`、`DUMP_GRAPH_LEVEL=1`、`DUMP_GRAPH_PATH=<结果目录>/dump/ge`，以及 `ASCEND_GLOBAL_LOG_LEVEL=0`、`ASCEND_SLOG_PRINT_TO_STDOUT=1`。实际注入参数记录于 job 的 report.json/replay_environment；仅传给本次 replay 进程，不影响常驻平台客户端。
+
+AF 图、逐 pass MLIR 和生成代码位于结果目录 dump/；GE 图位于 dump/ge/；PyTorch 调试产物默认位于 job 目录 torch_compile_debug/，Inductor cache 位于结果目录 cache/。日志保留在 job.log 和 AFX worker 日志中。只有执行到对应阶段才产生文件，具体产物取决于后端及安装版本。
+
+`--save` 始终保存 AFX 结果到 results.sqlite，与 dump 独立。dump 不自动保存所有输入/输出张量，也不强制同步运行或禁用缓存。性能验收应关闭 dump，避免调试开销影响结论。完整收集标准见 [复现证据清单](../skills/af-forge-repair/references/replay-evidence.md)。
+
+Replay 结束（包括失败）自动将现场文件清单和文本摘录写入 `report.json.evidence`，通过 `status` 或 `evidence list` 返回本地 CLI/MCP。包括绝对路径、类型、大小、读取错误和截断标记；上限为 128 个文件、单文件 2 KiB、总文本 64 KiB。日志返回末尾，其他文本返回开头。完整文件保留远端，不自动下载二进制或全部 dump；按返回路径可继续读取。缺失目录会明确标记，不能把开启 dump 当作文件已生成。

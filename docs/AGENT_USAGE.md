@@ -130,3 +130,22 @@ Python 更新失败时同时读取 result.json.error 和 rollback，分别确认
 记录存于 local.state_dir/issues/<issue-id>/summaries/<request-id摘要>.json，保存固定请求及成功回执，不保存 token。响应不确定时重试原命令；即使平台已变为 resolved，也会复用相同请求，避免重复发布。成功的本地重试直接返回回执。修改总结、租约或平台后重用同一 request-id 返回 REQUEST_CONFLICT；不要通过更换键盲目重试已发布总结。
 
 SUMMARY_INVALID 表示本地文件或字段有误；PLATFORM_WRONG_STATE、PLATFORM_LEASE_LOST、PLATFORM_UNAUTHORIZED 等平台错误保持透传。平台检查失败不视为归档成功，不自动释放租约或修改 issue 状态。
+
+## 证据分页与续读
+
+```bash
+af-forge evidence list --config "$CONFIG" --job-id <replay-job-id>
+# 清单被截断时，用返回的 next_offset 继续分页（offset 为文件序号）。
+af-forge evidence list --config "$CONFIG" --job-id <replay-job-id> --offset <next_offset>
+af-forge evidence read --config "$CONFIG" --job-id <replay-job-id> \
+  --path <files中的远端绝对路径> --offset 0 --limit 8192
+# 读取后续字节时同时传首次返回的 sha256，拒绝拼接已变化的文件。
+af-forge evidence read --config "$CONFIG" --job-id <replay-job-id> \
+  --path <同一文件路径> --offset <next_offset> --limit 8192 --sha256 <首次返回的sha256>
+```
+
+`read` 返回 content、bytes_read、next_offset、eof、sha256；offset/limit 单位为字节，单次上限 65536。文本按 UTF-8 解码，跨字节边界可能出现替代字符，需要时回读相邻字节。清单分页应在任务终态后进行，运行中的新增文件可能改变排序。接口只读本次 job 的日志和结果目录中的诊断文本，拒绝符号链接、任意配置文件和二进制；不需要平台 token，不创建新任务。文件缺失、变化、越界路径等返回 EVIDENCE_UNAVAILABLE；参数范围错误返回 INVALID_ARGUMENT。
+
+MCP 对应 command 为 `evidence list` / `evidence read`，参数与 CLI 相同。不要让 skill 自己拼 SSH 读取命令。
+
+清单中的 failures 来自 AFX 公共 attempt/shape 结果；每个文件的 associations 仅在 AFX diagnostics 明确引用该文件或其编译目录的完整路径时填入 attempt_id、shape_indices 和关联依据（reference_path 保留原始引用，区分文件/目录引用）。否则 association_state=unassociated，不按文件名猜测 kernel/Shape 归属。空 shape_indices 表示只有 attempt 级引用；一个文件可被多个 attempt 引用，不代表独占归属。

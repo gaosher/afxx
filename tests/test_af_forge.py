@@ -410,13 +410,15 @@ def test_toolchain_parent_directory_is_allowed(cfg, tmp_path):
     assert workflow_config.config(path)["build"]["llvm_build_dir"] == str(tmp_path)
 
 
+@pytest.mark.parametrize("dump", [False, True])
 @pytest.mark.parametrize("batch", [False, True])
 @pytest.mark.parametrize("auto", [False, True])
 @pytest.mark.parametrize("failure", [None, "seed", "execution", "database"])
 @pytest.mark.parametrize("afx_changed", [False, True])
 def test_replay_uses_private_results_and_existing_cli(
-    cfg, tmp_path, monkeypatch, batch, auto, failure, afx_changed
+    cfg, tmp_path, monkeypatch, batch, auto, failure, afx_changed, dump
 ):
+    cfg["replay"]["dump"] = dump
     if auto:
         cfg["replay"]["devices"] = cfg["replay"]["workers"] = "auto"
     monkeypatch.setattr(workflow_execution, "freeze_environment", lambda c, job: None)
@@ -468,6 +470,11 @@ def test_replay_uses_private_results_and_existing_cli(
         assert kwargs["env"]["AUTOFUSEX_HOME"] == str(
             Path(cfg["replay"]["results_dir"]) / job.name
         )
+        recorded = workflow_common.read(job / "report.json")["replay_environment"]
+        assert all(kwargs["env"][key] == value for key, value in recorded.items())
+        assert (recorded.get("TORCH_COMPILE_DEBUG") == "1") == dump
+        if dump:
+            assert Path(recorded["DUMP_GRAPH_PATH"]).is_dir()
         path = Path(argv[argv.index("--database") + 1])
         assert not (path.parent / "sync.json").exists()
         path.touch()
@@ -484,6 +491,7 @@ def test_replay_uses_private_results_and_existing_cli(
         with pytest.raises((ValueError, OSError)):
             workflow_execution.replay(cfg, job, request)
         report = workflow_common.read(job / "report.json")
+        assert "evidence" in report and report["evidence"]["dump_enabled"] == dump
         assert report["state"] == "failed" and report["resources"]["devices"]
         assert report["error"]
         if failure == "database":
@@ -505,6 +513,7 @@ def test_replay_uses_private_results_and_existing_cli(
         assert workflow_common.read(job / "report.json")["resources"]["workers"] == (
             2 if batch else 1
         )
+    assert workflow_common.read(job / "report.json")["evidence"]["files"]
     assert workflow_common.read(job / "report.json")["passed"]
     assert workflow_common.read(job / "report.json")["upload"] == "disabled"
 

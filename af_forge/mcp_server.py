@@ -39,6 +39,8 @@ Command = Literal[
     "issue regression-preview",
     "issue summarize",
     "execution show",
+    "evidence list",
+    "evidence read",
     "config init",
 ]
 
@@ -80,7 +82,7 @@ def create_server(default_config=None):
     )
 
     @server.tool()
-    async def af_forge_help(command: Command | Literal["issue", "execution", "config"] | None = None) -> str:
+    async def af_forge_help(command: Command | Literal["issue", "execution", "config", "evidence"] | None = None) -> str:
         """Read CLI command options without loading config or contacting the NPU."""
         _, output = await invoke((command.split() if command else []) + ["--help"])
         return output

@@ -48,6 +48,8 @@ local:
 
 每次 deploy 前核对 `$CONFIG` 的 local.source_dir 与实际修改所在 worktree 一致，使用 `af-forge deploy --config "$CONFIG" ...`；MCP 也必须传入同一任务配置。未提交源码修改会被同步，不能误用仍指向原仓库的配置。
 
+复现阶段在任务专用配置中设置 `replay.dump: true`，保留其他配置，无需 env update。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集输入、环境、日志和图/IR/代码证据。
+
 对 nnsmith seed 使用 Forge replay：
 
 ```bash
@@ -55,7 +57,7 @@ af-forge replay --config "$CONFIG" --job-id <基线deploy-job-id> --seed <原始
 af-forge status --config "$CONFIG" --job-id <replay-job-id>
 ```
 
-异步提交成功不等于复现完成；读取终态、report 和日志。记录原始 seed、Shape、dtype、后端、芯片、实际包身份、失败阶段、错误与相关 IR。保持原输入和精度语义，不能换 seed 或放宽正确性判定制造通过。
+异步提交成功不等于复现完成；读取终态、report 和 evidence。通过 `evidence list` 获取文件清单及关联，截断时按 next_offset 续页；使用 `evidence read` 按字节续读关键文件，不自行拼 SSH。无法关联的文件明确标记，不猜测 Shape 归属。记录原始 seed、Shape、dtype、后端、芯片、实际包身份、失败阶段、错误与相关 IR。保持原输入和精度语义，不能换 seed 或放宽正确性判定制造通过。
 
 非 nnsmith 用例使用平台给出的复现方式和目标环境，不强行传入 Forge seed 接口。失败无法复现时，先比较环境、包版本和用例条件；明确“未复现”及缺失证据，不直接宣称修复。
 

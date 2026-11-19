@@ -108,6 +108,8 @@ def test_mcp_stdio(tmp_path):
                 "issue tasks": ["--issue-id", "F152", "--round-no", "2"],
                 "issue regression-preview": ["--issue-id", "F152"],
                 "execution show": ["--exec-uuid", "exec-0001"],
+                "evidence list": ["--job-id", "a" * 32],
+                "evidence read": ["--job-id", "a" * 32, "--path", "/tmp/a.mlir"],
             }
             for command, arguments in query_commands.items():
                 help_result = await session.call_tool("af_forge_help", {"command": command})

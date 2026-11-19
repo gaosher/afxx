@@ -215,6 +215,8 @@ def frozen_config(c, manifest):
 
 
 def replay(c, job, request):
+    results = Path(c["replay"]["results_dir"]) / job.name
+    attempts = []
     try:
         with (
             workflow_common.lock(workflow_runtime.venv_lock(c), shared=True),
@@ -250,7 +252,9 @@ def replay(c, job, request):
             workflow_common.update_record(job / "report.json", runtime=runtime)
             results = Path(c["replay"]["results_dir"]) / job.name
             results.mkdir(parents=True, mode=0o700)
-            env.update(replay_adapter.replay_environment(results, c["replay"]["dump"]))
+            replay_env = replay_adapter.replay_environment(results, c["replay"]["dump"])
+            env.update(replay_env)
+            workflow_common.update_record(job / "report.json", replay_environment=replay_env)
             workflow_common.phase(job, "replay_prepare", results_dir=str(results))
             options = dict(c["replay"])
             if options["devices"] == "auto":
@@ -338,3 +342,11 @@ def replay(c, job, request):
             job / "report.json", state="failed", error=str(error)
         )
         raise
+    finally:
+        # Collection failures must not hide the original replay failure.
+        try:
+            evidence = replay_adapter.collect_evidence(job, results, c["replay"]["dump"])
+            replay_adapter.associate_evidence(evidence, attempts)
+        except OSError as error:
+            evidence = {"errors": [{"error": str(error)}], "files": []}
+        workflow_common.update_record(job / "report.json", evidence=evidence)
