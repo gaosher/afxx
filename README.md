@@ -75,10 +75,10 @@ doctor 校验配置、本地连接工具和 npussh 登录。远端依赖由 init
 ## 初始化和更新环境
 
 ```bash
-af-forge init
+af-forge init --config ~/.config/af-forge/config.yaml
 af-forge check
 # 修改配置后更新 torch_npu / AFX
-af-forge update
+af-forge update --config ~/.config/af-forge/config.yaml
 ```
 
 init 自动上传配置并准备 Python 3.11、CANN 和专用 venv。update 更新 torch_npu/AFX，保留现有 CANN。init/update 默认跟随远端日志；`--detach` 仅提交任务，后续用 status 查询。

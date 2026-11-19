@@ -90,7 +90,8 @@ def create_server(default_config=None):
         arguments are CLI tokens, never a shell command.
 
         init/update are detached; use status --job-id to poll. Public commands only.
-        Missing config uses AF_FORGE_CONFIG, cwd/af-forge-config.yaml, then the user config directory.
+        init/update require explicit config (tool config, --config argument, or server --config).
+        Other commands with missing config use AF_FORGE_CONFIG, cwd/af-forge-config.yaml, then the user config directory.
         """
         arguments = list(arguments or [])
         path = config if config is not None else default_config

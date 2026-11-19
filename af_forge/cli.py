@@ -132,7 +132,8 @@ def parse_arguments():
         cmd.set_defaults(command=name)
         cmd.add_argument(
             "--config",
-            default=workflow_config.default_config_path(),
+            required=name in ("init", "update"),
+            default=None if name in ("init", "update") else workflow_config.default_config_path(),
         )
         if name in jobs or name == "doctor":
             cmd.add_argument("--dry-run", action="store_true")
