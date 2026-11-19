@@ -208,6 +208,7 @@ def normalize_config(raw):
             "agent_id": None,
             "token_file": None,
             "remote_token_file": None,
+            "client_token_file": None,
         }
     if "python_env" in raw:
         workflow_common.require(
@@ -440,7 +441,7 @@ def validate_config(c):
 def platform_settings(c):
     p = c.get("platform", {})
     workflow_common.require(
-        set(p) == {"url", "agent_id", "token_file", "remote_token_file"},
+        set(p) - {"client_token_file"} == {"url", "agent_id", "token_file", "remote_token_file"},
         "fill platform configuration",
     )
     workflow_common.require(isinstance(p["url"], str), "fill platform.url")
@@ -464,6 +465,9 @@ def platform_settings(c):
             isinstance(p[key], str) and Path(p[key]).is_absolute(),
             "fill platform." + key,
         )
+    if p.get("client_token_file") is not None:
+        workflow_common.require(isinstance(p["client_token_file"], str) and Path(p["client_token_file"]).is_absolute(),
+                                "platform.client_token_file must be an absolute remote path")
     return p
 
 

@@ -92,6 +92,7 @@ def candidate(platform_cfg, tmp_path, monkeypatch):
         "capture",
         lambda *a, **k: json.dumps({"cann": "9.3", "autofuse_binary": "a" * 64}),
     )
+    monkeypatch.setattr("af_forge.afx.launcher.ensure_started", lambda *a: None)
     return job
 
 
@@ -455,3 +456,18 @@ def test_regression_must_match_candidate(platform_cfg, monkeypatch):
     monkeypatch.setattr(p, "call", lambda *a, **k: dict(issue_id=REPAIR, status="summarizing", rounds=[verification, regression]))
     with pytest.raises(ValueError, match="candidate differs"):
         p.poll(platform_cfg, REPAIR, 1)
+
+
+def test_verify_does_not_post_if_client_start_fails(platform_cfg, candidate, monkeypatch):
+    def fail(*args):
+        raise workflow_common.WorkflowError("PLATFORM_CLIENT_START_FAILED", "not ready")
+    monkeypatch.setattr("af_forge.afx.launcher.ensure_started", fail)
+    monkeypatch.setattr(p, "call", lambda *a, **k: pytest.fail("must not submit before startup"))
+    with pytest.raises(workflow_common.WorkflowError) as error:
+        p.verify(platform_cfg, candidate)
+    assert error.value.code == "PLATFORM_CLIENT_START_FAILED"
+    saved = workflow_common.read(candidate / "platform.json")
+    assert saved["state"] == "prepared"
+    monkeypatch.setattr("af_forge.afx.launcher.ensure_started", lambda *a: None)
+    monkeypatch.setattr(p, "call", lambda *a, **k: receipt())
+    assert p.verify(platform_cfg, candidate)["body"] == saved["body"]

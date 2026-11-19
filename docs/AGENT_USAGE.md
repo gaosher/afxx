@@ -70,7 +70,7 @@ verify 与 deploy 分离，在远端采集实际 AF 身份，核对部署后提�
 
 status/wait 以 verify 返回的 round_no 定位验证，跟踪同一候选包的下一轮 regress。只有相关轮次全部通过才返回 outcome=passed。wait 遇到失败和 invalid 均返回 PLATFORM_VERIFICATION_FAILED；等待超时可继续查同一轮次。查询保留历史轮次身份，不使用其他修复的结果。
 
-AFX 官方客户端在 NPU 独立常驻，通过 `afx platform client run --retest` 启动。Forge 不管理它的进程或启停，也不屏蔽平台更新行为。部署、更新仍执行环境占用检查。不要将 Forge 的锁视为独立客户端的并发保护。
+AFX 官方客户端在 NPU 独立常驻，通过 `afx platform client run --retest` 启动。verify 提交前通过官方 CLI 检查并启动客户端；不屏蔽平台更新行为，不自动停止或重启。需配置 platform.client_token_file。部署、更新仍执行环境占用检查。不要将 Forge 的锁视为独立客户端的并发保护。
 
 ## 错误处理
 
@@ -103,3 +103,5 @@ issue verify 将远端已分类错误的 code 和 message 原样返回到 error.
 Python 更新失败时同时读取 result.json.error 和 rollback，分别确认原始错误与恢复结果。AF 安装失败会使部署注册表失效。平台提交错误通过独立 issue verify 重试，部署记录继续保留。
 
 环境一致性差异以 WARNING 写入 job.log，不作为 deploy/replay 的失败条件。发生差异时 job 配置保留提交值，不附加旧环境锁；不要将其视为实际环境的精确快照。运行依赖检查和 AF 部署产物完整性检查仍需通过。
+
+客户端启动失败返回 PLATFORM_CLIENT_START_FAILED，查看远端 afx-client/client.log。PLATFORM_CLIENT_MISMATCH 表示存活进程的配置或 AF 身份不匹配；PLATFORM_CLIENT_UNTRACKED 表示同一 HOME 存在无法确认启动环境的进程。上述错误均不提交 verify，也不停止已有进程。

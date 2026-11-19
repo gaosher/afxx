@@ -263,6 +263,9 @@ def submit_issue_round(c, path, state, lease, package):
         all(state["body"].get(k) == v for k, v in candidate.items()),
         "prepared verification belongs to another lease or AF package",
     )
+    from af_forge.afx import launcher
+
+    launcher.ensure_started(c, package)
     result = call(
         c, "POST", f"/api/issues/{issue_id}/verify", state["body"], remote=True
     )

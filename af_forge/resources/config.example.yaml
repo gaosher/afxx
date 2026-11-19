@@ -39,3 +39,4 @@ cann:
 #   # 使用平台用户 Bearer token；远端 token 文件权限须为 0600。
 #   token_file: "/absolute/local/path/afx.token"
 #   remote_token_file: "/absolute/remote/path/afx.token"
+#   client_token_file: "/absolute/remote/path/client.token" # verify 前启动官方客户端，需 upload/retest 权限
