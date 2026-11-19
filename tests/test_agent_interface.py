@@ -502,10 +502,10 @@ def test_init_response_leaves_detailed_dependency_report_for_status():
         ["deploy", "--no-upload"],
         [
             "issue", "status",
-            "--repair-id",
-            "repair",
-            "--retest-id",
-            "retest",
+            "--issue-id",
+            "F152",
+            "--round-no",
+            "1",
             "--timeout",
             "3600",
         ],
@@ -538,9 +538,9 @@ def test_replay_resolves_deploy_job_in_configured_state_dir(cfg, monkeypatch):
     assert data["seeds"] == ["123"]
 
 
-def test_claim_response_exposes_repair_id_and_preserves_empty_result():
-    data = {"id": "repair", "lease_id": "lease"}
-    assert w.response("issue-claim", data)["data"]["repair_id"] == data["id"]
+def test_claim_response_preserves_issue_id_and_empty_result():
+    data = {"issue_id": "F152", "lease_id": "lease"}
+    assert w.response("issue-claim", data)["data"]["issue_id"] == data["issue_id"]
     assert w.response("issue-claim", None)["data"] is None
 
 

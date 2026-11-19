@@ -23,7 +23,7 @@ from af_forge.environment import runtime as workflow_runtime
 from af_forge import source as workflow_source
 
 
-def deploy(c, job, *, refresh_client=True):
+def deploy(c, job):
     source_path = Path(c["remote"]["source_dir"]).resolve()
     source_lock = workflow_runtime.registry(c).parent / (
         "source-" + workflow_common.digest(str(source_path)) + ".lock"
@@ -142,25 +142,6 @@ def deploy(c, job, *, refresh_client=True):
         except BaseException:
             workflow_common.write(current, {"state": "invalid", "job": job.name})
             raise
-    if refresh_client and "platform" in c:
-        # The client holds shared locks before publishing ready; release the
-        # installation writer lock first, then revalidate under shared locks.
-        with (
-            workflow_common.lock(workflow_runtime.venv_lock(c), shared=True),
-            workflow_common.lock(
-                workflow_runtime.registry(c).with_suffix(".lock"), shared=True
-            ),
-        ):
-            workflow_runtime.current_deployment(c, job / "deployment.json")
-            workflow_common.phase(job, "platform_client")
-            from af_forge.afx import client as platform_client
-
-            client = platform_client.start(c)
-            workflow_common.require(
-                client["installed"].get("af-mlir", {}).get("sha256")
-                == evidence["pyautofuse"]["sha256"],
-                "retest client loaded a different AF binary",
-            )
 
 
 def freeze_environment(c, job):

@@ -72,133 +72,6 @@ def test_real_seed_and_saved_result_cli(afx, tmp_path, count):
     assert d.summarize(attempts, normalized)["passed"]
 
 
-def test_real_repairs_submission_retry_and_accepted_result(
-    afx, platform_cfg, candidate, monkeypatch, tmp_path
-):
-    from contextlib import closing
-    from autofusex.fuzz.client.generation.sampling import SamplingConfig
-    from autofusex.fuzz.client.storage import ResultRepository
-    from autofusex.fuzz.client.storage.repository import _connect
-    from autofusex.fuzz.client.sync.outbox import pending
-    from autofusex.fuzz.server.central import repairs, retests, sessions
-    from autofusex.fuzz.server.central.repository import create_user, ingest
-
-    database = tmp_path / "central.sqlite"
-    user = create_user(database, "Workflow contract")
-    with closing(_connect(database, writable=True)) as db, db:
-        sessions.initialize(db)
-        retests.initialize(db)
-    original = ResultRepository(tmp_path / "original.sqlite")
-    seed = SamplingConfig(dynamic_variants=2).seed(42, dynamic=True)
-    original.save(
-        dict(
-            seed=str(seed),
-            workload_id="a" * 64,
-            oracle_id="cpu/1",
-            backend="af-mlir",
-            status="fail",
-            execution=dict(backend="af-mlir", static_only=False),
-            evaluation=dict(
-                correctness=True, performance=False, warmup_steps=1, measured_steps=1
-            ),
-            shape_results=[
-                dict(shape_index=i, correctness="fail", performance="not_requested")
-                for i in range(2)
-            ],
-        )
-    )
-    ingest(database, user["token"], pending(original.path))
-    fixed = ResultRepository(tmp_path / "fixed.sqlite")
-    client_id = pending(fixed.path)["source_id"]
-    retests.register(
-        database,
-        user["user_id"],
-        dict(
-            client_id=client_id,
-            machine_id="workflow-contract",
-            name="isolated",
-            backends=["af-mlir"],
-        ),
-    )
-    monkeypatch.setattr(
-        "af_forge.afx.client.status",
-        lambda c: dict(
-            state="ready", client_id=client_id, installed={"af-mlir": PACKAGE}
-        ),
-    )
-    submissions = []
-
-    def api(c, method, path, body=None, **kwargs):
-        assert path.startswith(p.API_ROOT)
-        parts = path[len(p.API_ROOT) :].strip("/").split("/")
-        if method == "GET":
-            return (
-                retests.clients(database, user["user_id"])
-                if parts == ["clients"]
-                else repairs.get(database, user["user_id"], parts[0])
-            )
-        action = parts[-1]
-        response = repairs.mutate(
-            database,
-            user["user_id"],
-            action,
-            body,
-            None if action == "claim" else parts[0],
-        )
-        if action == "retest":
-            submissions.append(body.copy())
-            if len(submissions) == 1:
-                raise workflow_common.WorkflowError(
-                    "PLATFORM_UNAVAILABLE", "lost response after server committed"
-                )
-        return response
-
-    monkeypatch.setattr(p, "call", api)
-    claimed = p.claim(platform_cfg, None, "claim-contract")
-    repair_id = claimed["id"]
-    assert len(p.preview(platform_cfg, repair_id)["snapshot"]["targets"]) == 2
-    p.renew(platform_cfg, claimed)
-    workflow_common.write(
-        candidate / "request.json",
-        {"issue": {"id": repair_id, "lease_id": claimed["lease_id"]}},
-    )
-    with pytest.raises(workflow_common.WorkflowError):
-        p.verify(platform_cfg, candidate)
-    submission = p.verify(platform_cfg, candidate)
-    assert submissions[0] == submissions[1]
-    assert not p.poll(platform_cfg, repair_id, submission["retest_id"])["terminal"]
-    task = retests.claim(database, user["user_id"], dict(client_id=client_id, limit=1))[
-        "items"
-    ][0]
-    spec = task["spec"]
-    attempt = fixed.save(
-        dict(
-            seed=spec["seed"],
-            workload_id=spec["workload_id"],
-            oracle_id=spec["oracle_id"],
-            backend="af-mlir",
-            status="ok",
-            evaluation=spec["evaluation"],
-            execution=dict(
-                backend="af-mlir", static_only=False, batch_id=task["lease_id"]
-            ),
-            shape_results=[
-                dict(shape_index=i, correctness="pass", performance="not_requested")
-                for i in range(2)
-            ],
-        )
-    )
-    ingest(database, user["token"], pending(fixed.path))
-    assert retests.complete(
-        database,
-        user["user_id"],
-        dict(client_id=client_id, lease_id=task["lease_id"], attempt_id=attempt),
-    )["accepted"]
-    result = p.poll(platform_cfg, repair_id, submission["retest_id"])
-    assert result["terminal"] and result["outcome"] == "passed"
-    assert result["status"] == "verified"
-
-
 def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_path):
     """Exercise the CLI through the v3 service with a temporary platform database."""
     import json
@@ -253,6 +126,9 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     verify_keys = []
 
     def api(c, method, path, body=None, **opts):
+        if method == "GET":
+            assert path == f"/api/issues/{number}"
+            return issues.issue_detail(store, number)
         assert method == "POST"
         if path == "/api/issues/claim":
             assert body["issue_id"] == number
@@ -303,3 +179,6 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     assert submitted["round_no"] == 1 and submitted["response"]["tasks"] == 1
     assert cli("issue verify", "--job-id", "a" * 32) == submitted
     assert len(verify_keys) == 2 and verify_keys[0] == verify_keys[1]
+
+    pending = cli("issue status", "--round-no", "1")
+    assert pending["terminal"] is False and pending["verification"]["kind"] == "verify"

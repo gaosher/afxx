@@ -25,10 +25,10 @@
 ## 软件功能
 
 - init 准备 CANN 和专用 venv，update 更新 torch_npu/AFX。
-- deploy 冻结并同步源码，构建安装 AF，验证加载来源并刷新平台客户端。
+- deploy 冻结并同步源码，构建安装 AF，验证加载来源。
 - replay 在指定有效部署上执行固定 seed，汇总完整性与正确性。
 - issue 命令领取、冻结目标查询、续租、提交复测和结果轮询。
-- client 命令管理专用复测进程，status 查询远端任务及其产物。
+- status 查询远端任务及产物；AFX 官方客户端独立运行。
 
 ## 设计约束
 
@@ -42,7 +42,7 @@ NPU 驱动可用，用户具备目标目录权限。包源提供配置要求的 
 
 ## 整体介绍
 
-入口解析 YAML 和命令，调用远端任务协议或平台适配器。任务保留独立配置、请求和状态。环境清单存于 env-state，deploy/replay 比对它与配置及实际环境；一致时将环境锁合入任务配置，不一致时记录 WARNING 并保留提交配置继续执行，不承诺精确环境复现。平台客户端运行在专用 venv/CANN 中，其生命周期由 workflow 管理。
+入口解析 YAML 和命令，调用远端任务协议或平台适配器。任务保留独立配置、请求和状态。环境清单存于 env-state，deploy/replay 比对它与配置及实际环境；一致时将环境锁合入任务配置，不一致时记录 WARNING 并保留提交配置继续执行，不承诺精确环境复现。AFX 官方客户端在 NPU 独立常驻，Forge 仅在本地编排和提交远端任务。
 
 ## 功能需求
 
@@ -56,8 +56,8 @@ NPU 驱动可用，用户具备目标目录权限。包源提供配置要求的 
 ### 功能需求 2 源码部署
 
 1. 介绍。将当前本地源码构建为可核验的远端安装。
-2. 输入。有效配置、工作区文件、可选 repair 租约及 request-id。
-3. 处理。生成全量快照和清单，上传任务，停止受管理客户端，核对环境，安全同步源码，编包、校验、安装及加载核验。有 platform 配置时启动刷新后的客户端。
+2. 输入。有效配置、工作区文件、可选 issue 租约及 request-id。
+3. 处理。生成快照并上传，核对环境与占用情况，同步源码，编包、安装、核验实际加载来源。
 4. 输出。deployment.json、AF run 包、源码清单和任务状态。平台验证通过独立 issue verify 提交。
 
 ### 功能需求 3 独立复跑
@@ -67,18 +67,18 @@ NPU 驱动可用，用户具备目标目录权限。包源提供配置要求的 
 3. 处理。持环境共享锁检查部署和加载身份，创建独立结果目录，调用 AFX 单次或批量 CLI，核对 seed/backend/shape 集合。
 4. 输出。report.json、结果数据库、日志及可选同步请求状态。
 
-### 功能需求 4 平台验证及客户端管理
+### 功能需求 4 平台验证
 
-1. 介绍。衔接平台 repair、修复部署和关联用例复测。
-2. 输入。平台配置、issue_key、repair UUID、租约、部署 job、retest UUID。
-3. 处理。本地调用 repairs claim/详情/renew；远端 issue verify 校验部署和专用 client ID，冻结 artifact 后提交 retest。AFX Consumer 负责定向任务的执行、上传和完成确认；本地 issue wait 跟踪指定 retest 的 terminal/passed。部署停止客户端后安装，再以专用环境重启。
-4. 输出。本地领取记录、job 的 platform.json、平台 retest 与冻结目标详情、客户端 process.json 与日志。
+1. 介绍。衔接平台 issue、修复部署和用例复测。
+2. 输入。平台配置、issue 编号、租约、部署 job、验证 round_no。
+3. 处理。本地调用 issues claim/详情/renew；远端 verify 校验 AF 身份并冻结请求；本地轮询指定 verify 及其后续 regress。AFX 官方客户端独立领取任务与上传结果。
+4. 输出。本地领取记录、job 的 platform.json、平台验证与回归轮次详情。
 
 ## 非功能需求
 
 ### 可维护性
 
-入口只负责 CLI 解析、JSON 响应和命令分发。配置、源码同步、运行环境、部署/复测和远端作业按职责分层；共享异常、原子文件操作、进程调用和文件锁位于 af_forge.common。各模块显式导入实现所属模块，不反向导入入口，不通过入口重导出工具函数。字段归一化集中于配置加载器。复跑的 seed/命令/公共结果查询契约集中于 af_forge.afx.replay，平台 HTTP 与进程管理分别由 af_forge.afx.platform 和 af_forge.afx.client 负责。
+入口只负责 CLI 解析、JSON 响应和命令分发。配置、源码同步、运行环境、部署/复测和远端作业按职责分层；共享异常、原子文件操作、进程调用和文件锁位于 af_forge.common。各模块显式导入实现所属模块，不反向导入入口，不通过入口重导出工具函数。字段归一化集中于配置加载器。复跑的 seed/命令/公共结果查询契约集中于 af_forge.afx.replay，平台 HTTP 由 af_forge.afx.platform 负责。
 
 ### 可测试性
 
@@ -92,7 +92,7 @@ pytest 以临时仓库和目录验证 Git/rsync 行为，通过构建、网络�
 
 ### 可靠性
 
-原子文件替换记录阶段状态。request-id、远端启动锁和启动凭据约束任务重试。同步删除仅覆盖托管文件。环境锁保护更新、安装与复测。客户端进程校验 PID 和启动时间，停止时等待活动复测结束，超时阻止部署继续。
+原子文件替换记录阶段状态。request-id、远端启动锁和启动凭据约束任务重试。同步删除仅覆盖托管文件。环境锁保护更新、安装与复测。安装前保留环境占用检查。
 
 ### 特性交叉影响
 
@@ -117,11 +117,11 @@ pytest 以临时仓库和目录验证 Git/rsync 行为，通过构建、网络�
 
 ### 执行性能
 
-独立 replay 使用 AFX 调度器及可见设备。平台客户端每轮检查包身份并执行复测，循环间等待 10 秒。本地 issue wait 最多每 30 秒查询一次。环境共享锁覆盖客户端整个生命周期，包含异步执行、上传回执及调度器退出，部署在活动任务结束后进行。
+独立 replay 使用 AFX 调度器及可见设备。本地 issue wait 最多每 30 秒查询一次。独立客户端的生命周期和资源由 AFX 管理，不持有 Forge 的环境锁。
 
 ### 内存和产物大小
 
-远端任务和专用客户端复制同一份明确列举的脚本集合及 package_sources.json，不依赖本地仓库路径；仅增加小型脚本文件，不改变源码快照、AF run 包或测试数据库布局。
+远端任务复制同一份明确列举的脚本集合及 package_sources.json，不依赖本地仓库路径；仅增加小型脚本文件，不改变源码快照、AF run 包或测试数据库布局。
 
 源码快照在同步确认后清理。CANN 包安装成功后清理。AF run 包、任务记录及结果持续保留；wheel 和锁按哈希共享。常驻客户端与 AFX 复测子进程占用独立内存，日志和结果需按使用规模归档。
 
@@ -129,9 +129,9 @@ pytest 以临时仓库和目录验证 Git/rsync 行为，通过构建、网络�
 
 ### 新增/修改接口描述
 
-主入口命令包括 init、update、deploy、replay、check、status、doctor、issue-* 和 client <操作>。stdout 为 schema_version=1 的 JSON envelope，退出码为 0 或 2。异步任务查询 state，平台查询 terminal/outcome；完整字段及错误码见 [AGENT_USAGE](AGENT_USAGE.md)。
+主入口命令包括 init、update、deploy、replay、check、status、doctor、issue <操作>。stdout 为 schema_version=1 的 JSON envelope，退出码为 0 或 2。异步任务查询 state，平台查询 terminal/outcome；完整字段及错误码见 [AGENT_USAGE](AGENT_USAGE.md)。
 
-deploy 可关联 repair 并续租，安装完成后返回部署状态。issue verify 在远端使用已冻结配置和候选身份提交，重试复用 platform.json 中的请求。issue wait 使用 retest UUID 定位该次修复的结果，平台只暴露最新 retest 时拒绝替代结果。
+deploy 可关联 issue 并续租，安装完成后返回部署状态。issue verify 在远端使用已冻结配置和候选身份提交，重试复用 platform.json 中的请求。issue wait 使用 round_no 定位验证及其后续回归，不混入其他修复轮次。
 
 ### 接口检查项
 
@@ -153,19 +153,18 @@ deploy 可关联 repair 并续租，安装完成后返回部署状态。issue ve
 - source.json 保存文件清单和摘要；deployment.json 引用它并记录包及加载证据。
 - request.json、launch.json、status.json 记录提交、启动和阶段状态。
 - platform.json 保存候选版本、哈希、幂等键和验证回执。
-- process.json 保存客户端 PID、启动时间、状态、解释器和安装身份。
 
 ### 关键技术/算法
 
-SHA-256 用于源码、包、加载文件和锁文件一致性校验。源码同步比较托管清单，删除范围由文件归属限制。复跑汇总对预期 seed/backend/shape 集合核验。动态 Shape 数量从 AFX seed 解码，结果通过 AFX CLI 分页及详情查询。平台轮询核对 retest UUID，采用平台验收结论。
+SHA-256 用于源码、包、加载文件和锁文件一致性校验。源码同步比较托管清单，删除范围由文件归属限制。复跑汇总对预期 seed/backend/shape 集合核验。动态 Shape 数量从 AFX seed 解码，结果通过 AFX CLI 分页及详情查询。平台轮询核对 issue 编号和 round_no，采用平台验收结论。
 
 ### 流程设计
 
 环境流程为 CANN 检查、venv 创建、依赖锁解析、同步安装、加载检查、发布当前清单。更新失败使用旧锁恢复并验证包清单。
 
-部署流程为停止客户端、环境校验、源码同步、构建、安装、加载核验、发布部署、启动客户端。安装失败使部署失效，客户端启动失败保留已成功的部署记录供排查。
+部署流程为环境校验、源码同步、构建、安装、加载核验、发布部署。安装失败使部署失效。
 
-平台流程为领取、续租、部署、显式 verify、定向 client ID 执行、本地查询。专用客户端采用 AFX Consumer 注册、复测及上传接口，包更新统一通过 workflow update。
+平台流程为领取、续租、部署、显式 verify、平台调度官方客户端执行、本地查询。Forge 不启停客户端，不阻止其平台更新行为。
 
 ### 对子模块的修改
 
@@ -178,20 +177,19 @@ SHA-256 用于源码、包、加载文件和锁文件一致性校验。源码同
 | af_forge/environment/runtime.py | 环境加载、依赖检查、库探测、部署身份与锁路径 |
 | af_forge/execution.py | deploy/replay 阶段与环境配置冻结 |
 | af_forge/jobs.py | 本地预检、幂等提交、远端作业协议及 worker 分发 |
-| af_forge/bundle.py | 远端任务和常驻客户端共用的独立运行文件清单 |
+| af_forge/bundle.py | 远端任务共用的独立运行文件清单 |
 | af_forge/environment/bootstrap.py | 托管解释器下载、能力预检与已有解释器复用 |
 | af_forge/environment/python.py | uv 环境创建、包来源、依赖锁、更新与回滚 |
 | af_forge/environment/cann.py | CANN 检查、选包、下载、安装和清理 |
 | af_forge/environment/consistency.py | 配置、环境清单和实际运行环境比对 |
 | af_forge/afx/replay.py | seed 契约、当前 AFX CLI 参数、公共结果查询与覆盖判定 |
-| af_forge/afx/platform.py | repairs HTTP 请求、租约、retest 提交和结果跟踪 |
-| af_forge/afx/client.py | 专用进程启动、状态、停止及受锁保护的复测 Consumer 循环 |
+| af_forge/afx/platform.py | issues HTTP 请求、租约、verify 提交和结果跟踪 |
 
 ### 错误处理
 
 #### 系统错误
 
-网络、文件、构建和安装错误保留任务现场及阶段。受管理子进程由操作超时与信号处理约束。客户端停止超时后允许继续等待；安装在客户端退出后开始。原子状态无法写入时，查询根据进程信息报告 unknown 或失败。
+网络、文件、构建和安装错误保留任务现场及阶段。受管理子进程由操作超时与信号处理约束。环境占用检查失败时保留现场。原子状态无法写入时，查询根据进程信息报告 unknown 或失败。
 
 #### 接口错误
 
@@ -199,11 +197,11 @@ SHA-256 用于源码、包、加载文件和锁文件一致性校验。源码同
 
 ## 安全检查
 
-按编码红线核对凭据、路径、资源和接口边界。凭据文件内容只在运行端读取，命令使用参数数组，远端命令经 shell 引用，清理限制到本任务拥有的文件。锁、文件和子进程生命周期覆盖异常分支。外部输入在路径、repair/retest UUID、设备列表和并行参数使用前校验。图改写、ABI 和 runtime 内部接口由编译器组件负责。
+按编码红线核对凭据、路径、资源和接口边界。凭据文件内容只在运行端读取，命令使用参数数组，远端命令经 shell 引用，清理限制到本任务拥有的文件。锁、文件和子进程生命周期覆盖异常分支。外部输入在路径、issue 编号、round_no、设备列表和并行参数使用前校验。图改写、ABI 和 runtime 内部接口由编译器组件负责。
 
 ## 兼容性检查
 
-配置使用 YAML 和明确字段，默认值由归一化阶段补齐。环境冻结文件保存实际来源和依赖锁。直接 AFX replay 结果通过适配模块读取；平台客户端依赖已安装 AFX 的 Client、设备发现和 provenance 接口，应随 AFX 更新验证。安装路径及 Python 导入归属通过预检和实际加载检查确认。
+配置使用 YAML 和明确字段，默认值由归一化阶段补齐。环境冻结文件保存实际来源和依赖锁。直接 AFX replay 结果通过适配模块读取；平台适配器依赖 AFX 的 issues HTTP 接口及实际 AF 身份采集接口。安装路径及 Python 导入归属通过预检和实际加载检查确认。
 
 ## 测试设计
 
@@ -215,7 +213,7 @@ SHA-256 用于源码、包、加载文件和锁文件一致性校验。源码同
 
 | 测试类别 | 关键测试项 | 测试方法 | 用例类型 |
 |---|---|---|---|
-| 功能 | 快照、同步、安装、环境恢复、平台提交、客户端启动 | 临时仓库与接口夹具 | pytest UT / ST |
+| 功能 | 快照、同步、安装、环境恢复、平台提交、轮次跟踪 | 临时仓库与接口夹具 | pytest UT / ST |
 | 异常 | 中断重试、包漂移、回滚失败、过期 PID、租约和网络错误 | 故障注入 | pytest UT / ST |
 | 性能 | 增量构建、快照和哈希耗时、日志增长 | 目标环境观测 | 手工验证 |
 | 兼容性 | YAML、AFX 版本、CANN 来源、依赖锁 | 参数和来源检查 | pytest UT / ST |
@@ -236,8 +234,8 @@ python3 -m pytest tests -q
 3. 源码同步删除范围、快照清理和幂等重试符合文件所有权。
 4. 独立 replay 完整校验 CPU/AF-MLIR 及 shape，保留诊断结果。
 5. deploy 与 verify 分开，平台请求重试使用固定候选身份和幂等键。
-6. 专用客户端固定运行环境，部署前等待复测结束，部署后刷新身份。
-7. 本地 agent 能区分平台通过、失败、结果已被替代和等待超时，只采用指定 retest 的结果。
+6. AFX 客户端独立常驻；Forge 不参与其进程管理。
+7. 本地 agent 区分通过、失败和等待超时，只采用指定验证及关联回归的结果。
 8. 文档命令和参数与当前 CLI 一致，操作说明可直接用于目标环境配置。
 
 ### 设计文档检查结果

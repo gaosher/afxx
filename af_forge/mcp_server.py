@@ -28,9 +28,6 @@ Command = Literal[
     "check",
     "doctor",
     "status",
-    "client start",
-    "client stop",
-    "client status",
     "issue claim",
     "issue preview",
     "issue status",
@@ -78,7 +75,7 @@ def create_server(default_config=None):
     )
 
     @server.tool()
-    async def workflow_help(command: Command | Literal["client", "issue", "config"] | None = None) -> str:
+    async def workflow_help(command: Command | Literal["issue", "config"] | None = None) -> str:
         """Read CLI command options without loading config or contacting the NPU."""
         _, output = await invoke((command.split() if command else []) + ["--help"])
         return output
@@ -89,7 +86,7 @@ def create_server(default_config=None):
         arguments: list[str] | None = None,
         config: str | None = None,
     ) -> CallToolResult:
-        """Run an explicit workflow command, e.g. "client start" or "issue verify".
+        """Run an explicit workflow command, e.g. "issue preview" or "issue verify".
         arguments are CLI tokens, never a shell command.
 
         init/update are detached; use status --job-id to poll. Public commands only.

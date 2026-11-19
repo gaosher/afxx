@@ -32,7 +32,7 @@ cann:
 # 批量 seed 分配到多卡；单 seed 使用第一张可见卡。
 # 需要限制资源时可增加 replay: {devices: ["npu:0"], workers: 1}。
 
-# 接入提供 /api/issues（F152 等编号）或 /api/agent/repairs（issue_key）的 AFX 平台时添加此节；两个 token 文件属于同一平台用户。
+# 接入提供 /api/issues（F152 等编号）的 AFX 平台时添加此节；两个 token 文件属于同一平台用户。
 # platform:
 #   url: "https://autofuse.online"
 #   agent_id: "af-repair-agent"

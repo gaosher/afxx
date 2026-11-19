@@ -67,10 +67,10 @@ def test_mcp_stdio(tmp_path):
             leaf_help = await session.call_tool("workflow_help", {"command": "issue verify"})
             assert "--job-id" in leaf_help.content[0].text
             grouped = await session.call_tool("workflow_run", {
-                "command": "client status", "config": str(tmp_path / "missing.yaml"),
+                "command": "issue claim", "config": str(tmp_path / "missing.yaml"),
             })
             assert grouped.isError
-            assert grouped.structuredContent["command"] == "client status"
+            assert grouped.structuredContent["command"] == "issue claim"
             assert grouped.structuredContent["error"]["code"] == "CONFIG_INVALID"
             missing = await session.call_tool(
                 "workflow_run",
@@ -138,12 +138,11 @@ def test_help_matches_overview_without_loading_config(monkeypatch, capsys):
 
 
 @pytest.mark.parametrize("group,action,options", [
-    ("client", "start", []), ("client", "stop", []), ("client", "status", []),
     ("issue", "claim", []), ("issue", "preview", ["--issue-id", "F152"]),
     ("issue", "renew", ["--issue-id", "F152"]),
     ("issue", "verify", ["--job-id", "a" * 32]),
-    ("issue", "status", ["--repair-id", "repair", "--retest-id", "retest"]),
-    ("issue", "wait", ["--repair-id", "repair", "--retest-id", "retest"]),
+    ("issue", "status", ["--issue-id", "F152", "--round-no", "1"]),
+    ("issue", "wait", ["--issue-id", "F152", "--round-no", "1"]),
 ])
 def test_grouped_commands_preserve_internal_operation(group, action, options, monkeypatch):
     from af_forge import cli
@@ -153,7 +152,7 @@ def test_grouped_commands_preserve_internal_operation(group, action, options, mo
     assert cli.response(args.command)["command"] == f"{group} {action}"
 
 
-@pytest.mark.parametrize("args", [["client"], ["issue"], ["client-start"], ["issue-claim"], ["client", "claim"]])
+@pytest.mark.parametrize("args", [["client", "start"], ["client", "stop"], ["client", "status"], ["client"], ["issue"], ["client-start"], ["issue-claim"], ["client", "claim"]])
 def test_invalid_group_commands_do_not_load_config(args, monkeypatch, capsys):
     from af_forge import cli
     import json

@@ -31,7 +31,6 @@ FILES = (
     "af_forge/environment/consistency.py",
     "af_forge/afx/replay.py",
     "af_forge/afx/platform.py",
-    "af_forge/afx/client.py",
     "af_forge/environment/package_sources.json",
     "af_forge/resources/config.example.yaml",
 )

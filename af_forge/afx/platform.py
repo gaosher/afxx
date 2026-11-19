@@ -7,7 +7,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # -----------------------------------------------------------------------------------------------------------
-"""AFX repairs protocol and remote retest submission."""
+"""AFX issue protocol and remote verification submission."""
 
 import sys
 from af_forge import common as workflow_common
@@ -86,21 +86,6 @@ def call(c, method, path, body=None, *, remote=False):
     return value["data"]
 
 
-API_ROOT = "/api/agent/repairs"
-
-
-def identity(value):
-    workflow_common.require(isinstance(value, str), "repair/retest ID must be a UUID")
-    try:
-        parsed = str(uuid.UUID(value))
-    except ValueError:
-        raise ValueError("repair/retest ID must be a UUID") from None
-    workflow_common.require(
-        value == parsed, "repair/retest ID must be a canonical UUID"
-    )
-    return value
-
-
 NUMBERED_ISSUE = re.compile(r"[FAP][0-9]{1,9}")
 
 
@@ -112,74 +97,60 @@ def validate_issue_id(value):
     return value
 
 
-def repair_identity(value):
+def record_path(c, issue_id):
     return (
-        value
-        if isinstance(value, str) and NUMBERED_ISSUE.fullmatch(value)
-        else identity(value)
+        Path(c["local"]["state_dir"])
+        / "issues"
+        / (validate_issue_id(issue_id) + ".json")
     )
 
 
-def record_path(c, repair):
-    return (
-        Path(c["local"]["state_dir"]) / "repairs" / (repair_identity(repair) + ".json")
-    )
-
-
-def claimed(c, repair):
-    value = workflow_common.read(record_path(c, repair))
+def claimed(c, issue_id):
+    value = workflow_common.read(record_path(c, issue_id))
     workflow_common.require(
         value["platform_url"] == workflow_config.platform_settings(c)["url"]
         and value["agent_id"] == c["platform"]["agent_id"],
-        "repair belongs to another platform or agent",
+        "issue belongs to another platform or agent",
     )
     return value
 
 
-def claim(c, issue_key, request_key, *, issue_id=None):
+def claim(c, request_key, *, issue_id=None):
     p = workflow_config.platform_settings(c)
     body = {"agent_id": p["agent_id"], "request_key": request_key}
-    if issue_key is not None:
-        workflow_common.require(
-            re.fullmatch(r"[0-9a-f]{24}", issue_key),
-            "issue key must contain 24 lowercase hex digits",
-        )
-        body["issue_key"] = issue_key
     if issue_id is not None:
-        workflow_common.require(issue_key is None, "specify only one issue selector")
         body["issue_id"] = validate_issue_id(issue_id)
-    root = "/api/issues" if issue_id is not None else API_ROOT
-    value = call(c, "POST", root + "/claim", body)
-    if value is not None:
-        workflow_common.require(
-            isinstance(value, dict) and value.get("lease_id"), "invalid claim response"
-        )
-        if issue_id is not None:
+    value = call(c, "POST", "/api/issues/claim", body)
+    if value is None:
+        return None
+    workflow_common.require(
+        isinstance(value, dict)
+        and value.get("lease_id")
+        and isinstance(value.get("lease_expires_at"), int)
+        and isinstance(value.get("repro"), dict),
+        "invalid issue claim response",
+    )
+    selected = validate_issue_id(value.get("issue_id"))
+    workflow_common.require(
+        issue_id is None or selected == issue_id, "issue identity mismatch"
+    )
+    value.update(
+        id=selected,
+        expires=value["lease_expires_at"] / 1000,
+        request_id=request_key,
+        platform_url=p["url"],
+        agent_id=p["agent_id"],
+    )
+    path = record_path(c, selected)
+    with workflow_common.lock(path.with_suffix(".lock")):
+        if path.exists():
+            prior = workflow_common.read(path)
             workflow_common.require(
-                value.get("issue_id") == issue_id
-                and isinstance(value.get("lease_expires_at"), int)
-                and isinstance(value.get("repro"), dict),
-                "invalid numbered issue claim response",
+                prior["expires"] <= value["expires"]
+                or prior["lease_id"] == value["lease_id"],
+                "stale claim retry; newer lease exists locally",
             )
-            value.update(
-                id=issue_id,
-                expires=value["lease_expires_at"] / 1000,
-                request_id=request_key,
-            )
-        else:
-            identity(value["id"])
-        path = record_path(c, value["id"])
-        value.update(platform_url=p["url"], agent_id=p["agent_id"])
-        with workflow_common.lock(path.with_suffix(".lock")):
-            if path.exists():
-                prior = workflow_common.read(path)
-                workflow_common.require(
-                    prior["expires"] <= value["expires"]
-                    or prior["lease_id"] == value["lease_id"],
-                    "stale claim retry; newer lease exists locally",
-                )
-            value["claim_request_key"] = request_key
-            workflow_common.write(path, value)
+        workflow_common.write(path, value)
     return value
 
 
@@ -214,31 +185,24 @@ def numbered_seeds(c, issue_id, repro):
         cursor = following
 
 
-def preview(c, repair, *, full=False):
-    if NUMBERED_ISSUE.fullmatch(repair):
-        receipt = claimed(c, repair)
-        if not full:
-            cases = receipt["repro"]["cases"]
-            summary = receipt.get("log_summary") or next(
-                (case["log_summary"] for case in cases if case.get("log_summary")),
-                receipt.get("title"),
-            )
-            return {
-                "issue_id": repair,
-                "failure_summary": summary,
-                "seeds": numbered_seeds(c, repair, receipt["repro"]),
-            }
+def preview(c, issue_id, *, full=False):
+    validate_issue_id(issue_id)
+    receipt = claimed(c, issue_id)
+    if not full:
+        cases = receipt["repro"]["cases"]
+        summary = receipt.get("log_summary") or next(
+            (case["log_summary"] for case in cases if case.get("log_summary")),
+            receipt.get("title"),
+        )
         return {
-            "issue_id": repair,
-            "snapshot": receipt["repro"],
-            "related_knowledge": receipt.get("related_knowledge", []),
+            "issue_id": issue_id,
+            "failure_summary": summary,
+            "seeds": numbered_seeds(c, issue_id, receipt["repro"]),
         }
-    detail = call(c, "GET", API_ROOT + "/" + identity(repair))
-    workflow_common.require(detail["id"] == repair, "repair identity mismatch")
     return {
-        "repair_id": repair,
-        "issue_key": detail["issue_key"],
-        "snapshot": detail["snapshot"],
+        "issue_id": issue_id,
+        "snapshot": receipt["repro"],
+        "related_knowledge": receipt.get("related_knowledge", []),
     }
 
 
@@ -247,10 +211,7 @@ def renew(c, lease, *, remote=False):
     return call(
         c,
         "POST",
-        ("/api/issues" if NUMBERED_ISSUE.fullmatch(lease["id"]) else API_ROOT)
-        + "/"
-        + repair_identity(lease["id"])
-        + "/renew",
+        "/api/issues" + "/" + validate_issue_id(lease["id"]) + "/renew",
         body,
         remote=remote,
     )
@@ -320,35 +281,27 @@ def submit_issue_round(c, path, state, lease, package):
 
 def verify(c, job, lease=None):
     linked = workflow_common.read(job / "request.json").get("issue")
-    if (
-        linked
-        and lease
-        and (
-            NUMBERED_ISSUE.fullmatch(linked["id"])
-            or NUMBERED_ISSUE.fullmatch(lease["id"])
-        )
-    ):
+    if linked and lease:
         workflow_common.require(
             linked == lease, "deployment belongs to a different issue or lease"
         )
     lease = lease or linked
     workflow_common.require(
-        lease, "issue-verify requires --repair or a repair-linked deployment"
+        lease, "issue verify requires --issue-id or an issue-linked deployment"
     )
-    repair = repair_identity(lease["id"])
+    issue_id = validate_issue_id(lease["id"])
     path = job / "platform.json"
     with workflow_common.lock(job / "platform.lock"):
         state = workflow_common.read(path) if path.exists() else {}
         workflow_common.require(
-            not state or state.get("issue_id", state.get("repair_id")) == repair,
-            "deployment already linked to another repair",
+            not state or state.get("issue_id") == issue_id,
+            "deployment already linked to another issue",
         )
         if state.get("state") == "submitted":
-            if NUMBERED_ISSUE.fullmatch(repair):
-                workflow_common.require(
-                    state["body"]["lease_id"] == lease["lease_id"],
-                    "submission belongs to another lease",
-                )
+            workflow_common.require(
+                state["body"]["lease_id"] == lease["lease_id"],
+                "submission belongs to another lease",
+            )
             return state
         # Capture the selected binary afresh, including retries of an uncertain POST.
         code = "import json; from autofusex.fuzz.client.environment import collect; print(json.dumps(collect()))"
@@ -365,97 +318,51 @@ def verify(c, job, lease=None):
             package["sha256"] == deployment["runtime"]["pyautofuse"]["sha256"],
             "installed AF differs from this deployment",
         )
-        if NUMBERED_ISSUE.fullmatch(repair):
-            return submit_issue_round(c, path, state, lease, package)
-        from af_forge.afx import client as platform_client
-
-        client = platform_client.status(c)
-        workflow_common.require(
-            client["state"] == "ready", "managed retest client is not ready"
-        )
-        workflow_common.require(
-            client.get("installed", {}).get("af-mlir") == package,
-            "managed client does not match the verification candidate",
-        )
-        client_id = identity(client["client_id"])
-        if not state:
-            artifact = dict(package, installed_at=deployment["installed_at"])
-            body = {
-                "lease_id": lease["lease_id"],
-                "client_id": client_id,
-                "artifact": artifact,
-                "request_key": uuid.uuid4().hex,
-            }
-            state = {"state": "prepared", "repair_id": repair, "body": body}
-            workflow_common.write(path, state)
-        workflow_common.require(
-            state["body"]["lease_id"] == lease["lease_id"],
-            "prepared request belongs to a different lease",
-        )
-        workflow_common.require(
-            state["body"]["client_id"] == client_id
-            and state["body"]["artifact"]
-            == dict(package, installed_at=deployment["installed_at"]),
-            "prepared request no longer matches client or installed artifact",
-        )
-        # The client must be visible under the same user as the repair token.
-        clients = call(c, "GET", API_ROOT + "/clients", remote=True)["items"]
-        workflow_common.require(
-            any(
-                item["id"] == client_id
-                and item["online"]
-                and "af-mlir" in item["backends"]
-                for item in clients
-            ),
-            "managed retest client is not online for this platform user",
-        )
-        response = call(
-            c, "POST", API_ROOT + "/" + repair + "/retest", state["body"], remote=True
-        )
-        workflow_common.require(
-            isinstance(response, dict)
-            and response.get("id") == repair
-            and isinstance(response.get("retest"), dict),
-            "invalid retest response",
-        )
-        retest_id = identity(response["retest"]["id"])
-        state.update(state="submitted", retest_id=retest_id, response=response)
-        workflow_common.write(path, state)
-        return state
+        return submit_issue_round(c, path, state, lease, package)
 
 
-def poll(c, repair, retest_id):
-    identity(retest_id)
-    detail = call(c, "GET", API_ROOT + "/" + identity(repair))
-    workflow_common.require(detail["id"] == repair, "repair identity mismatch")
-    retest = detail.get("retest")
-    if not retest or retest["id"] != retest_id:
-        raise workflow_common.WorkflowError(
-            "PLATFORM_RETEST_SUPERSEDED",
-            "指定复测已不再是当前批次；不会将其他修复的结果归到本次提交",
-            detail,
-        )
+def poll(c, issue_id, round_no):
+    validate_issue_id(issue_id)
     workflow_common.require(
-        type(retest["terminal"]) is bool and type(retest["passed"]) is bool,
-        "invalid retest result",
+        type(round_no) is int and round_no > 0, "round number must be positive"
     )
+    detail = call(c, "GET", f"/api/issues/{issue_id}")
+    workflow_common.require(detail["issue_id"] == issue_id, "issue identity mismatch")
+    rounds = detail["rounds"]
+    verification = next((r for r in rounds if r["round_no"] == round_no), None)
+    workflow_common.require(
+        verification and verification["kind"] == "verify",
+        "verification round not found",
+    )
+    regression = next(
+        (r for r in rounds if r["round_no"] == round_no + 1 and r["kind"] == "regress"),
+        None,
+    )
+    if regression:
+        workflow_common.require(
+            all(
+                regression[k] == verification[k] for k in ("fix_version", "fix_sha256")
+            ),
+            "regression candidate differs from verification",
+        )
+    last = regression or verification
+    terminal = last["finished_at"] is not None
     return {
-        "repair_id": repair,
-        "status": detail["state"],
-        "retest_id": retest_id,
-        "retest": retest,
-        "terminal": retest["terminal"],
-        "outcome": ("passed" if retest["passed"] else "failed")
-        if retest["terminal"]
-        else None,
+        "issue_id": issue_id,
+        "status": detail["status"],
+        "round_no": round_no,
+        "verification": verification,
+        "regression": regression,
+        "terminal": terminal,
+        "outcome": last["outcome"] if terminal else None,
     }
 
 
-def wait(c, repair, retest_id, timeout):
+def wait(c, issue_id, round_no, timeout):
     deadline = time.monotonic() + timeout
-    lease = claimed(c, repair)
+    lease = claimed(c, issue_id)
     while True:
-        result = poll(c, repair, retest_id)
+        result = poll(c, issue_id, round_no)
         if result["terminal"]:
             if result["outcome"] != "passed":
                 raise workflow_common.WorkflowError(
@@ -464,10 +371,10 @@ def wait(c, repair, retest_id, timeout):
             return result
         if time.monotonic() >= deadline:
             raise workflow_common.WorkflowError(
-                "PLATFORM_WAIT_TIMEOUT", "等待超时，可继续查询同一复测 ID", result
+                "PLATFORM_WAIT_TIMEOUT", "等待超时，可继续查询同一验证轮次", result
             )
         renew(c, lease)
-        print(f"{repair}: {result['status']}", file=sys.stderr, flush=True)
+        print(f"{issue_id}: {result['status']}", file=sys.stderr, flush=True)
         time.sleep(min(30, max(0, deadline - time.monotonic())))
 
 
@@ -477,22 +384,13 @@ def retry_remote(job, lease=None):
         c = workflow_config.validate_config(
             workflow_config.read_config(job / "config.yaml")
         )
-        from af_forge.afx import client as platform_client
-
-        with workflow_common.lock(platform_client.directory(c) / "control.lock"):
-            with (
-                workflow_common.lock(workflow_runtime.venv_lock(c), shared=True),
-                workflow_common.lock(
-                    workflow_runtime.registry(c).with_suffix(".lock"), shared=True
-                ),
-            ):
-                lease = lease or workflow_common.read(job / "request.json").get("issue")
-                if not lease or not NUMBERED_ISSUE.fullmatch(lease["id"]):
-                    platform_client.start(c)
-                value = verify(c, job, lease)
-                workflow_common.require(
-                    value is not None, "job is not linked to an issue"
-                )
+        with (
+            workflow_common.lock(workflow_runtime.venv_lock(c), shared=True),
+            workflow_common.lock(
+                workflow_runtime.registry(c).with_suffix(".lock"), shared=True
+            ),
+        ):
+            value = verify(c, job, lease)
         return {"state": "success", "verification": value}
     except workflow_common.WorkflowError as error:
         return {"state": "failed", "error_code": error.code, "error": str(error)}

@@ -72,6 +72,10 @@ def worker(job):
     try:
         c = workflow_config.validate_config(workflow_common.read(job / "config.yaml"))
         request = workflow_common.read(job / "request.json")
+        workflow_common.require_code(
+            request.get("command") in ("deploy", "init", "update", "replay", "check"),
+            "INVALID_ARGUMENT", "unsupported worker command",
+        )
         source = Path(c["remote"]["source_dir"]).resolve()
         for value in (
             c["remote"]["state_dir"],
@@ -93,15 +97,8 @@ def worker(job):
         workflow_common.phase(job, "starting")
         if request["command"] == "deploy":
             from af_forge.afx import platform as platform_adapter
-            from af_forge.afx import client as platform_client
-
             with platform_adapter.deployment_lease(c, job):
-                with platform_client.deployment(c):
-                    issue = request.get("issue") or {}
-                    if platform_adapter.NUMBERED_ISSUE.fullmatch(issue.get("id", "")):
-                        workflow_execution.deploy(c, job, refresh_client=False)
-                    else:
-                        workflow_execution.deploy(c, job)
+                workflow_execution.deploy(c, job)
         elif request["command"] in ("init", "update"):
             workflow_common.phase(job, request["command"])
             from af_forge.environment import bootstrap
@@ -119,14 +116,6 @@ def worker(job):
                 ],
                 cwd=job,
             )
-        elif request["command"].startswith("client-"):
-            from af_forge.afx import client as platform_client
-
-            workflow_common.phase(job, "platform_client")
-            result = platform_client.manage(
-                c, request["command"].removeprefix("client-")
-            )
-            workflow_common.write(job / "result.json", result)
         elif request["command"] == "replay":
             workflow_execution.replay(c, job, request)
         else:
@@ -154,9 +143,6 @@ def worker(job):
                             "deploy": "deployment.json",
                             "replay": "report.json",
                             "check": "python-dependencies.json",
-                            "client-start": "result.json",
-                            "client-stop": "result.json",
-                            "client-status": "result.json",
                         }[request["command"]]
                     )
                 ),
@@ -296,7 +282,6 @@ def local_preflight(command, dry_run=False):
 
 def phase_error(phase):
     return {
-        "platform_client": "PLATFORM_CLIENT_FAILED",
         "platform_verify": "PLATFORM_VERIFY_FAILED",
         "environment_consistency": "ENVIRONMENT_MISMATCH",
         "python_dependencies": "REMOTE_DEPENDENCY_FAILED",

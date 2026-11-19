@@ -67,16 +67,10 @@ def response(command, data=None, error=None):
         data = dict(data)
         if "job" in data:
             data["job_id"] = data["job"]
-        if (
-            command in ("issue-claim", "issue-renew")
-            and "id" in data
-            and "issue_id" not in data
-        ):
-            data["repair_id"] = data["id"]
     return {
         "schema_version": 1,
         "ok": error is None,
-        "command": command.replace("-", " ", 1) if command and command.startswith(("client-", "issue-", "config-")) else command,
+        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "config-")) else command,
         "data": data,
         "error": None if error is None else {"code": error.code, "message": str(error)},
     }
@@ -95,9 +89,6 @@ def parse_arguments():
         "deploy",
         "replay",
         "check",
-        "client-start",
-        "client-stop",
-        "client-status",
     )
     issues = (
         "issue-claim",
@@ -113,11 +104,8 @@ def parse_arguments():
         "deploy": "同步本地源码到远端，编包并安装 AF",
         "replay": "使用已部署的 AF 复跑指定 seed",
         "check": "检查远端运行环境及 Python 依赖",
-        "client-start": "启动远端 AFX 平台复测客户端",
-        "client-stop": "停止远端 AFX 平台复测客户端",
-        "client-status": "查询远端 AFX 平台复测客户端状态",
         "issue-claim": "从 AFX 平台领取待修复问题",
-        "issue-preview": "查看问题的回归候选集",
+        "issue-preview": "查看问题的复现用例和失败摘要",
         "issue-status": "查询平台验证和回归结果",
         "issue-wait": "轮询等待平台验证和回归结果",
         "issue-verify": "针对已部署的 AF 向平台提交验证",
@@ -128,10 +116,10 @@ def parse_arguments():
     for name in (*jobs, *issues, "status", "doctor"):
         parent = commands
         leaf = name
-        if name.startswith(("client-", "issue-", "config-")):
+        if name.startswith(("issue-", "config-")):
             group, leaf = name.split("-", 1)
             if group not in groups:
-                summary = "管理平台复测客户端" if group == "client" else "领取问题、提交验证及查询回归结果"
+                summary = "领取问题、提交验证及查询回归结果"
                 group_parser = commands.add_parser(
                     group, help=summary, description=summary,
                     usage=f"%(prog)s <操作> [参数]", allow_abbrev=False,
@@ -156,21 +144,11 @@ def parse_arguments():
             cmd.add_argument(
                 "--full", action="store_true", help="show full preview details"
             )
-        if name == "issue-claim":
-            selector = cmd.add_mutually_exclusive_group()
-            selector.add_argument("--issue-key", "--issue", dest="issue")
-            selector.add_argument("--issue-id", help="AFX platform issue, e.g. F152")
-        if name == "deploy" or (name in issues and name != "issue-claim"):
-            selector = cmd.add_mutually_exclusive_group(
-                required=name not in ("deploy", "issue-verify")
-            )
-            selector.add_argument("--repair-id", "--repair", dest="repair")
-            if name in ("deploy", "issue-preview", "issue-renew", "issue-verify"):
-                selector.add_argument(
-                    "--issue-id", help="claimed AFX platform issue, e.g. F152"
-                )
+        if name == "deploy" or name in issues:
+            cmd.add_argument("--issue-id", required=name not in ("deploy", "issue-verify", "issue-claim"),
+                             help="AFX platform issue, e.g. F152")
         if name in ("issue-wait", "issue-status"):
-            cmd.add_argument("--retest-id", "--retest", dest="retest", required=True)
+            cmd.add_argument("--round-no", type=int, required=True, help="verification round returned by issue verify")
         if name == "issue-wait":
             cmd.add_argument("--timeout", type=float, default=3600)
         if name in ("status", "issue-verify"):
@@ -207,7 +185,6 @@ def parse_arguments():
         request_id=None,
         dry_run=False,
         detach=False,
-        repair=None,
         seeds_file=None,
         deployment=None,
         upload=None,
@@ -230,16 +207,6 @@ def main():
         return workflow_config.write_template(args.source, args.output)
     if args.issue_id is not None:
         platform.validate_issue_id(args.issue_id)
-        if args.command != "issue-claim":
-            args.repair = args.issue_id
-    elif args.repair is not None:
-        platform.identity(args.repair)
-    if args.command == "issue-claim" and args.issue_id is None:
-        workflow_common.require_code(
-            bool(args.request_id),
-            "INVALID_ARGUMENT",
-            "issue claim requires --request-id",
-        )
     if args.job is not None:
         workflow_common.require_code(
             re.fullmatch(r"[0-9a-f]{32}", args.job),
@@ -267,20 +234,14 @@ def main():
     if args.command.startswith("issue-"):
         workflow_config.platform_settings(c)
         if args.command == "issue-claim":
-            if args.issue_id is not None:
-                request_id = args.request_id or uuid.uuid4().hex
-                if args.request_id is None:
-                    print(
-                        f"issue claim --request-id {request_id}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                return platform.claim(c, None, request_id, issue_id=args.issue_id)
-            return platform.claim(c, args.issue, args.request_id)
+            request_id = args.request_id or uuid.uuid4().hex
+            if args.request_id is None:
+                print(f"issue claim --request-id {request_id}", file=sys.stderr, flush=True)
+            return platform.claim(c, request_id, issue_id=args.issue_id)
         if args.command == "issue-renew":
-            return platform.renew(c, platform.claimed(c, args.repair))
+            return platform.renew(c, platform.claimed(c, args.issue_id))
         if args.command == "issue-preview":
-            return platform.preview(c, args.repair, full=args.full)
+            return platform.preview(c, args.issue_id, full=args.full)
         if args.command in ("issue-status", "issue-wait"):
             if args.command == "issue-wait":
                 workflow_common.require_code(
@@ -288,11 +249,11 @@ def main():
                     "INVALID_ARGUMENT",
                     "invalid timeout",
                 )
-                return platform.wait(c, args.repair, args.retest, args.timeout)
-            return platform.poll(c, args.repair, args.retest)
+                return platform.wait(c, args.issue_id, args.round_no, args.timeout)
+            return platform.poll(c, args.issue_id, args.round_no)
         workflow_jobs.local_preflight("status")
         directory = str(Path(c["remote"]["state_dir"]) / args.job)
-        lease = platform.claimed(c, args.repair) if args.repair else None
+        lease = platform.claimed(c, args.issue_id) if args.issue_id else None
         context = {key: lease[key] for key in ("id", "lease_id")} if lease else None
         code = "import sys,json; sys.path.insert(0,sys.argv[1]); from af_forge.afx import platform as p; print(json.dumps(p.retry_remote(sys.argv[1],json.loads(sys.argv[2]))))"
         result = workflow_jobs.remote(
@@ -304,11 +265,6 @@ def main():
             result.get("error", "verify failed"),
         )
         return result["verification"]
-    workflow_common.require_code(
-        not args.command.startswith("client-") or "platform" in c,
-        "CONFIG_INVALID",
-        "fill platform configuration",
-    )
     workflow_jobs.local_preflight(
         "deploy" if args.command == "doctor" else args.command, args.dry_run
     )
@@ -352,15 +308,15 @@ def main():
         "deployment": args.deployment,
         "upload": args.upload,
     }
-    if args.command == "deploy" and args.repair:
-        lease = platform.claimed(c, args.repair)
+    if args.command == "deploy" and args.issue_id:
+        lease = platform.claimed(c, args.issue_id)
         request["issue"] = {key: lease[key] for key in ("id", "lease_id")}
     data = workflow_jobs.submit(
         c, request, args.request_id or uuid.uuid4().hex, args.dry_run
     )
     if (
         args.command
-        in ("init", "update", "client-start", "client-stop", "client-status")
+        in ("init", "update")
         and not args.dry_run
         and not args.detach
     ):
@@ -408,7 +364,7 @@ def main():
 
 def cli():
     command = sys.argv[1] if len(sys.argv) > 1 else None
-    if command in ("client", "issue", "config") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
+    if command in ("issue", "config") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()

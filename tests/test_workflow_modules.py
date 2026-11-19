@@ -57,7 +57,7 @@ def test_module_dependencies_are_acyclic_and_do_not_import_cli():
 
 
 @pytest.mark.parametrize(
-    "command", ["deploy", "replay", "check", "init", "update", "client-start"]
+    "command", ["deploy", "replay", "check", "init", "update"]
 )
 def test_submitted_bundle_imports_without_repository(cfg, tmp_path, command):
     result = workflow_jobs.submit(cfg, {"command": command}, "bundle-" + command, True)
@@ -128,3 +128,8 @@ def test_copied_runtime_dependency_probe_is_executable(tmp_path):
         row["name"] == "missing_workflow_fixture" and not row["passed"]
         for row in report["checks"]
     )
+
+
+def test_bundle_contains_no_resident_client():
+    assert "af_forge/afx/client.py" not in workflow_bundle.FILES
+    assert importlib.util.find_spec("af_forge.afx.client") is None

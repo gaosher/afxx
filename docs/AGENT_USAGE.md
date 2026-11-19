@@ -8,22 +8,21 @@
 |---|---|---|
 | doctor | 本地校验配置、工具和 npussh 登录 | 检查通过 |
 | init / update | 提交远端任务，默认跟随日志；支持 --detach | 远端任务 success，环境清单 ready |
-| deploy | 提交远端任务，返回 job ID | status 为 success，deployment.json 有效；配置 platform 时客户端已刷新 |
+| deploy | 提交远端任务，返回 job ID | status 为 success，deployment.json 有效 |
 | replay | 提交远端任务，返回 job ID | status 为 success 且 report.json.passed=true |
 | check | 提交远端依赖检查 | 任务 success、依赖检查通过 |
 | status | 查询远端 job | 查询成功后继续检查返回的任务 state |
 | issue claim / issue preview / issue renew | 本地直接调用平台 HTTPS | 保存领取响应、预览或续租到期时间 |
-| issue verify | 通过 npussh 在远端提交平台请求 | 返回 state=submitted，保存 retest_id |
-| issue status | 本地查询平台指定 retest | 检查 terminal 和 outcome |
+| issue verify | 通过 npussh 在远端提交平台请求 | 返回 state=submitted，保存 round_no |
+| issue status | 本地查询平台指定验证轮次 | 检查 terminal 和 outcome |
 | issue wait | 本地持续查询平台并续租 | terminal=true 且 outcome=passed |
-| client start / client stop / client status | 提交远端管理任务并等待完成 | 检查 data.status["result.json"] 中的客户端状态 |
 
-命令之间使用顶层 data.job_id、data.repair_id、data.retest_id，分别传给 --job-id、--repair-id、--retest-id。replay 的 --job-id 指成功的 deploy 任务；旧的 --deployment 路径仍可使用，两种引用互斥。各子命令的 --help 列出接受的参数，传入无关选项返回 INVALID_ARGUMENT。
+命令之间使用 data.job_id、data.issue_id、data.round_no，分别传给 --job-id、--issue-id、--round-no。replay 使用成功 deploy 的 --job-id。各命令的 --help 列出接受的参数。
 
 所有公共命令 stdout 返回一个 JSON 对象，日志走 stderr。--help 返回帮助文本。
 
 ```json
-{"schema_version":1,"ok":true,"command":"issue preview","data":{"repair_id":"11111111-1111-4111-8111-111111111111","snapshot":{"targets":[]}},"error":null}
+{"schema_version":1,"ok":true,"command":"issue preview","data":{"issue_id":"F152","snapshot":{"targets":[]}},"error":null}
 ```
 
 ```json
@@ -39,11 +38,11 @@ af-forge deploy --request-id deploy-001
 af-forge status --job-id <job-id>
 ```
 
-提交前生成并保存 request-id，允许 1–128 位字母、数字、下划线、点或连字符。init/update/deploy/replay/check 和 client 管理命令支持此参数。省略时自动生成，但若整个响应丢失，将无法从响应取回该值。
+提交前生成并保存 request-id，允许 1–128 位字母、数字、下划线、点或连字符。init/update/deploy/replay/check支持此参数。省略时自动生成，但若整个响应丢失，将无法从响应取回该值。
 
-任务状态包括 prepared、queued、running、success、failed、unknown。prepared 为 dry-run 本地产物。status 会返回已有的部署、复跑、环境、平台和客户端报告。每 15–30 秒轮询，长编包阶段可延长到 60 秒；阶段变化或到达终态时汇报。unknown 时检查进程和日志。
+任务状态包括 prepared、queued、running、success、failed、unknown。prepared 为 dry-run 本地产物。status 会返回已有的部署、复跑、环境、平台报告。每 15–30 秒轮询，长编包阶段可延长到 60 秒；阶段变化或到达终态时汇报。unknown 时检查进程和日志。
 
-init/update 默认跟随远端日志，Ctrl+C 停止本地查看，任务仍可通过 status 查询。client 管理命令也等待远端任务完成。
+init/update 默认跟随远端日志，Ctrl+C 停止本地查看，任务仍可通过 status 查询。
 
 ## 幂等与恢复
 
@@ -57,31 +56,21 @@ init/update 默认跟随远端日志，Ctrl+C 停止本地查看，任务仍可�
 
 ```bash
 af-forge issue claim --request-id claim-001
-af-forge issue preview --repair-id <repair-id>
-af-forge issue renew --repair-id <repair-id>
-af-forge deploy --repair-id <repair-id> --request-id deploy-001
+af-forge issue preview --issue-id F152
+af-forge issue renew --issue-id F152
+af-forge deploy --issue-id F152 --request-id deploy-001
 af-forge status --job-id <job-id>
-af-forge issue verify --repair-id <repair-id> --job-id <job-id>
-af-forge issue wait --repair-id <repair-id> --retest-id <retest-id>
+af-forge issue verify --issue-id F152 --job-id <job-id>
+af-forge issue wait --issue-id F152 --round-no <round_no>
 ```
 
-使用 --issue-id F152 时，claim/preview/renew/deploy/verify 共用同一 issue_id。claim 接受可选的 --request-id，agent 建议预生成并保存它；网络重试复用原 ID。编号领取成功时 stdout 仅返回 issue_id、status、title、backend、case_count、lease_expires_at（Unix 毫秒）及 request_id。完整领取回执保存在本地 repairs/<issue_id>.json，preview 默认返回 issue_id、failure_summary 和 seeds（按顺序去重）；若回执截断，分页读取平台当前有效用例。--full 返回领取时的 snapshot.cases 和 related_knowledge。verify 返回 state=submitted 和 round_no，可重试同一部署以取得原回执。编号问题的轮次在平台详情中查询。
+claim 可用 --issue-id 指定问题；省略时由平台分配。领取回执存于 issues/<issue_id>.json，包含复现信息和租约。重复请求复用 request-id；无任务时返回 null。preview 默认输出失败摘要及去重 seed，--full 返回完整复现信息。
 
-按 issue_key 或自动分配时，claim 必须提供 request-id，可选 --issue-key 指定 24 位十六进制 issue_key。领取返回 data.repair_id（repair UUID）、lease_id、expires 和 snapshot。无任务时 data=null；下一次领取用新 request-id，重试原请求使用原 ID。领取响应保存在本地 repairs/，修复期间根据 expires 提前续租。关联 repair 的 deploy 在远端自动续租。
+verify 与 deploy 分离，在远端采集实际 AF 身份，核对部署后提交 `/api/issues/{id}/verify`。platform.json 固定候选身份、租约和幂等键；已提交时返回原回执。一个部署只绑定一个问题和租约。
 
-issue preview 返回冻结 snapshot 中的实际复测目标，不是独立的回归预览。deploy 和 issue verify 分开执行。verify 使用 job 冻结配置，核对部署、实际 AF 及专用 client ID，提交 repairs/{id}/retest。platform.json 保存固定请求及回执，一个部署 job 绑定一个 repair。新修复或新复测提交使用新部署 job。
+status/wait 以 verify 返回的 round_no 定位验证，跟踪同一候选包的下一轮 regress。只有相关轮次全部通过才返回 outcome=passed。wait 遇到失败和 invalid 均返回 PLATFORM_VERIFICATION_FAILED；等待超时可继续查同一轮次。查询保留历史轮次身份，不使用其他修复的结果。
 
-issue wait 必须传入 verify 返回的 retest_id。只以该 retest 的 terminal/passed 判定，不把 repair 状态或其他轮结果当作通过。修复状态 verified 表示可提交总结，resolved 表示归档完成。当前没有单独的自动 regress 轮次，workflow 不代填或提交修复总结。
-
-超时继续查询同一 retest；PLATFORM_RETEST_SUPERSEDED 表示平台已切换到其他复测，当前详情 API 无法查询指定旧 retest。再次部署前等待当前复测结束，避免定向客户端运行期间环境变化。
-
-## 专用客户端
-
-`client start/client stop/client status` 使用远端管理任务。client status 的任务 success 表示查询完成，客户端自身可能为 stopped、starting、ready、draining、unhealthy 或 failed。检查 result.json 的状态、日志路径和安装身份。
-
-deploy 停止受管理客户端后才开始安装流程。停止超时表示客户端可能仍在完成复测，待其结束后重试。环境 update 前停止客户端，成功后重新启动。客户端采用配置的 venv/CANN 和 replay.devices，包更新统一交给 workflow update。
-
-本地和远端使用同一平台用户的 Bearer token；远端凭据文件权限为 0600。凭据内容只在使用端读取，配置和命令参数仅传路径。
+AFX 官方客户端在 NPU 独立常驻，通过 `afx platform client run --retest` 启动。Forge 不管理它的进程或启停，也不屏蔽平台更新行为。部署、更新仍执行环境占用检查。不要将 Forge 的锁视为独立客户端的并发保护。
 
 ## 错误处理
 
@@ -101,11 +90,10 @@ deploy 停止受管理客户端后才开始安装流程。停止超时表示客�
 | ENVIRONMENT_MISMATCH | 核对配置、current.json 和实际环境 |
 | PLATFORM_CREDENTIAL_MISSING | 检查相应端的凭据文件 |
 | PLATFORM_UNAVAILABLE / PLATFORM_RESPONSE_INVALID | 检查平台连接和响应，重试原请求 |
-| PLATFORM_CONFLICT / PLATFORM_UNAUTHORIZED | 核对 repair 租约、请求键、用户及客户端归属 |
-| PLATFORM_VERIFY_FAILED | 检查远端提交错误、客户端身份和已保存请求 |
-| PLATFORM_VERIFICATION_FAILED | 从 data.retest 查看复测状态、attempt 和 artifact |
-| PLATFORM_RETEST_SUPERSEDED | 不使用其他 retest 的结果；检查保存的提交回执 |
-| PLATFORM_WAIT_TIMEOUT | 继续查询同一 repair 和 retest |
+| PLATFORM_CONFLICT / PLATFORM_UNAUTHORIZED | 核对 issue 租约、请求键、用户及客户端归属 |
+| PLATFORM_VERIFY_FAILED | 检查远端提交错误、包身份和已保存请求 |
+| PLATFORM_VERIFICATION_FAILED | 查看 data.verification 和 data.regression |
+| PLATFORM_WAIT_TIMEOUT | 继续查询同一 issue 和 round_no |
 | INTERNAL_ERROR | 保留现场并排查实现错误 |
 
 issue verify 将远端已分类错误的 code 和 message 原样返回到 error.code 和 error.message。未分类异常及仅含错误文本的旧任务回执使用 PLATFORM_VERIFY_FAILED，并保留错误文本。SSH 连接或响应读取失败使用 REMOTE_UNAVAILABLE。

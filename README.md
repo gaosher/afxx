@@ -33,13 +33,12 @@ af-forge/
 │   │   └── package_sources.json
 │   └── afx/                # AFX 接口适配
 │       ├── replay.py
-│       ├── platform.py
-│       └── client.py
+│       └── platform.py
 ├── docs/                   # Agent 规范、设计、本地依赖
 └── tests/                  # 单元与接口测试
 ```
 
-内部模块通过 `af_forge` 包导入；远端任务和常驻客户端保留相同包结构。日常调用已安装的 `af-forge`；agent 也可通过 `af-forge-mcp` 使用同一组命令。
+内部模块通过 `af_forge` 包导入；远端任务保留相同包结构。日常调用已安装的 `af-forge`；agent 也可通过 `af-forge-mcp` 使用同一组命令。
 
 查看全部命令：`af-forge help`（等同于 `af-forge --help`，无需配置或连接远端）。
 
@@ -88,8 +87,7 @@ doctor 校验配置、本地连接工具和 npussh 登录。远端依赖由 init
 │   └── build/                    编译缓存
 ├── workflow-state/<job-id>/      任务配置、日志、报告及 AF run 包
 ├── workflow-results/<job-id>/    独立 replay 结果
-├── workflow-env-state/           当前环境清单、锁文件和共享 wheel
-└── platform-client-<摘要>/       专用平台复测客户端
+└── workflow-env-state/           当前环境清单、锁文件和共享 wheel
 ```
 
 | 配置项 | 默认行为 |
@@ -139,13 +137,13 @@ Python 环境锁包含 `nnsmith-autofusex==0.1.2.post1`，venv 内使用 uv 0.11
 
 修改 Daily 日期或 AFX 版本后执行 update。AFX 配置为 `latest` 时，每次 update 查询并下载当前最新兼容正式版，包哈希未变化则跳过更新；环境清单记录实际版本和哈希，冻结配置使用实际版本。它比较配置和当前环境清单，更新发生变化的 torch_npu/AFX，校验其余依赖的版本和来源。更新失败时尝试用原锁恢复，恢复失败则标记 invalid。torch 和稳定依赖变化需要在新目录 init。
 
-使用平台客户端的环境按以下顺序更新：
+更新环境：
 
 ```bash
-af-forge client stop
 af-forge update
-af-forge client start
 ```
+
+AFX 客户端独立运行，Forge 不控制其生命周期。更新与安装保留环境占用检查，发现正在使用的库时会报错。
 
 update 保留现有 CANN。包下载要求来源仍可访问；指定版本的包必须支持当前 Python 和平台。包源默认值及 OPS 映射集中在 [package_sources.json](af_forge/environment/package_sources.json)。
 
@@ -177,7 +175,7 @@ af-forge status --job-id <job-id>
 
 deploy/replay 的配置、当前环境清单与实际包版本不一致时，输出含 expected/actual 的 WARNING 并继续；告警保留在 job.log 中。有差异时保留提交的 config.yaml，不写入旧清单的环境锁，因此该配置不保证精确复现实际环境。依赖无法加载及 AF 部署产物被替换仍报错。AFX 在部署后更新不会单独阻止 replay，实际加载身份写入 report.json。
 
-配置了 platform 时，部署前停止专用复测客户端，安装后重新启动并检查它识别的 AF 哈希。`deploy --repair-id REPAIR_ID` 可关联领取上下文，在编包期间续租。平台验证通过独立的 issue verify 命令提交。
+`deploy --issue-id F152` 关联领取上下文，在编包期间续租。部署完成后，通过独立的 `issue verify` 命令提交平台验证。
 
 ```bash
 # 离线校验并生成本地快照
@@ -208,55 +206,40 @@ af-forge deploy --issue-id F152 --request-id deploy-F152-1
 af-forge issue verify --issue-id F152 --job-id <deploy-job-id>
 ```
 
-领取成功后终端显示问题摘要。完整回执保存在本机 `repairs/<issue_id>.json`；编号问题的 preview 默认输出缩进 JSON，包含失败摘要和去重后的全部 nnsmith seed。若领取回执被截断，preview 会从平台分页读取当前受影响的用例。加 `--full` 可查看领取时保存的复现详情和相关知识。编号领取可显式传 `--request-id`；省略时 CLI 在发送前将生成的 ID 写入 stderr，重试使用同一个 ID。修复期间按租约到期时间提前续租，关联部署期间 workflow 自动续租。验证以实测 AF 版本及 pyautofuse.so 哈希提交，返回 `data.round_no`。平台按芯片和包身份调度已注册客户端；可在平台问题详情查看轮次，`issue wait --retest-id` 用于下方 repair UUID 流程。
+领取成功后终端显示问题摘要。完整回执保存在本机 `issues/<issue_id>.json`；编号问题的 preview 默认输出缩进 JSON，包含失败摘要和去重后的全部 nnsmith seed。若领取回执被截断，preview 会从平台分页读取当前受影响的用例。加 `--full` 可查看领取时保存的复现详情和相关知识。编号领取可显式传 `--request-id`；省略时 CLI 在发送前将生成的 ID 写入 stderr，重试使用同一个 ID。修复期间按租约到期时间提前续租，关联部署期间 workflow 自动续租。验证以实测 AF 版本及 pyautofuse.so 哈希提交，返回 `data.round_no`。平台按芯片和包身份调度已注册客户端。
 
-### 按 issue_key 领取或由平台分配
+### 平台分配与结果查询
 
-服务端需提供 `/api/agent/repairs`，远端 AFX 需提供当前的 `fuzz.client.sync.retests.Consumer` 接口。
+省略 `--issue-id` 时，平台分配一个待修复问题；没有任务时返回 `data=null`。
 
 ```bash
-# 可选 --issue-key <24位十六进制 issue_key>；省略时由平台分配
 af-forge issue claim --request-id claim-001
-# 后续使用 claim 返回的 data.repair_id（repair UUID）
-af-forge issue preview --repair-id <repair-id>
-af-forge issue renew --repair-id <repair-id>
-
-af-forge deploy --repair-id <repair-id> --request-id deploy-001
-af-forge status --job-id <job-id>
-
-# 确认 deploy 成功后显式提交；不会自动提交验证
-af-forge issue verify --repair-id <repair-id> --job-id <job-id>
-# --retest-id 使用 issue verify 返回的 data.retest_id
-af-forge issue wait --repair-id <repair-id> --retest-id <retest-id> --timeout 3600
+# 使用 verify 返回的 round_no
+af-forge issue status --issue-id F152 --round-no 1
+af-forge issue wait --issue-id F152 --round-no 1 --timeout 3600
 ```
 
-claim 一次领取一个问题，返回 repair ID、lease_id、expires 和冻结的 snapshot，无任务时 data 为 null。issue preview 查询该 repair 的 snapshot，包含关联的 attempt/Shape 目标。这是实际复测集合；当前接口没有独立的回归候选集预览或自动追加 regress 轮次。
+verify 在远端核对部署记录与实际加载的 AF，向 `/api/issues/{id}/verify` 提交 lease_id、fix_version、fix_sha256 和 request_key。job 的 platform.json 保存固定请求和回执。网络失败后重试同一部署会复用请求键；不同修复使用新的部署 job。
 
-issue verify 失败时，CLI 透传远端错误码和消息，未分类异常返回 `PLATFORM_VERIFY_FAILED`。
+status/wait 查询指定 verify 轮次及紧随其后、包身份一致的 regress 轮次。回归仍在执行时不会把验证通过视为整个流程通过；后续修复的轮次不会覆盖本次结果。失败或超时返回错误码及轮次详情，超时后可继续查询同一 round_no。修复总结由平台处理。
 
-issue verify 在远端重新采集 AFX 环境中的 AF 版本和 pyautofuse.so 哈希，核对当前部署、专用客户端和平台在线注册。随后向 `/api/agent/repairs/{id}/retest` 提交 lease_id、client_id、artifact 和 request_key。artifact 包含 version、sha256 和部署时记录的 installed_at。平台证据只记录候选包身份，实际执行身份由 workflow 的环境隔离、库校验和部署锁保证。
+## AFX 常驻客户端
 
-一个部署 job 保存一个 repair 的幂等请求。网络失败后重复 issue verify 复用同一请求，重新检查实际环境；已提交请求返回保存的回执。不同修复或再次复测使用新的部署 job。修复租约换代后，未提交的旧请求不能改绑到新租约。
+Forge 在本地控制远端任务；AFX 官方客户端在 NPU 上独立运行，负责心跳、上传、复测领取和平台更新。Forge 不提供客户端管理命令，不代理常驻进程，也不执行 stop 或自动重启。
 
-issue wait 每 30 秒查询 repair 并续租，仅接受指定 retest ID 的结果。状态为 claimed → retesting → fixing（失败）或 verified（通过）。通过返回 terminal=true、outcome=passed；失败或超时返回错误码和复测详情。一次查询使用 `issue status --repair-id ID --retest-id ID`。如果平台已切换到另一 retest，返回 PLATFORM_RETEST_SUPERSEDED，避免误用另一轮结果；当前详情接口仅暴露最新 retest。
-
-verified 后可通过平台 summary 接口提交修复总结，进入 resolved；workflow 当前不提供总结提交命令。
-
-## 平台复测客户端
+在 NPU 上使用目标环境启动，例如（按实际配置修改路径）：
 
 ```bash
-af-forge client status
-af-forge client stop
-af-forge client start
+source /mnt/workspace/af-workflow/Ascend/cann/set_env.sh
+source /mnt/workspace/af-workflow/venv/bin/activate
+export AUTOFUSEX_HOME=/mnt/workspace/af-workflow/afx
+mkdir -p "$AUTOFUSEX_HOME/results"
+afx platform client run --endpoint https://autofuse.online \
+  --token-file /absolute/path/client.token \
+  --results "$AUTOFUSEX_HOME/results/results.sqlite" --retest
 ```
 
-这些命令创建远端管理任务并等待完成，客户端状态位于 `data.status["result.json"]`。启动使用指定 venv、CANN 和独立 AUTOFUSEX_HOME，验证用户凭据、NPU 资源和 AF 身份，通过 AFX Consumer 注册专用 client ID。设备来自 replay.devices，默认全部可见逻辑卡，需属于同一 NPU 架构。
-
-Consumer 负责 `/api/retest` 任务领取、租约、调度和完成确认，AFX uploader 负责 `/api/upload` 及回执。workflow 管理进程、生命周期锁和安装身份；不再实现复测上传协议。客户端全生命周期持共享环境锁，确保异步执行和上传期间环境不被更新。
-
-进程身份由 PID 和 Linux 启动时间确认。停止时禁止领取新任务，继续排空在途任务、上传和完成确认，等待调度器退出。60 秒内未完成则停止命令报错，客户端继续排空，结束后可重试部署。状态包括 stopped、starting、ready、draining、unhealthy 和 failed。
-
-平台将复测定向给提交中的 client_id。任务持续 pending 时检查该客户端在线状态。等待当前复测结束后再覆盖部署；平台 artifact 本身不会强制校验客户端所加载的二进制。AFX 包统一通过 workflow update 更新，不接受客户端自动升级。
+SQLite 数据库由 AFX 创建，不必手工建立空文件。`--retest` 启用平台复测任务领取；客户端需报告与 verify 提交相符的后端版本、哈希和芯片信息。包更新、注册和调度遵循 AFX 自身行为。Forge 的环境锁仅协调 Forge 任务，不代表独立客户端也持有这些锁。
 
 ## 独立 seed 复跑
 
@@ -281,19 +264,18 @@ Shape 数量由 AFX 解码 seed 得到：静态为 1，动态为 2–8。结果�
 | 位置 | 内容与用途 |
 |---|---|
 | 本地 `requests/` | request-id 到冻结任务的幂等索引 |
-| 本地 `repairs/<id>.json` | 平台 repair 领取响应、冻结目标及租约 |
+| 本地 `issues/<id>.json` | 平台 issue 领取响应、冻结目标及租约 |
 | job 的 `config.yaml` | 有效配置；环境操作成功或部署/复跑环境校验通过后含实际版本、日期、哈希和内嵌依赖锁 |
 | job 的 `request.json` / `launch.json` / `status.json` | 请求、远端启动凭据、阶段与终态 |
 | job 的 `source.json` | 源码清单、权限、链接、哈希及快照清理结果 |
 | job 的 `deployment.json` / `packages/` | 部署来源、加载证据及 AF run 包 |
 | job 的 `report.json` | 独立 replay 的资源、结果及同步状态 |
-| job 的 `result.json` | 环境操作或客户端管理结果；环境更新包含组件和回滚信息 |
-| job 的 `platform.json` | 平台 retest 固定请求及回执 |
+| job 的 `result.json` | 环境操作结果；环境更新包含组件和回滚信息 |
+| job 的 `platform.json` | 平台 verify 固定请求及回执 |
 | job 的 `python-dependencies.json` / `cann-bootstrap.json` | 依赖检查和 CANN 安装证据 |
 | job 的 `job.log` / `uv.log` | 操作日志 |
 | `workflow-env-state/current.json` | 当前环境清单，供环境一致性校验及更新使用 |
 | `workflow-env-state/wheels/` / `locks/` | 按哈希保存 torch_npu/AFX wheel 和依赖锁 |
-| `platform-client-<摘要>/` | 进程状态、独立 HOME、复测数据库、上传回执库、日志及启动工具 |
 
 源码快照 snapshot/ 为普通目录树。确认远端启动后清理本地副本，远端同步校验成功后清理远端副本。状态不明确时保留现场，dry-run 保留快照。源码清单和部署引用继续用于校验，删除快照后需另行保留源码才能恢复未提交修改。
 
@@ -311,7 +293,7 @@ Shape 数量由 AFX 解码 seed 得到：静态为 1，动态为 2–8。结果�
 python3 -m pytest tests -q
 ```
 
-测试使用临时目录、Git/rsync 和构建、平台、设备接口夹具，覆盖同步、幂等、更新回滚、环境冻结、结果判定和客户端生命周期。真实编包、NPU 执行及平台联调需在配置的目标环境验证。
+测试使用临时目录、Git/rsync 和构建、平台、设备接口夹具，覆盖同步、幂等、更新回滚、环境冻结、结果判定和平台验证轮次。真实编包、NPU 执行及平台联调需在配置的目标环境验证。
 
 指定 AFX 源码运行契约测试：
 
@@ -353,6 +335,6 @@ uv pip install -e '.[dev]'
 
 ### 命令分组
 
-`af-forge help` 显示顶层命令；`af-forge client --help` 和 `af-forge issue --help` 分别显示客户端和问题处理操作。旧的连字符子命令不再作为 CLI 入口。
+`af-forge help` 显示顶层命令；`af-forge issue --help` 显示问题处理操作。旧的连字符子命令不再作为 CLI 入口。
 
-MCP 使用相同命令路径：`workflow_help({"command":"issue"})` 查看分组，`workflow_help({"command":"issue verify"})` 查看操作参数；`workflow_run({"command":"client status"})` 执行操作。参数放在 `arguments` 数组中，例如 `{"command":"issue verify","arguments":["--issue-id","F152","--job-id","<job-id>"]}`。JSON 响应的 `command` 使用空格分隔路径；任务记录中的内部操作标识保持不变。
+MCP 使用相同命令路径：`workflow_help({"command":"issue"})` 查看分组，`workflow_help({"command":"issue verify"})` 查看操作参数；`workflow_run({"command":"issue claim"})` 执行操作。参数放在 `arguments` 数组中，例如 `{"command":"issue verify","arguments":["--issue-id","F152","--job-id","<job-id>"]}`。JSON 响应的 `command` 使用空格分隔路径；任务记录中的内部操作标识保持不变。

@@ -310,34 +310,18 @@ def test_deploy_publishes_only_verified_install(
 
     monkeypatch.setattr(workflow_common, "run", fake_run)
     monkeypatch.setattr(workflow_runtime, "probe", lambda *a: evidence)
-    starts = []
     if managed:
         cfg["platform"] = {}
         workflow_common.write(
             job / "request.json",
             {
                 "issue": {
-                    "id": "11111111-1111-4111-8111-111111111111",
+                    "id": "F152",
                     "lease_id": "lease",
                 }
             },
         )
 
-        def start_client(c):
-            import fcntl
-
-            with (tmp_path / "registry.lock").open("a") as guard:
-                fcntl.flock(guard, fcntl.LOCK_SH | fcntl.LOCK_NB)
-            assert (
-                workflow_runtime.current_deployment(c, job / "deployment.json")["state"]
-                == "success"
-            )
-            starts.append(True)
-            return {
-                "installed": {"af-mlir": {"sha256": evidence["pyautofuse"]["sha256"]}}
-            }
-
-        monkeypatch.setattr("af_forge.afx.client.start", start_client)
         monkeypatch.setattr(
             "af_forge.afx.platform.verify",
             lambda *a: pytest.fail("deploy must not submit verify"),
@@ -347,7 +331,6 @@ def test_deploy_publishes_only_verified_install(
             workflow_execution.deploy(cfg, job)
         assert workflow_common.read(tmp_path / "registry.json")["state"] == "invalid"
         assert not (job / "deployment.json").exists()
-        assert not starts
     else:
         workflow_execution.deploy(cfg, job)
         deployment = workflow_common.read(job / "deployment.json")
@@ -368,7 +351,6 @@ def test_deploy_publishes_only_verified_install(
         assert workflow_common.read(
             tmp_path / "registry.json"
         ) == workflow_runtime.deployment_reference(job / "deployment.json")
-        assert bool(starts) is managed
 
 
 def test_interrupted_sync_can_retry_and_remove_partial_files(

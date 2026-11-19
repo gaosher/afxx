@@ -113,12 +113,10 @@ def dependency_checks(module, scope):
                 "-c",
                 "from autofusex.fuzz.client.generation.sampling import SamplingConfig,decode; "
                 "from autofusex.fuzz.client.storage import ResultRepository; "
-                "from autofusex.fuzz.client.sync.retests import Consumer; "
-                "from autofusex.fuzz.client.sync.client import configure,verify_identity,once; "
                 "s=SamplingConfig(dynamic_variants=8).seed(0,dynamic=True); "
                 "assert decode(s)[0].dynamic_variants==8; "
-                "assert all(callable(f) for f in (ResultRepository.list,ResultRepository.detail,Consumer.tick,configure,verify_identity,once)); "
-                'print("AFX seed/results/repairs consumer interfaces available")',
+                "assert all(callable(f) for f in (ResultRepository.list,ResultRepository.detail)); "
+                'print("AFX seed/results interfaces available")',
             ],
         )
     )
