@@ -4,8 +4,8 @@
 
 安装后使用 `af-forge` 命令；`af-forge-mcp` 提供 stdio MCP 接口。命令和远端任务共用同一套业务模块，上传文件从已安装的 wheel 中取得，无需保留本工具源码。源码仓库由配置指定，命令可在任意目录执行。
 
+- [命令参考与参数矩阵](docs/af-forge-commands.md)
 - [配置说明与默认值](docs/CONFIGURATION.md) · [YAML 模板](af_forge/resources/config.example.yaml)
-- [本地依赖](docs/LOCAL_DEPENDENCIES.md)
 - [Agent 调用约定](docs/AGENT_USAGE.md) · [问题修复 Skill](skills/af-forge-repair/SKILL.md)
 - [设计与模块边界](docs/DESIGN.md)
 
@@ -40,29 +40,26 @@ af-forge/
 
 内部模块通过 `af_forge` 包导入；远端任务保留相同包结构。日常调用已安装的 `af-forge`；agent 也可通过 `af-forge-mcp` 使用同一组命令。
 
-查看全部命令：`af-forge help`（等同于 `af-forge --help`，无需配置或连接远端）。
+查看全部命令：`af-forge help`。
 
-## 准备配置与依赖
+## 安装与配置
+
+安装 Forge 并登录 NPU 服务：
 
 ```bash
-# 使用 Python 3.11+ 从 wheel 安装。
 python3 -m pip install /absolute/path/af_forge-0.1.0-py3-none-any.whl
-npm install -g npussh@0.2.4
 npussh login
+npussh list
+```
+
+生成本地配置，默认保存到 `~/.config/af-forge/config.yaml`：
+
+```bash
 af-forge config init --source /absolute/path/graph-autofusion
 ```
 
-默认使用 pip，本地无需安装 uv。PyYAML 和 MCP SDK 随 wheel 依赖自动安装；Git、Node.js 20+、npussh/npursync、OpenSSH 和 rsync 仍由系统提供。确保安装工具的 bin 目录在 PATH 中。
-
-如果希望将工具及其依赖隔离安装，也可以选择 `uv tool`：
-
-```bash
-uv tool install --python 3.11 /absolute/path/af_forge-0.1.0-py3-none-any.whl
-```
-
-远端 `init/update` 使用 uv 管理运行环境，与本地选择 pip 或 uv 安装工具无关。
-
-所有命令默认读取 `~/.config/af-forge/config.yaml`；仅 `--config` 显式覆盖，不随工作目录或配置环境变量改变。
+可用 `af-forge config init --output` 指定其他位置。使用非默认位置时，后续命令需显式传 `--config /absolute/path/config.yaml`。
+所有命令默认读取 `~/.config/af-forge/config.yaml`；仅 `--config` 显式覆盖。
 
 编辑生成的配置，填写连接环境、workflow_root 和远端 LLVM/LLD 路径。字段说明、路径推导和 Python/CANN 选项见 [配置文档](docs/CONFIGURATION.md)。
 
@@ -73,6 +70,10 @@ af-forge doctor
 ```
 
 doctor 校验配置、本地连接工具和 npussh 登录。远端依赖由 init/check 及各操作的预检负责。
+
+## 命令与参数矩阵
+
+完整命令速查、必填参数、默认值、ID 类型、dry-run 和 MCP 行为见 [命令参考](docs/af-forge-commands.md)。也可执行 `af-forge <命令> --help` 查看当前安装版本的参数。
 
 ## 初始化和更新环境
 
@@ -261,18 +262,47 @@ AFX_SOURCE=/absolute/path/Autofuse-Debugger python3 -m pytest tests/test_afx_con
 
 ## MCP 接入
 
-MCP 客户端配置示例（命令需在客户端 PATH 中，或使用 af-forge-mcp 的绝对路径）：
+MCP 是可选接入方式：agent 可直接执行 `af-forge` CLI，也可通过 MCP 调用同一套功能。`af-forge-mcp` 在本地由 agent 客户端启动，通过标准输入/输出（stdio）通信；不需要在 NPU 上启动 MCP 服务，也不需要配置 HTTP 地址。
+
+### 接入 Codex
+
+安装 Forge wheel 后，在本地终端执行：
+
+```bash
+# 查找 wheel 提供的 MCP 入口
+command -v af-forge-mcp
+
+# 将上一条输出的绝对路径填到这里
+codex mcp add af-forge -- /absolute/path/to/af-forge-mcp
+codex mcp list
+```
+
+默认使用 `~/.config/af-forge/config.yaml`。如果要固定使用另一份配置，注册时将参数传给 af-forge-mcp：
+
+```bash
+codex mcp add af-forge -- /absolute/path/to/af-forge-mcp --config /absolute/path/config.yaml
+```
+
+两种注册方式选一种。注册后，在加载了该 MCP 的 agent 会话里请求：“使用 af-forge MCP 查看 deploy 命令帮助”。应调用 `af_forge_help`，无需执行真实部署。`codex mcp list` 只确认注册信息，工具调用成功才表示接入可用。
+
+绝对路径用于让客户端找到可执行文件；若只写 `af-forge-mcp`，客户端进程的 PATH 必须包含它所在的目录。实际远端操作还要求客户端环境能找到 npussh 等连接工具。
+
+### 其他支持 stdio 的客户端
+
+按客户端自己的 MCP 配置格式填写可执行文件路径。采用 mcpServers JSON 格式的客户端可参考下例；这段 JSON 不用于 Codex 的 config.toml：
 
 ```json
 {
   "mcpServers": {
     "af-forge": {
-      "command": "af-forge-mcp",
-      "args": ["--config", "/absolute/path/config.yaml"]
+      "command": "/absolute/path/to/af-forge-mcp",
+      "args": []
     }
   }
 }
 ```
+
+如需指定其他配置，将 args 改为 `["--config", "/absolute/path/config.yaml"]`。无需手动在终端常驻运行 af-forge-mcp，客户端负责启动它。
 
 提供两个工具：`af_forge_help(command)` 查询命令参数；`af_forge_run(command, arguments, config)` 执行命令并返回原有 JSON 响应，失败同时标记 MCP `isError`。例如 `{"command":"deploy","arguments":["--request-id","fix-001"]}`，随后用 `{"command":"status","arguments":["--job-id","<job-id>"]}` 查询。`arguments` 是参数数组，不经过 shell。
 
@@ -288,19 +318,6 @@ uv pip install -e '.[dev]'
 ```
 
 产物位于 `dist/`。wheel 包含远端运行模块、包源配置和 YAML 模板，不包含用户配置、token、源码快照或本地状态。本工具沿用 [CANN Open Software License Agreement Version 2.0](LICENSE)。
-
-### 命令分组
-
-顶层命令按用途分为四类，命令名称保持不变：
-
-- **远端环境**：`env init`、`env update`、`env check`
-- **远端工作流**：`deploy`、`replay`、`status`
-- **问题验证**：`issue claim|preview|detail|tasks|regression-preview|status|wait|verify|renew|summarize`、`execution show`
-- **本地操作**：`doctor`、`config init`
-
-`af-forge help` 显示带分类前缀的顶层命令；`af-forge issue --help` 显示问题处理操作，`af-forge config --help` 显示配置操作。旧的连字符子命令不再作为 CLI 入口。
-
-MCP 使用相同命令路径：`af_forge_help({"command":"issue"})` 查看分组，`af_forge_help({"command":"issue verify"})` 查看操作参数；`af_forge_run({"command":"issue claim"})` 执行操作。参数放在 `arguments` 数组中，例如 `{"command":"issue verify","arguments":["--issue-id","F152","--job-id","<job-id>"]}`。JSON 响应的 `command` 使用空格分隔路径；任务记录中的内部操作标识保持不变。
 
 ## 问题修复 Skill
 
