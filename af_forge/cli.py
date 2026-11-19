@@ -191,7 +191,6 @@ def parse_arguments():
             cmd.add_argument("--sha256", help="hash from previous read; reject changed file")
         if name == "status":
             detail = cmd.add_mutually_exclusive_group()
-            detail.add_argument("--full", action="store_true", help="download complete reports to local /tmp; return path and size")
             detail.add_argument("--attempt", help="read one AFX attempt (compact fields by default)")
             detail.add_argument("--wait", action="store_true", help="return only changes or terminal state")
             cmd.add_argument("--fields", help="comma-separated attempt fields; supports dotted paths")
@@ -344,8 +343,6 @@ def main():
         fields = args.fields.split(",") if args.fields is not None else None
         workflow_common.require_code(fields is None or all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", name) for name in fields),
                                      "INVALID_ARGUMENT", "invalid attempt fields")
-        if args.full:
-            return workflow_jobs.download_report(c, args.job)
         if args.wait:
             return workflow_jobs.wait_status(c, args.job, since=args.since,
                                              timeout=args.timeout if args.timeout is not None else 30)
@@ -361,7 +358,7 @@ def main():
             cleanup = {"state": "failed", "error": str(error)}
         if cleanup is not None:
             data["local_snapshot_cleanup"] = cleanup
-        return data
+        return workflow_jobs.localize_replay(c, args.job, data) if args.attempt is None else data
     values = []
     if args.command == "replay":
         if args.job:
@@ -431,6 +428,8 @@ def main():
                 status.get("error", args.command + " 未确认成功"),
                 data,
             )
+    if args.command == "replay" and data.get("state") in {"success", "failed"}:
+        return workflow_jobs.localize_replay(c, data["job"], workflow_jobs.query_status(c, data["job"]))
     return data
 
 

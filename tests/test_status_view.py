@@ -114,36 +114,6 @@ def test_default_attempt_is_small_and_fields_are_explicit(report):
         status_view(report, attempt_id='af-1', fields=['typo'])
 
 
-def test_full_download_returns_only_private_tmp_file(report, monkeypatch):
-    from pathlib import Path
-    monkeypatch.setattr(jobs,'query_status',lambda *a,**kw:status_view(report, full=True))
-    result=jobs.download_report({}, 'a'*32)
-    path=Path(result['path'])
-    try:
-        assert path.parent==Path('/tmp') and set(result)=={'path','size_bytes'}
-        assert path.stat().st_mode & 0o777 == 0o600
-        assert path.stat().st_size==result['size_bytes']
-        assert json.loads(path.read_text())['details']['report.json']['attempts']==report['report.json']['attempts']
-    finally:
-        path.unlink()
-
-
-def test_full_cli_does_not_emit_report(report, monkeypatch, capsys):
-    from pathlib import Path
-    monkeypatch.setattr(sys,'argv',['af-forge','status','--job-id','a'*32,'--full'])
-    monkeypatch.setattr(config,'config',lambda _: {})
-    monkeypatch.setattr(jobs,'local_preflight',lambda *a:None)
-    monkeypatch.setattr(jobs,'query_status',lambda *a,**kw:status_view(report,full=True))
-    assert cli.cli()==0
-    out=capsys.readouterr().out
-    result=json.loads(out)['data']
-    try:
-        assert len(out)<500 and 'large graph' not in out
-        assert set(result)=={'path','size_bytes'}
-    finally:
-        Path(result['path']).unlink()
-
-
 @pytest.mark.parametrize('scenario', ['changed','timeout','terminal','attention','since'])
 def test_wait_only_returns_changes_or_end(monkeypatch, scenario):
     import time

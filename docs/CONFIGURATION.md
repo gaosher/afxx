@@ -148,4 +148,4 @@ AF 图、逐 pass MLIR 和生成代码位于结果目录 dump/；GE 图位于 du
 
 `--save` 始终保存 AFX 结果到 results.sqlite，与 dump 独立。dump 不自动保存所有输入/输出张量，也不强制同步运行或禁用缓存。性能验收应关闭 dump，避免调试开销影响结论。完整收集标准见 [复现证据清单](../skills/af-forge-repair/references/replay-evidence.md)。
 
-Replay 结束（包括失败）自动将现场文件清单和文本摘录写入 `report.json.evidence`，通过 `evidence list` 按需读取；`status --full` 下载报告到本机 /tmp，只返回路径和大小；默认 status 只返回概要。包括绝对路径、类型、大小、读取错误和截断标记；上限为 128 个文件、单文件 2 KiB、总文本 64 KiB。日志返回末尾，其他文本返回开头。完整文件保留远端，不自动下载二进制或全部 dump；按返回路径可继续读取。缺失目录会明确标记，不能把开启 dump 当作文件已生成。
+replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/af-forge-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 下载覆盖结果目录和 job 的诊断目录，不受报告摘录的 128 文件/文本长度限制；不跟随符号链接，不下载含凭据的 sync.json，跳过原因记在 evidence.json。开启 dump 不保证每个阶段都生成文件。

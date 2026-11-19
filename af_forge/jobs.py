@@ -316,6 +316,7 @@ def inspect():
   except (OSError,ValueError):
    data.update(state='unknown',error_code='LAUNCH_UNCERTAIN',error='inspect logs; do not resubmit with a new request ID')
  data.update(log=str(p/'job.log'))
+ if (p/'request.json').exists():data['task_type']=json.loads((p/'request.json').read_text()).get('command')
  if (p/'source.json').exists():
   cleanup=json.loads((p/'source.json').read_text()).get('snapshot_cleanup')
   if cleanup is not None:data['snapshot_cleanup']=cleanup
@@ -554,25 +555,6 @@ def query_status(c, job_id, *, full=False, attempt_id=None, fields=None):
     return data
 
 
-def download_report(c, job_id):
-    """Keep full JSON out of CLI/MCP output; use a private local temporary file."""
-    import tempfile
-    data = query_status(c, job_id, full=True)
-    workflow_common.require_code(data["state"] != "not_found", "JOB_NOT_FOUND", "未找到任务：" + job_id)
-    path = None
-    try:
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir="/tmp",
-                prefix="af-forge-" + job_id + "-", suffix=".json", delete=False) as output:
-            path = Path(output.name)
-            json.dump(data, output, ensure_ascii=False)
-            output.write("\n")
-        return {"path": str(path), "size_bytes": path.stat().st_size}
-    except BaseException:
-        if path is not None:
-            path.unlink(missing_ok=True)
-        raise
-
-
 def status_cursor(data):
     return workflow_common.digest({key: value for key, value in data.items()
                                    if key not in {"cursor", "snapshot_cleanup", "local_snapshot_cleanup"}})
@@ -591,7 +573,10 @@ def wait_status(c, job_id, *, since=None, timeout=30):
         workflow_common.require_code(data["state"] != "not_found", "JOB_NOT_FOUND", "未找到任务：" + job_id)
         cursor = status_cursor(data)
         if data["state"] in {"success", "failed", "unknown"}:
-            return dict(data, cursor=cursor, event="terminal" if data["state"] != "unknown" else "attention")
+            result = localize_replay(c, job_id, data)
+            if "evidence_path" in result:
+                return result
+            return dict(result, cursor=cursor, event="terminal" if data["state"] != "unknown" else "attention")
         if baseline is not None and cursor != baseline:
             return dict(data, cursor=cursor, event="changed")
         baseline = cursor
@@ -599,3 +584,11 @@ def wait_status(c, job_id, *, since=None, timeout=30):
         if remaining <= 0:
             return {"job_id": job_id, "event": "timeout", "cursor": cursor}
         time.sleep(min(2, remaining))
+
+
+def localize_replay(c, job_id, data):
+    if data.get("state") not in {"success", "failed"} or not ("replay" in data or data.get("task_type") == "replay"):
+        return data
+    from af_forge import evidence_bundle
+    directory = evidence_bundle.download(c, job_id, remote)
+    return evidence_bundle.terminal_result(directory, dict(data, job_id=job_id))

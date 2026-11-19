@@ -32,7 +32,7 @@
 {"schema_version":1,"ok":false,"command":"doctor","data":null,"error":{"code":"AUTH_REQUIRED","message":"请执行 npussh login"}}
 ```
 
-退出码 0 表示调用成功，2 表示请求失败。异步提交成功后继续查询远端任务。init/update 的最终响应为摘要，详细检查报告通过 status --full 下载到本机 /tmp。平台等待失败时 data 保留终态详情；等待超时时仅保留 issue_id、round_no 和 event=timeout。
+退出码 0 表示调用成功，2 表示请求失败。异步提交成功后继续查询远端任务。init/update 的最终响应为摘要，详细检查报告保存在远端任务目录。平台等待失败时 data 保留终态详情；等待超时时仅保留 issue_id、round_no 和 event=timeout。
 
 ## 部署和任务轮询
 
@@ -43,7 +43,7 @@ af-forge status --job-id <job-id>
 
 提交前生成并保存 request-id，允许 1–128 位字母、数字、下划线、点或连字符。init/update/deploy/replay/check支持此参数。省略时自动生成，但若整个响应丢失，将无法从响应取回该值。
 
-任务状态包括 prepared、queued、running、success、failed、unknown。prepared 为 dry-run 本地产物。status 默认只返回概要；完整报告使用 status --full 下载，单个执行使用 status --attempt --fields。等待任务使用 status --wait --since，避免重复概要进入上下文；阶段变化或到达终态时汇报。unknown 时检查进程和日志。
+任务状态包括 prepared、queued、running、success、failed、unknown。prepared 为 dry-run 本地产物。非 replay 终态的 status 返回概要；replay 终态自动下载全量证据，单个执行使用 status --attempt --fields。等待任务使用 status --wait --since，避免重复概要进入上下文；阶段变化或到达终态时汇报。unknown 时检查进程和日志。
 
 init/update 默认跟随远端日志，Ctrl+C 停止本地查看，任务仍可通过 status 查询。
 
@@ -154,10 +154,8 @@ MCP 对应 command 为 `evidence list` / `evidence read`，参数与 CLI 相同�
 ## Status 概要、字段查询与等待
 
 ```bash
-# 默认概要附 cursor，供下一次等待使用。
+# 运行中返回概要和 cursor；replay 终态自动下载全量现场。
 af-forge status --config "$CONFIG" --job-id <job-id>
-# 完整报告下载到本机 /tmp，仅返回 data.path 和 data.size_bytes。
-af-forge status --config "$CONFIG" --job-id <job-id> --full
 # 默认 attempt 只返回简短身份、状态、错误摘要；详细字段需显式选择。
 af-forge status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id>
 af-forge status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id> \
@@ -169,12 +167,12 @@ af-forge status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-i
 af-forge status --config "$CONFIG" --job-id <job-id> --wait --since <cursor> --timeout 30
 ```
 
-默认 data 返回 job_id、state、phase（若有）、退出码/错误、日志路径、available_details 和 cursor。replay 包含 passed、判定错误、deployment_job_id、results_dir、attempt_count、failed_attempt_count、失败索引（attempt_id/shape_indices）和 evidence 数量/截断/采集错误数；失败索引及判定错误最多 20 项，有独立截断标记。dependencies 仅返回 passed 和 failed_checks。
+replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/af-forge-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。
 
-`--full`、`--attempt`、`--wait` 互斥。full 文件为随机命名的 `/tmp/af-forge-<job-id>-*.json`，权限 0600，不覆盖已有文件；文件内 details 按原报告名组织。远端报告保持不变。不要将下载文件整个 cat 回上下文，按所需键本地提取；使用完自行删除，/tmp 不承担长期归档。
+非 replay 终态仍返回概要和 cursor；`--attempt` 与 `--wait` 互斥。完整本地文件布局、缓存和失败重试规则见 [复现证据清单](../skills/af-forge-repair/references/replay-evidence.md#replay-自动返回的证据)。按需提取文件内容，不要整体读取到上下文。
 
 attempt 默认字段为 id、seed_short、backend、status、error_stage、error_summary（缺失的可选字段省略），字符串最多 512 字符，裁剪字段列于 attempt_truncated_fields。`--fields` 使用逗号分隔的字段或字典点路径，例如 metadata.graph、contexts.environment、diagnostic_view.summary、shape_results；选择结果以完整字段路径为键。显式选择的大字段会完整返回，按定位需要逐次读取。未知执行返回 ATTEMPT_NOT_FOUND，未知字段返回 ATTEMPT_FIELD_NOT_FOUND，不默默忽略拼写错误。
 
-wait 默认 30 秒、允许 (0,50] 秒，CLI/MCP 均返回一次 JSON。携带 since 时与上次概要比较；未传时以首次查询为基线等待下一次变化。event=changed/terminal 返回新概要和 cursor；state=unknown 返回 event=attention，需处理进程不确定状态。没有变化时只返回 job_id、event=timeout、cursor，表示等待窗口结束而非任务失败。下一次继续使用返回的 cursor；不重复提交原任务。网络请求本身的超时独立于等待窗口。
+wait 默认 30 秒、允许 (0,50] 秒，CLI/MCP 均返回一次 JSON。携带 since 时与上次概要比较；未传时以首次查询为基线等待下一次变化。event=changed/terminal 返回新概要和 cursor；replay 终态直接返回上述 evidence_path 和 failures，不附 event/cursor；state=unknown 返回 event=attention，需处理进程不确定状态。没有变化时只返回 job_id、event=timeout、cursor，表示等待窗口结束而非任务失败。下一次继续使用返回的 cursor；不重复提交原任务。网络请求本身的超时独立于等待窗口。
 
-公开任务 ID 统一为 job_id，提交结果不重复返回 job 别名或嵌套 status。state 与 passed 含义不同；外层 ok 只表示查询成功。概要和字段投影在远端完成，避免轮询传回大图/日志。文件清单用 evidence list，文本用 evidence read；关联只保存 attempt_id 引用。
+公开任务 ID 统一为 job_id，提交结果不重复返回 job 别名或嵌套 status。state 与 passed 含义不同；外层 ok 只表示查询成功。概要和字段投影在远端完成，避免轮询传回大图/日志。replay 终态优先读取本地证据文件；evidence list/read 保留为按需远端查询入口。

@@ -15,7 +15,7 @@ from af_forge.afx.replay import failure_index
 
 def status_view(data, full=False, attempt_id=None, fields=None):
     names = ("report.json", "python-dependencies.json", "deployment.json", "platform.json", "result.json")
-    task_keys = ("job_id", "state", "phase", "pid", "exit_code", "error_code", "error", "log", "artifact", "snapshot_cleanup")
+    task_keys = ("job_id", "task_type", "state", "phase", "pid", "exit_code", "error_code", "error", "log", "artifact", "snapshot_cleanup")
     out = {key: data[key] for key in task_keys if key in data}
     if "job" in data:
         out["job_id"] = data["job"]

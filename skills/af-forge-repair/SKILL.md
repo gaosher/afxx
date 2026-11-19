@@ -62,7 +62,7 @@ af-forge replay --config "$CONFIG" --job-id <基线deploy-job-id> --seed <原始
 af-forge status --config "$CONFIG" --job-id <replay-job-id>
 ```
 
-异步提交成功不等于复现完成；先读取 `data.state`、`data.replay.passed` 和失败 attempt 索引；对失败 ID 先用 `status --attempt <id>` 看简短摘要，再用 `--fields error_stage,error_summary,diagnostic_view.summary,shape_results` 选择必要信息。图/环境分别按需选 metadata.graph 或 contexts.environment。`status --full` 仅下载到本机 /tmp，返回路径和大小；需要包身份/依赖详情时在本地提取文件中的相应字段，禁止把完整 JSON 整体读回上下文。用 `evidence list` 获取文件清单、文本摘录及缺失/截断标记，清单截断时用 `evidence list --job-id ... --offset ...` 续页，文本截断时用 `evidence read --job-id ... --path ... --offset ... --sha256 ...` 续读（均传 `$CONFIG`）；不要自行拼 SSH 命令。按 attempt_id 连接执行详情与明确关联的文件；unassociated 不代表属于当前失败 Shape。按复现证据清单记录输入、环境和包身份、失败阶段、完整日志与对应图/IR/代码的路径，并检查文件实际存在。缺失或截断的证据注明原因，不将打开开关视为已取得全部产物。保持原输入和精度语义，不能换 seed 或放宽正确性判定制造通过。
+异步提交成功不等于复现完成；用 status/wait 等到 success/failed，Forge 自动下载全量现场到 /tmp，返回 evidence_path 和失败基础信息。先读取本地 evidence.json 的 files/skipped，再按需读取 job/report.json 的 runtime、attempts 和诊断字段及失败对应日志/IR；不要将整份报告或全部 dump 放入上下文。使用清单中的 local_path，按报告中的明确关联连接 attempt 与产物，不按文件名猜测 Shape 归属。需要额外执行信息时用 `status --attempt <id> --fields ...`。下载失败时重查同一 job，不重新 replay；缓存完整则复用。按复现证据清单记录输入、环境、包身份、失败阶段和实际文件路径；缺失证据注明原因。保持原输入和精度语义，不能换 seed 或放宽正确性判定制造通过。
 
 非 nnsmith 用例使用平台给出的复现方式和目标环境，不强行传入 Forge seed 接口。失败无法复现时，先比较环境、包版本和用例条件；明确“未复现”及缺失证据，不直接宣称修复。
 
@@ -79,7 +79,7 @@ af-forge deploy --config "$CONFIG" --issue-id <issue-id> --request-id <本轮唯
 af-forge status --config "$CONFIG" --job-id <deploy-job-id>
 ```
 
-部署和 replay 等待时，保存首次 status 的 cursor，使用 `status --wait --since <cursor> --timeout 30`（带同一配置和 job ID）；无变化只得到 timeout 回执，继续沿用返回 cursor，不重复读取概要或提交任务。无 cursor 时该命令以首次查询为基线。event=attention 表示状态不确定，应排查进程。等待 job state=success，并保留部署记录和源码/包身份。构建或安装失败先处理对应失败，不进入 verify。候选部署后可用同一原始 seed 快速 replay；平台验证仍是下一步独立验收。
+部署和 replay 等待时，保存首次 status 的 cursor，使用 `status --wait --since <cursor> --timeout 30`（带同一配置和 job ID）；无变化只得到 timeout 回执，继续沿用返回 cursor，不重复读取概要或提交任务。无 cursor 时该命令以首次查询为基线。replay 终态直接返回 state、evidence_path、failures，不再需要 cursor。event=attention 表示状态不确定，应排查进程。等待 job state=success，并保留部署记录和源码/包身份。构建或安装失败先处理对应失败，不进入 verify。候选部署后可用同一原始 seed 快速 replay；平台验证仍是下一步独立验收。
 
 环境一致性 WARNING 不会自动阻止 Forge；agent 应读懂差异，并确认候选环境能用于该问题。不能把带差异的配置视为精确复现证据。平台复测执行期间不覆盖它使用的候选环境。
 

@@ -104,7 +104,7 @@ def test_mcp_stdio(tmp_path):
             assert not result.isError
             assert result.structuredContent["ok"]
             status_help = await session.call_tool("af_forge_help", {"command": "status"})
-            assert all(option in status_help.content[0].text for option in ("--full", "--attempt", "--fields", "--wait", "--since"))
+            assert all(option in status_help.content[0].text for option in ("--attempt", "--fields", "--wait", "--since"))
             query_commands = {
                 "issue detail": ["--issue-id", "F152"],
                 "issue tasks": ["--issue-id", "F152", "--round-no", "2"],
