@@ -10,7 +10,7 @@ af-forge config init --source /absolute/path/graph-autofusion --output ~/.config
 
 `config init` 自动填写 `local.source_dir`，保留模板注释并拒绝覆盖已有文件。填写 `connection.environment`、`workflow_root`、`build.llvm_build_dir` 和 `build.lld_bin`；根据需要修改 Python/CANN 选项。私人配置不要纳入版本控制。
 
-`af-forge env init` 和 `af-forge env update` 必须显式传入 `--config`，不会使用环境变量或默认路径。其他命令的配置按 `--config`、`AF_FORGE_CONFIG`、当前目录 `af-forge-config.yaml`、用户配置目录 `~/.config/af-forge/config.yaml` 的顺序选择（支持 `XDG_CONFIG_HOME`）。源码仓库由 `local.source_dir` 指定，命令可在任意目录执行。
+所有命令（包括 env init/update）默认读取 `~/.config/af-forge/config.yaml`，仅显式 `--config` 覆盖。不读取 AF_FORGE_CONFIG、XDG_CONFIG_HOME 或工作目录配置。`config init --source <源码目录>` 在默认位置生成配置；`--output` 可指定其他位置，已有文件不会覆盖。
 
 配置使用 YAML 普通映射、列表和标量。日期、版本号使用带引号的字符串。加载器拒绝重复键、自定义标签、合并键及不支持的数据类型。路径填写绝对路径，配置中的 `~`、`$HOME` 不展开。远端运行路径采用字母、数字及 `_./+-`，避免空格和 shell 元字符。
 
@@ -131,7 +131,7 @@ deploy/replay 的配置、当前环境清单与实际包版本不一致时，输
 
 恢复使用内嵌 Python 依赖锁、实际 Daily 日期、CANN 发布号及包哈希。基础 Python 版本必须匹配，包源或共享 wheel 需仍可访问。外部 CANN 缺少安装收据时，只记录可探测的版本信息，恢复需准备相应安装。源码、seed 和运行结果按各自产物保存。
 
-MCP 调用 init/update 时，也必须显式指定配置：通过调用的 `config` 字段、`arguments` 中的 `--config`，或启动 `af-forge-mcp --config ...` 提供。
+MCP 默认读取同一固定配置；需要覆盖时，通过调用的 `config` 字段、`arguments` 中的 `--config`，或启动 `af-forge-mcp --config ...` 提供。
 
 ## Replay 定位采集
 

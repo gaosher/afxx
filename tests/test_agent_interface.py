@@ -158,9 +158,9 @@ def test_doctor_has_no_task_or_remote_side_effect(
     script = tmp_path / "tool" / "af_forge/cli.py"
     monkeypatch.setattr(w, "__file__", str(script))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("AF_FORGE_CONFIG", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
     p = (
-        tmp_path / "af-forge-config.yaml"
+        tmp_path / ".config/af-forge/config.yaml"
         if use_default
         else tmp_path / "custom.yaml"
     )

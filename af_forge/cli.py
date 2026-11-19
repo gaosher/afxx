@@ -155,8 +155,8 @@ def parse_arguments():
         cmd.set_defaults(command=name)
         cmd.add_argument(
             "--config",
-            required=name in ("init", "update"),
-            default=None if name in ("init", "update") else workflow_config.default_config_path(),
+            default=workflow_config.default_config_path(),
+            help="配置文件（默认 ~/.config/af-forge/config.yaml）",
         )
         if name in (*env_jobs, *jobs) or name == "doctor":
             cmd.add_argument("--dry-run", action="store_true")
@@ -220,7 +220,8 @@ def parse_arguments():
     template = config_commands.add_parser("init", help="生成带注释的配置模板", allow_abbrev=False)
     template.set_defaults(command="config-init")
     template.add_argument("--source", required=True, help="local graph-autofusion repository")
-    template.add_argument("--output", default="af-forge-config.yaml")
+    template.add_argument("--output", default=workflow_config.default_config_path(),
+                          help="输出路径（默认 ~/.config/af-forge/config.yaml；不覆盖已有文件）")
     commands.add_parser("help", help="显示全部命令及功能说明", allow_abbrev=False)
     parser.set_defaults(
         issue_id=None,
@@ -266,6 +267,10 @@ def main():
         c = workflow_config.config(args.config)
     except workflow_common.WorkflowError:
         raise
+    except FileNotFoundError as error:
+        raise workflow_common.WorkflowError(
+            "CONFIG_INVALID", f"配置文件不存在：{args.config}；请运行 af-forge config init --source <源码目录>，或用 --config 指定已有配置。"
+        ) from error
     except (ValueError, OSError, TypeError) as error:
         raise workflow_common.WorkflowError("CONFIG_INVALID", str(error)) from error
     if args.command in ("init", "update"):

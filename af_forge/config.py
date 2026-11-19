@@ -472,15 +472,9 @@ def platform_settings(c):
 
 
 def default_config_path():
-    """Resolve user configuration independently of the installed package."""
-    import os
+    """Return the fixed per-user configuration path."""
+    return Path.home() / ".config" / "af-forge" / "config.yaml"
 
-    if os.environ.get("AF_FORGE_CONFIG"):
-        return Path(os.environ["AF_FORGE_CONFIG"]).expanduser()
-    local = Path.cwd() / "af-forge-config.yaml"
-    if local.is_file():
-        return local
-    return Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "af-forge" / "config.yaml"
 
 
 def write_template(source, output):

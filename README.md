@@ -49,7 +49,7 @@ af-forge/
 python3 -m pip install /absolute/path/af_forge-0.1.0-py3-none-any.whl
 npm install -g npussh@0.2.4
 npussh login
-af-forge config init --source /absolute/path/graph-autofusion --output ~/.config/af-forge/config.yaml
+af-forge config init --source /absolute/path/graph-autofusion
 ```
 
 默认使用 pip，本地无需安装 uv。PyYAML 和 MCP SDK 随 wheel 依赖自动安装；Git、Node.js 20+、npussh/npursync、OpenSSH 和 rsync 仍由系统提供。确保安装工具的 bin 目录在 PATH 中。
@@ -61,6 +61,8 @@ uv tool install --python 3.11 /absolute/path/af_forge-0.1.0-py3-none-any.whl
 ```
 
 远端 `init/update` 使用 uv 管理运行环境，与本地选择 pip 或 uv 安装工具无关。
+
+所有命令默认读取 `~/.config/af-forge/config.yaml`；仅 `--config` 显式覆盖，不随工作目录或配置环境变量改变。
 
 编辑生成的配置，填写连接环境、workflow_root 和远端 LLVM/LLD 路径。字段说明、路径推导和 Python/CANN 选项见 [配置文档](docs/CONFIGURATION.md)。
 
@@ -75,10 +77,10 @@ doctor 校验配置、本地连接工具和 npussh 登录。远端依赖由 init
 ## 初始化和更新环境
 
 ```bash
-af-forge env init --config ~/.config/af-forge/config.yaml
+af-forge env init
 af-forge env check
 # 修改配置后更新 torch_npu / AFX
-af-forge env update --config ~/.config/af-forge/config.yaml
+af-forge env update
 ```
 
 init 自动上传配置并准备 Python 3.11、CANN 和专用 venv。update 更新 torch_npu/AFX，保留现有 CANN。init/update 默认跟随远端日志；`--detach` 仅提交任务，后续用 status 查询。

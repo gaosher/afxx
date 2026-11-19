@@ -20,15 +20,13 @@ from mcp.client.stdio import stdio_client
 from af_forge import config
 
 
-def test_config_priority(tmp_path, monkeypatch):
+def test_config_fixed_home_ignores_cwd_and_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("AF_FORGE_CONFIG", raising=False)
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "user"))
-    assert config.default_config_path() == tmp_path / "user/af-forge/config.yaml"
+    monkeypatch.setenv("AF_FORGE_CONFIG", str(tmp_path / "other.yaml"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "other"))
     (tmp_path / "af-forge-config.yaml").touch()
-    assert config.default_config_path() == tmp_path / "af-forge-config.yaml"
-    monkeypatch.setenv("AF_FORGE_CONFIG", str(tmp_path / "explicit.yaml"))
-    assert config.default_config_path() == tmp_path / "explicit.yaml"
+    assert config.default_config_path() == tmp_path / ".config/af-forge/config.yaml"
 
 
 def test_template_preserves_comments_and_does_not_overwrite(tmp_path):
@@ -45,7 +43,7 @@ def test_mcp_stdio(tmp_path):
         parameters = StdioServerParameters(
             command=sys.executable,
             args=["-m", "af_forge.mcp_server"],
-            env=dict(os.environ),
+            env=dict(os.environ, HOME=str(tmp_path)),
         )
         async with (
             stdio_client(parameters) as (read, write),
@@ -75,7 +73,7 @@ def test_mcp_stdio(tmp_path):
             for command in ("env init", "env update"):
                 no_config = await session.call_tool("af_forge_run", {"command": command})
                 assert no_config.isError
-                assert no_config.structuredContent["error"]["code"] == "INVALID_ARGUMENT"
+                assert no_config.structuredContent["error"]["code"] == "CONFIG_INVALID"
                 explicit = await session.call_tool("af_forge_run", {
                     "command": command, "config": str(tmp_path / "missing.yaml"),
                 })
@@ -202,29 +200,33 @@ def test_config_init_uses_default_filename_without_loading_config(tmp_path, monk
     import json
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(sys, "argv", ["af-forge", "config", "init", "--source", str(tmp_path)])
     monkeypatch.setattr(config, "config", lambda *_: pytest.fail("must not load config"))
     assert cli.cli() == 0
     result = json.loads(capsys.readouterr().out)
     assert result["command"] == "config init"
-    assert result["data"]["config"] == str(tmp_path / "af-forge-config.yaml")
-    assert config.default_config_path() == tmp_path / "af-forge-config.yaml"
+    assert result["data"]["config"] == str(tmp_path / ".config/af-forge/config.yaml")
+    assert config.default_config_path() == tmp_path / ".config/af-forge/config.yaml"
 
 
 
-@pytest.mark.parametrize("command", ["init", "update"])
-def test_env_requires_explicit_config_even_with_defaults(tmp_path, monkeypatch, capsys, command):
-    import json
+@pytest.mark.parametrize("command", ["init", "update", "check"])
+def test_env_default_and_explicit_config(tmp_path, monkeypatch, command):
     from af_forge import cli
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "af-forge-config.yaml").write_text("{}")
-    monkeypatch.setenv("AF_FORGE_CONFIG", str(tmp_path / "af-forge-config.yaml"))
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(sys, "argv", ["af-forge", "env", command])
-    assert cli.cli() == 2
-    result = json.loads(capsys.readouterr().out)
-    assert result["error"]["code"] == "INVALID_ARGUMENT"
-    assert "--config" in result["error"]["message"]
+    assert cli.parse_arguments().config == tmp_path / ".config/af-forge/config.yaml"
     monkeypatch.setattr(sys, "argv", ["af-forge", "env", command, "--config", "/chosen/config.yaml"])
     assert cli.parse_arguments().config == "/chosen/config.yaml"
-    monkeypatch.setattr(sys, "argv", ["af-forge", "env", "check"])
-    assert cli.parse_arguments().config == tmp_path / "af-forge-config.yaml"
+
+
+def test_missing_default_config_guidance(tmp_path, monkeypatch, capsys):
+    import json
+    from af_forge import cli
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(sys, "argv", ["af-forge", "env", "init"])
+    assert cli.cli() == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error"]["code"] == "CONFIG_INVALID"
+    assert "af-forge config init" in result["error"]["message"]

@@ -101,8 +101,8 @@ def create_server(default_config=None):
         --wait --since <cursor> returns changes/end or a tiny timeout receipt (default 30 seconds).
 
         init/update are detached; use status --job-id to poll. Public commands only.
-        init/update require explicit config (tool config, --config argument, or server --config).
-        Other commands with missing config use AF_FORGE_CONFIG, cwd/af-forge-config.yaml, then the user config directory.
+        All commands default to ~/.config/af-forge/config.yaml.
+        Override via tool config, --config argument, or server --config.
         """
         arguments = list(arguments or [])
         path = config if config is not None else default_config

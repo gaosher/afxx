@@ -1,6 +1,6 @@
 # Agent 调用约定
 
-入口为 `af-forge`。配置按 `--config`、`AF_FORGE_CONFIG`、当前目录 `af-forge-config.yaml`、用户配置目录 `~/.config/af-forge/config.yaml` 的顺序选择（支持 `XDG_CONFIG_HOME`）。配置字段和操作顺序见 [README](../README.md)，本文件约定响应、状态、重试和完成条件。
+所有命令（包括 env init/update）默认读取 `~/.config/af-forge/config.yaml`，仅显式 `--config` 覆盖。不读取 AF_FORGE_CONFIG、XDG_CONFIG_HOME 或工作目录配置。`config init --source <源码目录>` 在默认位置生成配置；`--output` 可指定其他位置，已有文件不会覆盖。
 
 ## 命令与完成条件
 

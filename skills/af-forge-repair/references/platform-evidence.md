@@ -4,7 +4,7 @@
 
 ## 获取证据
 
-命令均带本次选定的 `--config "$CONFIG"`；MCP 使用 `af_forge_run` 的 config 字段和相同命令路径。这些只读操作无需先领取问题，也不连接 NPU。
+命令默认使用固定用户配置；仅使用非默认配置时追加 `--config <配置绝对路径>`，MCP 对应传 config 字段。这些只读操作无需先领取问题，也不连接 NPU。
 
 | 目的 | Forge 命令 | 使用方式 |
 |---|---|---|
@@ -36,6 +36,6 @@ Forge 的 verify 使用配置 venv/CANN 调用 AFX 官方 CLI，启动记录与�
 
 ## 检视后的独立总结提交
 
-仅在总结经过人工检视且用户明确要求提交时，使用 `af-forge issue summarize --config "$CONFIG" --issue-id <issue-id> --summary-file <本地summary.yaml> --request-id <本次总结请求ID>`；不是修复循环的自动步骤。直接使用修复流程生成并检视过的 summary.yaml，无需再转换格式。YAML 是 Forge 的本地输入约定，平台实际接收 JSON。YAML 直接包含 kind、title、symptom、root_cause、solution，可用 fix_ref 记录真实修复 commit，用 body_md 保存多行正文。
+仅在总结经过人工检视且用户明确要求提交时，使用 `af-forge issue summarize --issue-id <issue-id> --summary-file <本地summary.yaml> --request-id <本次总结请求ID>`；不是修复循环的自动步骤。直接使用修复流程生成并检视过的 summary.yaml，无需再转换格式。YAML 是 Forge 的本地输入约定，平台实际接收 JSON。YAML 直接包含 kind、title、symptom、root_cause、solution，可用 fix_ref 记录真实修复 commit，用 body_md 保存多行正文。
 
 需要本地领取记录、有效租约、knowledge 权限及平台 summarizing 状态。网络重试复用原文件和 request-id；内容或租约改变不能复用旧键。只有返回 status=resolved 和 knowledge_id 才报告平台归档完成。此命令会发布知识，而非保存待审草稿。
