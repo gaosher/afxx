@@ -449,6 +449,7 @@ def poll(c, issue_id, round_no):
 def wait(c, issue_id, round_no, timeout):
     deadline = time.monotonic() + timeout
     lease = claimed(c, issue_id)
+    previous = None
     while True:
         result = poll(c, issue_id, round_no)
         if result["terminal"]:
@@ -459,10 +460,13 @@ def wait(c, issue_id, round_no, timeout):
             return result
         if time.monotonic() >= deadline:
             raise workflow_common.WorkflowError(
-                "PLATFORM_WAIT_TIMEOUT", "等待超时，可继续查询同一验证轮次", result
+                "PLATFORM_WAIT_TIMEOUT", "等待超时，可继续查询同一验证轮次",
+                {"issue_id": issue_id, "round_no": round_no, "event": "timeout"}
             )
         renew(c, lease)
-        print(f"{issue_id}: {result['status']}", file=sys.stderr, flush=True)
+        if previous is not None and result['status'] != previous:
+            print(f"{issue_id}: {result['status']}", file=sys.stderr, flush=True)
+        previous = result['status']
         time.sleep(min(30, max(0, deadline - time.monotonic())))
 
 

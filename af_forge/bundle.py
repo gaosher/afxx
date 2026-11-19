@@ -27,6 +27,7 @@ FILES = (
     "af_forge/environment/runtime.py",
     "af_forge/execution.py",
     "af_forge/jobs.py",
+    "af_forge/job_view.py",
     "af_forge/bundle.py",
     "af_forge/environment/consistency.py",
     "af_forge/afx/replay.py",

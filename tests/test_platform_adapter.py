@@ -227,6 +227,7 @@ def test_wait_timeout_keeps_round_and_renews(platform_cfg, monkeypatch):
         error.value.code == "PLATFORM_WAIT_TIMEOUT"
         and error.value.data["round_no"] == 1
     )
+    assert error.value.data == {"issue_id": REPAIR, "round_no": 1, "event": "timeout"}
     assert renewals == [True]
 
 
@@ -471,3 +472,17 @@ def test_verify_does_not_post_if_client_start_fails(platform_cfg, candidate, mon
     monkeypatch.setattr("af_forge.afx.launcher.ensure_started", lambda *a: None)
     monkeypatch.setattr(p, "call", lambda *a, **k: receipt())
     assert p.verify(platform_cfg, candidate)["body"] == saved["body"]
+
+
+def test_wait_unchanged_round_does_not_repeat_output(platform_cfg, monkeypatch, capsys):
+    ticks = [0]
+    monkeypatch.setattr(p.time, "monotonic", lambda: ticks[0])
+    monkeypatch.setattr(p.time, "sleep", lambda seconds: ticks.__setitem__(0, ticks[0]+seconds))
+    monkeypatch.setattr(p, "claimed", lambda *a: LEASE)
+    monkeypatch.setattr(p, "renew", lambda *a: None)
+    monkeypatch.setattr(p, "poll", lambda *a: dict(terminal=False, status="verifying", round_no=1,
+                                                  verification={"large": "payload"*1000}))
+    with pytest.raises(workflow_common.WorkflowError) as error:
+        p.wait(platform_cfg, REPAIR, 1, 65)
+    assert error.value.data == {"issue_id": REPAIR, "round_no": 1, "event": "timeout"}
+    assert capsys.readouterr().err == ""

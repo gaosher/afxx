@@ -25,6 +25,7 @@ from af_forge.afx import replay as replay_adapter
 from af_forge import common as workflow_common
 from af_forge import config as workflow_config
 from af_forge import jobs as workflow_jobs
+from af_forge.job_view import status_view
 from af_forge.environment import runtime as workflow_runtime
 
 
@@ -66,7 +67,10 @@ def response(command, data=None, error=None):
     if isinstance(data, dict):
         data = dict(data)
         if "job" in data:
-            data["job_id"] = data["job"]
+            data["job_id"] = data.pop("job")
+        if isinstance(data.get("status"), dict):
+            status = status_view(data.pop("status"))
+            data.update({key: value for key, value in status.items() if key not in data})
     return {
         "schema_version": 1,
         "ok": error is None,
@@ -185,6 +189,14 @@ def parse_arguments():
             cmd.add_argument("--path", required=True, help="absolute remote artifact path")
             cmd.add_argument("--limit", type=int, default=8192, help="bytes, maximum 65536")
             cmd.add_argument("--sha256", help="hash from previous read; reject changed file")
+        if name == "status":
+            detail = cmd.add_mutually_exclusive_group()
+            detail.add_argument("--full", action="store_true", help="download complete reports to local /tmp; return path and size")
+            detail.add_argument("--attempt", help="read one AFX attempt (compact fields by default)")
+            detail.add_argument("--wait", action="store_true", help="return only changes or terminal state")
+            cmd.add_argument("--fields", help="comma-separated attempt fields; supports dotted paths")
+            cmd.add_argument("--since", help="cursor from previous status; requires --wait")
+            cmd.add_argument("--timeout", type=float, help="wait timeout in seconds, default 30, maximum 50")
         if name == "replay":
             reference = cmd.add_mutually_exclusive_group(required=True)
             reference.add_argument(
@@ -325,7 +337,21 @@ def main():
             path=getattr(args, "path", None), offset=args.offset,
             limit=getattr(args, "limit", 8192), sha256=getattr(args, "sha256", None))
     if args.command == "status":
-        data = workflow_jobs.query_job(c, args.job)
+        workflow_common.require_code(not args.fields or args.attempt is not None,
+                                     "INVALID_ARGUMENT", "--fields requires --attempt")
+        workflow_common.require_code(args.wait or (args.since is None and args.timeout is None),
+                                     "INVALID_ARGUMENT", "--since/--timeout require --wait")
+        fields = args.fields.split(",") if args.fields is not None else None
+        workflow_common.require_code(fields is None or all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", name) for name in fields),
+                                     "INVALID_ARGUMENT", "invalid attempt fields")
+        if args.full:
+            return workflow_jobs.download_report(c, args.job)
+        if args.wait:
+            return workflow_jobs.wait_status(c, args.job, since=args.since,
+                                             timeout=args.timeout if args.timeout is not None else 30)
+        data = workflow_jobs.query_status(c, args.job, attempt_id=args.attempt, fields=fields)
+        if args.attempt is None:
+            data["cursor"] = workflow_jobs.status_cursor(data)
         workflow_common.require_code(
             data["state"] != "not_found", "JOB_NOT_FOUND", "未找到任务：" + args.job
         )

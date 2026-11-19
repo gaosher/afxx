@@ -347,7 +347,7 @@ if action=='follow':
    break
   time.sleep(1)
  sys.exit(0)
-if action=='status':
+if action in ('status','view'):
  if not p.exists():print(json.dumps({'state':'not_found','job':p.name}));sys.exit(0)
 else:p.mkdir(parents=True,exist_ok=True,mode=0o700)
 with (p/'.submit.lock').open('a') as guard:
@@ -360,6 +360,9 @@ with (p/'.submit.lock').open('a') as guard:
    child=subprocess.Popen([sys.executable,'-m','af_forge.cli','_worker',str(p)],stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True,cwd=p)
   write(p/'launch.json',{'state':'started','pid':child.pid,'job':p.name})
   data=inspect()
+ if action=='view':
+  try:data=status_view(data,**json.loads(sys.argv[3]))
+  except ValueError as error:data={'state':'failed','query_error':str(error)}
  print(json.dumps(data))
 """
 
@@ -537,3 +540,62 @@ except (OSError, ValueError, KeyError) as error:
                        json.dumps(dict(action=action, path=path, offset=offset, limit=limit, sha256=sha256))])
     workflow_common.require_code(value['state'] == 'success', value.get('error_code', 'EVIDENCE_UNAVAILABLE'), value.get('error', 'evidence unavailable'))
     return value['evidence']
+
+
+def query_status(c, job_id, *, full=False, attempt_id=None, fields=None):
+    import inspect
+    from af_forge.job_view import status_view
+    from af_forge.afx.replay import failure_index
+    code = inspect.getsource(failure_index) + "\n" + inspect.getsource(status_view) + "\n" + REMOTE_JOB
+    data = remote(c, ["python3", "-c", code, str(Path(c["remote"]["state_dir"]) / job_id),
+                      "view", json.dumps(dict(full=full, attempt_id=attempt_id, fields=fields))])
+    workflow_common.require_code("query_error" not in data, "ATTEMPT_FIELD_NOT_FOUND" if data.get("query_error", "").startswith("attempt field") else "ATTEMPT_NOT_FOUND",
+                                 data.get("query_error", "attempt not found"))
+    return data
+
+
+def download_report(c, job_id):
+    """Keep full JSON out of CLI/MCP output; use a private local temporary file."""
+    import tempfile
+    data = query_status(c, job_id, full=True)
+    workflow_common.require_code(data["state"] != "not_found", "JOB_NOT_FOUND", "未找到任务：" + job_id)
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir="/tmp",
+                prefix="af-forge-" + job_id + "-", suffix=".json", delete=False) as output:
+            path = Path(output.name)
+            json.dump(data, output, ensure_ascii=False)
+            output.write("\n")
+        return {"path": str(path), "size_bytes": path.stat().st_size}
+    except BaseException:
+        if path is not None:
+            path.unlink(missing_ok=True)
+        raise
+
+
+def status_cursor(data):
+    return workflow_common.digest({key: value for key, value in data.items()
+                                   if key not in {"cursor", "snapshot_cleanup", "local_snapshot_cleanup"}})
+
+
+def wait_status(c, job_id, *, since=None, timeout=30):
+    """Bounded long poll: one changed/terminal result, or a tiny timeout receipt."""
+    import time
+    workflow_common.require_code(0 < timeout <= 50, "INVALID_ARGUMENT", "wait timeout must be in (0, 50] seconds")
+    workflow_common.require_code(since is None or re.fullmatch(r"[0-9a-f]{64}", since),
+                                 "INVALID_ARGUMENT", "invalid status cursor")
+    deadline = time.monotonic() + timeout
+    baseline = since
+    while True:
+        data = query_status(c, job_id)
+        workflow_common.require_code(data["state"] != "not_found", "JOB_NOT_FOUND", "未找到任务：" + job_id)
+        cursor = status_cursor(data)
+        if data["state"] in {"success", "failed", "unknown"}:
+            return dict(data, cursor=cursor, event="terminal" if data["state"] != "unknown" else "attention")
+        if baseline is not None and cursor != baseline:
+            return dict(data, cursor=cursor, event="changed")
+        baseline = cursor
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {"job_id": job_id, "event": "timeout", "cursor": cursor}
+        time.sleep(min(2, remaining))

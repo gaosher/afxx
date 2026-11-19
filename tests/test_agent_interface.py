@@ -240,8 +240,8 @@ def test_status_failure_is_successful_query(cfg, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(workflow_jobs, "local_preflight", lambda *a: None)
     monkeypatch.setattr(
         workflow_jobs,
-        "query_job",
-        lambda *a: {"state": "failed", "error_code": "REPLAY_FAILED"},
+        "query_status",
+        lambda *a, **kw: {"state": "failed", "error_code": "REPLAY_FAILED"},
     )
     assert af_forge.cli.cli() == 0
     envelope = json.loads(capsys.readouterr().out)
@@ -486,7 +486,6 @@ def test_init_response_leaves_detailed_dependency_report_for_status():
     data = {"job": "job", "request_id": "request", "state": "success", "status": status}
     assert af_forge.cli.response("init", data)["data"] == {
         "job_id": "job",
-        "job": "job",
         "request_id": "request",
         "state": "success",
         "artifact": "/job/result.json",

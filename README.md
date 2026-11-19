@@ -309,4 +309,4 @@ cp -R skills/af-forge-repair "${CODEX_HOME:-$HOME/.codex}/skills/"
 
 调用示例：`使用 $af-forge-repair 修复 AFX issue F152，验证和回归通过后 commit，等待检视。`
 
-定位 replay 的失败时，status 返回 report.json 中的 evidence 文件清单和摘录；使用 `af-forge evidence list` 分页列出产物，`af-forge evidence read` 续读日志/IR。CLI 与 MCP 参数一致，详见 [证据读取说明](docs/AGENT_USAGE.md#证据分页与续读)。
+定位 replay 的失败时，`status` 默认返回判定、失败 attempt 索引和证据数量；`status --full` 下载完整报告到本机 `/tmp`，只返回路径和大小；`status --attempt <id> --fields ...` 按字段读取执行详情。等待使用 `status --wait --since <cursor>`，无变化只返回简短超时回执。使用 `af-forge evidence list` 分页列出产物、`af-forge evidence read` 续读日志/IR；CLI 与 MCP 参数一致，详见 [证据读取说明](docs/AGENT_USAGE.md#证据分页与续读)。

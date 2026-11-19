@@ -30,7 +30,7 @@
 
 ## Replay 自动返回的证据
 
-replay 成功或失败结束后，Forge 自动扫描现场并将清单写入现有 `report.json` 的 `evidence`。执行 `af-forge evidence list --config "$CONFIG" --job-id <replay-job-id>` 或读取 status 的 report.json.evidence：
+replay 成功或失败结束后，Forge 自动扫描现场并将清单写入现有 `report.json` 的 `evidence`。默认 status 仅返回判定和证据数量。执行 `af-forge evidence list --config "$CONFIG" --job-id <replay-job-id>` 读取清单；完整报告使用 `status --full` 下载到本机 /tmp，返回路径和大小；文件内 details["report.json"] 保留完整数据，不要把整个文件读回上下文：
 
 - files：每个实际文件的远端绝对 path、category、size_bytes；文本附 excerpt、excerpt_offset 和 excerpt_truncated。日志取末尾，图/IR/源码取开头。
 - directories：实际扫描目录、是否存在、返回文件数。路径不再依赖手工猜测；未执行到相应阶段可能没有文件。
@@ -56,3 +56,5 @@ af-forge evidence read --config "$CONFIG" --job-id <replay-job-id> \
 MCP 对应 command 为 `evidence list` / `evidence read`，参数与 CLI 相同。不要让 skill 自己拼 SSH 读取命令。
 
 清单中的 failures 来自 AFX 公共 attempt/shape 结果；每个文件的 associations 仅在 AFX diagnostics 明确引用该文件或其编译目录的完整路径时填入 attempt_id、shape_indices 和关联依据（reference_path 保留原始引用，区分文件/目录引用）。否则 association_state=unassociated，不按文件名猜测 kernel/Shape 归属。空 shape_indices 表示只有 attempt 级引用；一个文件可被多个 attempt 引用，不代表独占归属。
+
+默认 status 的 replay.failures 与 evidence.failures 均为失败索引（attempt_id、shape_indices），不重复保存整份 Shape 错误。`status --attempt <attempt_id>` 默认返回简短摘要。使用 `--fields` 分别选择 error_summary、shape_results、diagnostic_view.summary、metadata.graph、contexts.environment 等必要字段。完整运行包身份或依赖检查可通过 `status --full` 下载后在本地按键提取；不要把完整文件整体读回上下文。等待用 `status --wait --since <cursor> --timeout 30`，不要反复请求 full。

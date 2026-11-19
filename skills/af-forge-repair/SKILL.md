@@ -48,7 +48,12 @@ local:
 
 每次 deploy 前核对 `$CONFIG` 的 local.source_dir 与实际修改所在 worktree 一致，使用 `af-forge deploy --config "$CONFIG" ...`；MCP 也必须传入同一任务配置。未提交源码修改会被同步，不能误用仍指向原仓库的配置。
 
-复现阶段在任务专用配置中设置 `replay.dump: true`，保留其他配置，无需 env update。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集输入、环境、日志和图/IR/代码证据。
+复现阶段默认在任务专用 `$CONFIG` 中设置 `replay.dump: true`，保留其他 replay 配置；不修改用户的原始配置，无需 env update。基线与候选的定位复测使用相同采集设置。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集证据。
+
+```yaml
+replay:
+  dump: true
+```
 
 对 nnsmith seed 使用 Forge replay：
 
@@ -57,7 +62,7 @@ af-forge replay --config "$CONFIG" --job-id <基线deploy-job-id> --seed <原始
 af-forge status --config "$CONFIG" --job-id <replay-job-id>
 ```
 
-异步提交成功不等于复现完成；读取终态、report 和 evidence。通过 `evidence list` 获取文件清单及关联，截断时按 next_offset 续页；使用 `evidence read` 按字节续读关键文件，不自行拼 SSH。无法关联的文件明确标记，不猜测 Shape 归属。记录原始 seed、Shape、dtype、后端、芯片、实际包身份、失败阶段、错误与相关 IR。保持原输入和精度语义，不能换 seed 或放宽正确性判定制造通过。
+异步提交成功不等于复现完成；先读取 `data.state`、`data.replay.passed` 和失败 attempt 索引；对失败 ID 先用 `status --attempt <id>` 看简短摘要，再用 `--fields error_stage,error_summary,diagnostic_view.summary,shape_results` 选择必要信息。图/环境分别按需选 metadata.graph 或 contexts.environment。`status --full` 仅下载到本机 /tmp，返回路径和大小；需要包身份/依赖详情时在本地提取文件中的相应字段，禁止把完整 JSON 整体读回上下文。用 `evidence list` 获取文件清单、文本摘录及缺失/截断标记，清单截断时用 `evidence list --job-id ... --offset ...` 续页，文本截断时用 `evidence read --job-id ... --path ... --offset ... --sha256 ...` 续读（均传 `$CONFIG`）；不要自行拼 SSH 命令。按 attempt_id 连接执行详情与明确关联的文件；unassociated 不代表属于当前失败 Shape。按复现证据清单记录输入、环境和包身份、失败阶段、完整日志与对应图/IR/代码的路径，并检查文件实际存在。缺失或截断的证据注明原因，不将打开开关视为已取得全部产物。保持原输入和精度语义，不能换 seed 或放宽正确性判定制造通过。
 
 非 nnsmith 用例使用平台给出的复现方式和目标环境，不强行传入 Forge seed 接口。失败无法复现时，先比较环境、包版本和用例条件；明确“未复现”及缺失证据，不直接宣称修复。
 
@@ -74,7 +79,7 @@ af-forge deploy --config "$CONFIG" --issue-id <issue-id> --request-id <本轮唯
 af-forge status --config "$CONFIG" --job-id <deploy-job-id>
 ```
 
-等待 job state=success，并保留部署记录和源码/包身份。构建或安装失败先处理对应失败，不进入 verify。候选部署后可用同一原始 seed 快速 replay；平台验证仍是下一步独立验收。
+部署和 replay 等待时，保存首次 status 的 cursor，使用 `status --wait --since <cursor> --timeout 30`（带同一配置和 job ID）；无变化只得到 timeout 回执，继续沿用返回 cursor，不重复读取概要或提交任务。无 cursor 时该命令以首次查询为基线。event=attention 表示状态不确定，应排查进程。等待 job state=success，并保留部署记录和源码/包身份。构建或安装失败先处理对应失败，不进入 verify。候选部署后可用同一原始 seed 快速 replay；平台验证仍是下一步独立验收。
 
 环境一致性 WARNING 不会自动阻止 Forge；agent 应读懂差异，并确认候选环境能用于该问题。不能把带差异的配置视为精确复现证据。平台复测执行期间不覆盖它使用的候选环境。
 
@@ -90,7 +95,7 @@ verify 在远端核对候选 AF 身份，确保官方 AFX client 启动，再向
 af-forge issue status --config "$CONFIG" --issue-id <issue-id> --round-no <verify-round-no>
 ```
 
-agent 默认间隔约 30 秒查询，不另安排例行续租；只在阶段变化、新失败或完成时汇报。也可调用 `issue wait --timeout 3600`，但 MCP 下长时间 wait 可能受客户端超时限制。超时继续查询原轮次，不重复提交。
+agent 使用 `issue wait --timeout 30` 等待原轮次，不另安排例行续租；等待内部仅在状态变化时报告，超时仅保留问题/轮次引用。超时继续等待原轮次，不重复提交。只在新阶段、新失败或完成时向用户汇报。
 
 - verification 未结束：继续等待。
 - verification.outcome=failed：读取该轮失败任务与执行证据，回到第 2/3 步；修改后经过新的 deploy 和 verify。

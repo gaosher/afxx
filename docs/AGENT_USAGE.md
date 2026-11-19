@@ -9,7 +9,8 @@
 | doctor | 本地校验配置、工具和 npussh 登录 | 检查通过 |
 | init / update | 提交远端任务，默认跟随日志；支持 --detach | 远端任务 success，环境清单 ready |
 | deploy | 提交远端任务，返回 job ID | status 为 success，deployment.json 有效 |
-| replay | 提交远端任务，返回 job ID | status 为 success 且 report.json.passed=true |
+| evidence list / evidence read | 本地通过 npussh 只读远端证据 | ok=true；按 next_offset 续读，检查 sha256 和未关联标记 |
+| replay | 提交远端任务，返回 job ID | data.state=success 且 data.replay.passed=true |
 | check | 提交远端依赖检查 | 任务 success、依赖检查通过 |
 | status | 查询远端 job | 查询成功后继续检查返回的任务 state |
 | issue claim / issue preview / issue renew | 本地直接调用平台 HTTPS | 保存领取响应、预览或续租到期时间 |
@@ -31,7 +32,7 @@
 {"schema_version":1,"ok":false,"command":"doctor","data":null,"error":{"code":"AUTH_REQUIRED","message":"请执行 npussh login"}}
 ```
 
-退出码 0 表示调用成功，2 表示请求失败。异步提交成功后继续查询远端任务。init/update 的最终响应为摘要，详细检查报告通过 status 获取。平台等待失败或超时时，data 保留查询结果。
+退出码 0 表示调用成功，2 表示请求失败。异步提交成功后继续查询远端任务。init/update 的最终响应为摘要，详细检查报告通过 status --full 下载到本机 /tmp。平台等待失败时 data 保留终态详情；等待超时时仅保留 issue_id、round_no 和 event=timeout。
 
 ## 部署和任务轮询
 
@@ -42,7 +43,7 @@ af-forge status --job-id <job-id>
 
 提交前生成并保存 request-id，允许 1–128 位字母、数字、下划线、点或连字符。init/update/deploy/replay/check支持此参数。省略时自动生成，但若整个响应丢失，将无法从响应取回该值。
 
-任务状态包括 prepared、queued、running、success、failed、unknown。prepared 为 dry-run 本地产物。status 会返回已有的部署、复跑、环境、平台报告。每 15–30 秒轮询，长编包阶段可延长到 60 秒；阶段变化或到达终态时汇报。unknown 时检查进程和日志。
+任务状态包括 prepared、queued、running、success、failed、unknown。prepared 为 dry-run 本地产物。status 默认只返回概要；完整报告使用 status --full 下载，单个执行使用 status --attempt --fields。等待任务使用 status --wait --since，避免重复概要进入上下文；阶段变化或到达终态时汇报。unknown 时检查进程和日志。
 
 init/update 默认跟随远端日志，Ctrl+C 停止本地查看，任务仍可通过 status 查询。
 
@@ -149,3 +150,31 @@ af-forge evidence read --config "$CONFIG" --job-id <replay-job-id> \
 MCP 对应 command 为 `evidence list` / `evidence read`，参数与 CLI 相同。不要让 skill 自己拼 SSH 读取命令。
 
 清单中的 failures 来自 AFX 公共 attempt/shape 结果；每个文件的 associations 仅在 AFX diagnostics 明确引用该文件或其编译目录的完整路径时填入 attempt_id、shape_indices 和关联依据（reference_path 保留原始引用，区分文件/目录引用）。否则 association_state=unassociated，不按文件名猜测 kernel/Shape 归属。空 shape_indices 表示只有 attempt 级引用；一个文件可被多个 attempt 引用，不代表独占归属。
+
+## Status 概要、字段查询与等待
+
+```bash
+# 默认概要附 cursor，供下一次等待使用。
+af-forge status --config "$CONFIG" --job-id <job-id>
+# 完整报告下载到本机 /tmp，仅返回 data.path 和 data.size_bytes。
+af-forge status --config "$CONFIG" --job-id <job-id> --full
+# 默认 attempt 只返回简短身份、状态、错误摘要；详细字段需显式选择。
+af-forge status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id>
+af-forge status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id> \
+  --fields error_stage,error_summary,diagnostic_view.summary,shape_results
+# 独立读取环境或图，避免把整份 attempt 放入上下文。
+af-forge status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id> \
+  --fields contexts.environment
+# 只等待变化/终态；没有变化时返回小型 timeout 回执。
+af-forge status --config "$CONFIG" --job-id <job-id> --wait --since <cursor> --timeout 30
+```
+
+默认 data 返回 job_id、state、phase（若有）、退出码/错误、日志路径、available_details 和 cursor。replay 包含 passed、判定错误、deployment_job_id、results_dir、attempt_count、failed_attempt_count、失败索引（attempt_id/shape_indices）和 evidence 数量/截断/采集错误数；失败索引及判定错误最多 20 项，有独立截断标记。dependencies 仅返回 passed 和 failed_checks。
+
+`--full`、`--attempt`、`--wait` 互斥。full 文件为随机命名的 `/tmp/af-forge-<job-id>-*.json`，权限 0600，不覆盖已有文件；文件内 details 按原报告名组织。远端报告保持不变。不要将下载文件整个 cat 回上下文，按所需键本地提取；使用完自行删除，/tmp 不承担长期归档。
+
+attempt 默认字段为 id、seed_short、backend、status、error_stage、error_summary（缺失的可选字段省略），字符串最多 512 字符，裁剪字段列于 attempt_truncated_fields。`--fields` 使用逗号分隔的字段或字典点路径，例如 metadata.graph、contexts.environment、diagnostic_view.summary、shape_results；选择结果以完整字段路径为键。显式选择的大字段会完整返回，按定位需要逐次读取。未知执行返回 ATTEMPT_NOT_FOUND，未知字段返回 ATTEMPT_FIELD_NOT_FOUND，不默默忽略拼写错误。
+
+wait 默认 30 秒、允许 (0,50] 秒，CLI/MCP 均返回一次 JSON。携带 since 时与上次概要比较；未传时以首次查询为基线等待下一次变化。event=changed/terminal 返回新概要和 cursor；state=unknown 返回 event=attention，需处理进程不确定状态。没有变化时只返回 job_id、event=timeout、cursor，表示等待窗口结束而非任务失败。下一次继续使用返回的 cursor；不重复提交原任务。网络请求本身的超时独立于等待窗口。
+
+公开任务 ID 统一为 job_id，提交结果不重复返回 job 别名或嵌套 status。state 与 passed 含义不同；外层 ok 只表示查询成功。概要和字段投影在远端完成，避免轮询传回大图/日志。文件清单用 evidence list，文本用 evidence read；关联只保存 attempt_id 引用。

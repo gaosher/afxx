@@ -95,6 +95,9 @@ def create_server(default_config=None):
     ) -> CallToolResult:
         """Run an explicit workflow command, e.g. "issue preview" or "issue verify".
         arguments are CLI tokens, never a shell command.
+        status returns a compact summary; --full downloads to local /tmp and returns path/size.
+        --attempt selects an execution, --fields selects dotted fields.
+        --wait --since <cursor> returns changes/end or a tiny timeout receipt (default 30 seconds).
 
         init/update are detached; use status --job-id to poll. Public commands only.
         init/update require explicit config (tool config, --config argument, or server --config).

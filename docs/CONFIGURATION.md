@@ -148,4 +148,4 @@ AF 图、逐 pass MLIR 和生成代码位于结果目录 dump/；GE 图位于 du
 
 `--save` 始终保存 AFX 结果到 results.sqlite，与 dump 独立。dump 不自动保存所有输入/输出张量，也不强制同步运行或禁用缓存。性能验收应关闭 dump，避免调试开销影响结论。完整收集标准见 [复现证据清单](../skills/af-forge-repair/references/replay-evidence.md)。
 
-Replay 结束（包括失败）自动将现场文件清单和文本摘录写入 `report.json.evidence`，通过 `status` 或 `evidence list` 返回本地 CLI/MCP。包括绝对路径、类型、大小、读取错误和截断标记；上限为 128 个文件、单文件 2 KiB、总文本 64 KiB。日志返回末尾，其他文本返回开头。完整文件保留远端，不自动下载二进制或全部 dump；按返回路径可继续读取。缺失目录会明确标记，不能把开启 dump 当作文件已生成。
+Replay 结束（包括失败）自动将现场文件清单和文本摘录写入 `report.json.evidence`，通过 `evidence list` 按需读取；`status --full` 下载报告到本机 /tmp，只返回路径和大小；默认 status 只返回概要。包括绝对路径、类型、大小、读取错误和截断标记；上限为 128 个文件、单文件 2 KiB、总文本 64 KiB。日志返回末尾，其他文本返回开头。完整文件保留远端，不自动下载二进制或全部 dump；按返回路径可继续读取。缺失目录会明确标记，不能把开启 dump 当作文件已生成。
