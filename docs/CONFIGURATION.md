@@ -149,3 +149,20 @@ AF 图、逐 pass MLIR 和生成代码位于结果目录 dump/；GE 图位于 du
 `--save` 始终保存 AFX 结果到 results.sqlite，与 dump 独立。dump 不自动保存所有输入/输出张量，也不强制同步运行或禁用缓存。性能验收应关闭 dump，避免调试开销影响结论。完整收集标准见 [复现证据清单](../skills/af-forge-repair/references/replay-evidence.md)。
 
 replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/af-forge-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 下载覆盖结果目录和 job 的诊断目录，不受报告摘录的 128 文件/文本长度限制；不跟随符号链接，不下载含凭据的 sync.json，跳过原因记在 evidence.json。开启 dump 不保证每个阶段都生成文件。
+
+
+## Init 平台凭据准备
+
+未配置 platform 时，init 不读取或创建 token。配置 platform.url 和 agent_id 后：
+
+- platform.token_file 省略、null 或空字符串时，默认 `~/.config/af-forge/auth/afx.token`。
+- platform.remote_token_file 留空时，默认 `<workflow_root>/auth/afx.token`。
+- platform.client_token_file 留空时，复用 remote_token_file；显式指定时两处都会收到同一个 token。
+
+init 提交前复用本地 token；文件不存在时仅在交互终端隐藏输入一次，保存为 0600，再通过 `/api/me` 验证身份。已存在但为空或不可读的文件会报错，不静默覆盖。本地 token 必须位于同步源码目录之外。token 由平台签发，Forge 不签发、不轮换；用户需具有相应领取、验证、上传和复测权限，具体权限仍由平台接口检查。
+
+环境 init 成功后通过 SSH 标准输入同步到远端，文件权限为 0600，token 内容不进入命令参数、配置快照、job 文件或日志。相同 token 复用；任一目标已有不同 token 时停止，不覆盖原凭据。配置文件只保存路径。
+
+普通 env init 在返回前完成同步。`--detach`、MCP 或中途停止查看日志的任务，需要后续 `status` / `status --wait` 确认成功并同步；仅提交任务不表示 token 已就绪。MCP/非交互调用不会弹出输入，缺少本地文件返回 PLATFORM_CREDENTIAL_MISSING。dry-run 不读取、不输入、不同步 token；update 不触发凭据同步。
+
+成功结果的 auth.state 为 ready。凭据同步失败时返回 PLATFORM_CREDENTIAL_SYNC_FAILED 或 PLATFORM_CREDENTIAL_CONFLICT，并保留 job_id、environment_state=success；修正文件/权限后查询同一 init job 重试，不重新初始化 venv。续查使用本地 job 的冻结配置定位凭据文件，重复同步不会重写相同内容。不要把另一环境的配置用于恢复本任务。

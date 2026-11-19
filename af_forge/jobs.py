@@ -573,6 +573,8 @@ def wait_status(c, job_id, *, since=None, timeout=30):
         workflow_common.require_code(data["state"] != "not_found", "JOB_NOT_FOUND", "未找到任务：" + job_id)
         cursor = status_cursor(data)
         if data["state"] in {"success", "failed", "unknown"}:
+            from af_forge import credentials
+            data = credentials.complete_init(c, job_id, data)
             result = localize_replay(c, job_id, data)
             if "evidence_path" in result:
                 return result

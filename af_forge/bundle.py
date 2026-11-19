@@ -15,6 +15,7 @@ import shutil
 
 FILES = (
     "af_forge/cli.py",
+    "af_forge/credentials.py",
     "af_forge/__init__.py",
     "af_forge/environment/__init__.py",
     "af_forge/afx/__init__.py",

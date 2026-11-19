@@ -102,6 +102,8 @@ def create_server(default_config=None):
         --wait --since <cursor> returns changes/end or a tiny timeout receipt (default 30 seconds).
 
         init/update are detached; use status --job-id to poll. Public commands only.
+        Init needs an existing local token file when platform is configured (no interactive prompt).
+        Successful init status/wait also synchronizes credentials to the NPU.
         All commands default to ~/.config/af-forge/config.yaml.
         Override via tool config, --config argument, or server --config.
         """

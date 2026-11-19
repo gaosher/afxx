@@ -25,6 +25,7 @@ from af_forge.afx import replay as replay_adapter
 from af_forge import common as workflow_common
 from af_forge import config as workflow_config
 from af_forge import jobs as workflow_jobs
+from af_forge import credentials
 from af_forge.job_view import status_view
 from af_forge.environment import runtime as workflow_runtime
 
@@ -38,7 +39,7 @@ def response(command, data=None, error=None):
     if command in ("init", "update") and data and "job" in data:
         status = data.get("status") or {}
         summary = {
-            key: data[key] for key in ("job", "request_id", "state") if key in data
+            key: data[key] for key in ("job", "request_id", "state", "auth") if key in data
         }
         if data.get("dry_run"):
             summary.update(dry_run=True, local=data["local"])
@@ -364,6 +365,8 @@ def main():
             cleanup = {"state": "failed", "error": str(error)}
         if cleanup is not None:
             data["local_snapshot_cleanup"] = cleanup
+        if args.attempt is None:
+            data = credentials.complete_init(c, args.job, data)
         return workflow_jobs.localize_replay(c, args.job, data) if args.attempt is None else data
     values = []
     if args.command == "replay":
@@ -388,6 +391,8 @@ def main():
     if args.command == "deploy" and args.issue_id:
         lease = platform.claimed(c, args.issue_id)
         request["issue"] = {key: lease[key] for key in ("id", "lease_id")}
+    if args.command == "init" and not args.dry_run:
+        credentials.prepare(c)
     data = workflow_jobs.submit(
         c, request, args.request_id or uuid.uuid4().hex, args.dry_run
     )
@@ -436,6 +441,8 @@ def main():
                 status.get("error", args.command + " 未确认成功"),
                 data,
             )
+    if args.command == "init" and data.get("state") == "success" and not args.dry_run:
+        data = credentials.complete_init(c, data["job"], dict(data, task_type="init"))
     if args.command == "replay" and data.get("state") in {"success", "failed"}:
         return workflow_jobs.localize_replay(c, data["job"], workflow_jobs.query_status(c, data["job"]))
     return data

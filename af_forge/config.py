@@ -258,6 +258,15 @@ def normalize_config(raw):
     c.pop("workflow_root")
     c["remote"].pop("workspace")
 
+    if "platform" in c:
+        p = c["platform"]
+        if p["token_file"] in (None, ""):
+            p["token_file"] = str(Path.home() / ".config/af-forge/auth/afx.token")
+        if p["remote_token_file"] in (None, ""):
+            p["remote_token_file"] = under("auth/afx.token")
+        if p["client_token_file"] in (None, ""):
+            p["client_token_file"] = p["remote_token_file"]
+
     def package_source(name):
         return workflow_common.read(
             Path(__file__).with_name("environment") / "package_sources.json"

@@ -85,6 +85,8 @@ af-forge env update
 
 init 自动上传配置并准备 Python 3.11、CANN 和专用 venv。update 更新 torch_npu/AFX，保留现有 CANN。init/update 默认跟随远端日志；`--detach` 仅提交任务，后续用 status 查询。
 
+配置 platform 后，init 优先复用本地 token 文件，缺失时在交互终端隐藏输入；环境成功后自动同步到 NPU。路径留空时使用 `~/.config/af-forge/auth/afx.token` 和 `<workflow_root>/auth/afx.token`。非交互调用需预先准备本地文件；detach/MCP 提交后通过 status/wait 完成成功后的同步。
+
 首次初始化、包源、版本选择和失败恢复规则见 [环境配置](docs/CONFIGURATION.md#初始化和更新环境)。
 
 ## 部署源码与 AF

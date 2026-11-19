@@ -14,7 +14,7 @@ description: 使用 AF Forge 领取 AFX 平台 issue，复现并定位 graph-aut
 - 启动时将选定配置展开为绝对路径，展示配置路径、connection.environment、workflow_root、local.source_dir 和平台地址（不输出 token）。默认配置不存在时提示 `af-forge config init --source <源码目录>` 或请求已有配置路径，不搜索环境变量或当前目录。领取阶段示例使用默认配置；用户指定其他配置时追加 `--config <绝对路径>`。创建 worktree 任务配置后，按第 2 步切换，后续示例显式携带该配置（MCP 传 `config`）。
 - 从配置定位 `local.source_dir`，在目标源码仓库读取 AGENTS.md，遵循其开发、测试、构建和提交要求。先记录原有修改，不覆盖或提交用户无关改动。
 - 用户要求执行完整修复流程时，按授权范围领取、部署、verify 和本地 commit；已有授权不重复询问。只做诊断或讨论时不发起这些写操作。不自动 push、合并或关闭 issue。
-- 远端续租和提交 verify 使用 `platform.remote_token_file`，官方 AFX client 使用 `platform.client_token_file`。复用环境中已配置的文件；同一文件具备两类权限且与本地领取账号一致时，两项可以指向同一路径。任务专用配置保留这两个字段。路径缺失或鉴权失败时，报告具体字段和错误，不按 issue 创建 token 文件，也不建议上传本机 token。
+- 远端 verify/续租使用 `platform.remote_token_file`，AFX client 使用 `platform.client_token_file`。配置 platform 后，env init 会复用或隐藏输入本地 token，并在环境成功后同步；异步 init 用 status/wait 完成同步。修复时复用已有凭据，遇到缺失或鉴权错误报告具体字段；不要为领取问题重建环境或重新签发 token。
 - 一个问题的工作记录保留 issue_id、租约到期时间、基线/候选 deploy job_id、request-id、verify round_no、AF 包身份及证据路径。复用任务已有笔记或修复总结，不另造状态数据库、不复制 wheel/源码快照。
 - 网络重试复用同一请求与 request-id；源码/配置改变后使用新的 deploy request-id。一个候选 job 的 verify 重试取回原回执，不能用它开始新的修复轮次。
 
