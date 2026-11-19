@@ -38,30 +38,12 @@ def deploy(c, job):
         workflow_runtime.venv_preflight(c, env, job, "deploy")
         workflow_common.phase(job, "sync")
         source, manifest = workflow_source.sync_source(c, job)
-        root = Path(c["runtime"]["install_root"]) / "cann"
-        fingerprint = {
-            "cann": workflow_common.sha(root / "compiler/version.info"),
-            "runtime": dict(c["runtime"], debugger_module="autofusex"),
-            "build": c["build"],
-            "lld": workflow_common.sha(c["build"]["lld_bin"]),
-            "llvm": workflow_common.sha(
-                Path(c["build"]["llvm_build_dir"]) / "lib/cmake/llvm/LLVMConfig.cmake"
-            ),
-            "mlir": workflow_common.sha(
-                Path(c["build"]["llvm_build_dir"]) / "lib/cmake/mlir/MLIRConfig.cmake"
-            ),
-            "python": workflow_common.capture(
-                [workflow_runtime.python(c), "--version"], env=env
-            ).strip(),
-        }
-        stamp = source / "build" / ".workflow-environment.json"
-        if (source / "build").exists():
-            workflow_common.require(
-                stamp.exists() and workflow_common.read(stamp) == fingerprint,
-                "build environment changed or unknown; move the dedicated build directory aside before retrying",
-            )
-        workflow_common.write(stamp, fingerprint)
         workflow_common.phase(job, "build")
+        build_dir = source / "build"
+        workflow_common.require(not build_dir.is_symlink(), "build directory may not be a symlink")
+        build_dir.mkdir(exist_ok=True)
+        # Remove the obsolete Forge stamp when reusing a pre-existing build tree.
+        (build_dir / ".workflow-environment.json").unlink(missing_ok=True)
         output = job / "packages"
         output.mkdir()
         workflow_common.run(
@@ -253,7 +235,7 @@ def replay(c, job, request):
             results = Path(c["replay"]["results_dir"]) / job.name
             results.mkdir(parents=True, mode=0o700)
             replay_env = replay_adapter.replay_environment(results, c["replay"]["dump"])
-            env.update(replay_env)
+            env = {**env, "AUTOFUSEX_HOME": replay_env["AUTOFUSEX_HOME"]}
             workflow_common.update_record(job / "report.json", replay_environment=replay_env)
             workflow_common.phase(job, "replay_prepare", results_dir=str(results))
             options = dict(c["replay"])
@@ -301,7 +283,7 @@ def replay(c, job, request):
             )
             workflow_common.phase(job, "replay", results_dir=str(results))
             # --save persists evidence locally. Without sync.json no upload is configured.
-            completed = workflow_common.run(command, env=env, cwd=job, check=False)
+            completed = workflow_common.run(command, env={**env, **replay_env}, cwd=job, check=False)
             workflow_common.update_record(
                 job / "report.json", exit_code=completed.returncode
             )

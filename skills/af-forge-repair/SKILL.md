@@ -57,6 +57,8 @@ af-forge replay --config "$TASK_CONFIG" --dump --job-id <基线deploy-job-id> --
 af-forge status --config "$TASK_CONFIG" --job-id <replay-job-id>
 ```
 
+若 replay 在准备阶段退出，先按[准备阶段失败](references/replay-evidence.md#准备阶段失败)定位出错的子命令。目标 seed 实际执行且失败阶段和关键诊断与平台记录吻合后，才能报告已复现。
+
 用 status/wait 等到终态并取得 evidence_path，再按 [复现证据清单](references/replay-evidence.md#replay-自动返回的证据) 读取必要的本地报告、日志和 dump。缺失证据注明原因；保持原 seed、输入和精度语义。
 
 非 nnsmith 用例使用平台给出的复现方式和目标环境，不强行传入 Forge seed 接口。失败无法复现时，先比较环境、包版本和用例条件；明确“未复现”及缺失证据，不直接宣称修复。

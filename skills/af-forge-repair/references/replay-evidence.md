@@ -2,6 +2,12 @@
 
 定位复现使用 `af-forge replay --dump ...`，覆盖本次任务的 replay.dump 并冻结到 job 配置，不修改原配置。未传 --dump 时沿用配置，普通 replay 默认 false；这些设置仅作用于本次 Forge replay，不改变平台常驻 client。读取 job 的终态、`report.json` 和 `job.log`；以 report 的 results_dir、runtime、resources、replay_environment 为实际记录，不能仅引用配置期望值。
 
+## 准备阶段失败
+
+1. 用 `status` 或 `wait` 确认原 replay job 已失败，再查 `job.log` 中报错的子命令。设备自动探测和 seed 解析都可能读取 JSON，仅凭 JSON 解析异常无法区分。若目标 seed 尚未执行，记录“准备失败，尚未复现”。
+2. 保留原设备和 worker 配置。若准备阶段的 JSON 混入 CANN 日志，核对 Forge 版本和探测进程继承的环境；Forge 的 dump 参数应只作用于实际执行用例的进程及其子进程。
+3. 以实际执行记录核对失败阶段与平台关键诊断；涉及 dump 的结论需指向实际生成的文件。
+
 ## 必需信息
 
 - 问题与输入：issue_id、case_key/执行 UUID（平台执行记录的标识，若提供；不同于 Forge job_id 和 AFX attempt_id）、原始完整 seed、复现命令、静态/动态模式、每个失败 shape_index 对应的 Shape、dtype、后端。从平台执行详情和 AFX 保存的 attempt/shape 结果读取；仅有 seed 时不编造输入明细。

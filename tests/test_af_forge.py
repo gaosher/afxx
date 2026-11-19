@@ -191,16 +191,7 @@ def test_sync_refuses_remote_user_edits(cfg, tmp_path):
 def test_build_failure_does_not_install(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr(workflow_execution, "freeze_environment", lambda c, job: None)
     job = job_snapshot(cfg, tmp_path / "job")
-    root = Path(cfg["runtime"]["install_root"])
-    (root / "cann/compiler").mkdir(parents=True)
-    (root / "cann/compiler/version.info").write_text("Version=test")
-    llvm = Path(cfg["build"]["llvm_build_dir"]) / "bin"
-    llvm.mkdir(parents=True)
-    (llvm / "ld.lld").write_text("lld")
-    for package in ("llvm", "mlir"):
-        directory = llvm.parent / "lib/cmake" / package
-        directory.mkdir(parents=True)
-        (directory / (package.upper() + "Config.cmake")).write_text(package)
+    retry = job_snapshot(cfg, tmp_path / "retry")
     monkeypatch.setattr(workflow_runtime, "environment", lambda c: {})
     monkeypatch.setattr(workflow_runtime, "venv_preflight", lambda *a: {})
     monkeypatch.setattr(workflow_runtime, "registry", lambda c: tmp_path / "registry")
@@ -217,6 +208,16 @@ def test_build_failure_does_not_install(cfg, tmp_path, monkeypatch):
     monkeypatch.setattr(workflow_common, "run", fake_run)
     with pytest.raises(subprocess.CalledProcessError):
         workflow_execution.deploy(cfg, job)
+    stamp = Path(cfg["remote"]["source_dir"]) / "build/.workflow-environment.json"
+    assert not stamp.exists()
+    cached = stamp.parent / "cached-object"
+    cached.write_bytes(b"existing")
+    stamp.write_text("obsolete stamp")
+    with pytest.raises(subprocess.CalledProcessError):
+        workflow_execution.deploy(cfg, retry)
+    assert not stamp.exists()
+    assert cached.read_bytes() == b"existing"
+    assert sum("build.sh" in command for command in commands) == 2
     assert not any("--upgrade" in a for a in commands)
     assert not (job / "deployment.json").exists()
 
@@ -444,6 +445,7 @@ def test_replay_uses_private_results_and_existing_cli(
     )
 
     def capture(argv, **kwargs):
+        assert kwargs["env"] == {"AUTOFUSEX_HOME": str(Path(cfg["replay"]["results_dir"]) / job.name)}
         if "device_count" in argv[2]:
             return "2"
         if failure == "seed":
