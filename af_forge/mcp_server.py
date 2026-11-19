@@ -68,20 +68,20 @@ def create_server(default_config=None):
     server = FastMCP(
         "AF Forge",
         instructions=(
-            "Use workflow_help for command options. Commands may change the NPU environment "
+            "Use af_forge_help for command options. Commands may change the NPU environment "
             "or platform state. init/update return a job ID; poll status. deploy and "
             "issue verify are separate actions. stderr carries diagnostic logs."
         ),
     )
 
     @server.tool()
-    async def workflow_help(command: Command | Literal["issue", "config"] | None = None) -> str:
+    async def af_forge_help(command: Command | Literal["issue", "config"] | None = None) -> str:
         """Read CLI command options without loading config or contacting the NPU."""
         _, output = await invoke((command.split() if command else []) + ["--help"])
         return output
 
     @server.tool()
-    async def workflow_run(
+    async def af_forge_run(
         command: Command,
         arguments: list[str] | None = None,
         config: str | None = None,

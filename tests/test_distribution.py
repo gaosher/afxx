@@ -54,26 +54,26 @@ def test_mcp_stdio(tmp_path):
             await session.initialize()
             listed = await session.list_tools()
             assert {tool.name for tool in listed.tools} == {
-                "workflow_help",
-                "workflow_run",
+                "af_forge_help",
+                "af_forge_run",
             }
             help_result = await session.call_tool(
-                "workflow_help", {"command": "deploy"}
+                "af_forge_help", {"command": "deploy"}
             )
             assert not help_result.isError
             assert "--request-id" in help_result.content[0].text
-            group_help = await session.call_tool("workflow_help", {"command": "issue"})
+            group_help = await session.call_tool("af_forge_help", {"command": "issue"})
             assert "verify" in group_help.content[0].text
-            leaf_help = await session.call_tool("workflow_help", {"command": "issue verify"})
+            leaf_help = await session.call_tool("af_forge_help", {"command": "issue verify"})
             assert "--job-id" in leaf_help.content[0].text
-            grouped = await session.call_tool("workflow_run", {
+            grouped = await session.call_tool("af_forge_run", {
                 "command": "issue claim", "config": str(tmp_path / "missing.yaml"),
             })
             assert grouped.isError
             assert grouped.structuredContent["command"] == "issue claim"
             assert grouped.structuredContent["error"]["code"] == "CONFIG_INVALID"
             missing = await session.call_tool(
-                "workflow_run",
+                "af_forge_run",
                 {
                     "command": "doctor",
                     "config": str(tmp_path / "missing.yaml"),
@@ -82,7 +82,7 @@ def test_mcp_stdio(tmp_path):
             assert missing.isError
             assert missing.structuredContent["error"]["code"] == "CONFIG_INVALID"
             result = await session.call_tool(
-                "workflow_run",
+                "af_forge_run",
                 {
                     "command": "config init",
                     "arguments": [
@@ -95,7 +95,7 @@ def test_mcp_stdio(tmp_path):
             )
             assert not result.isError
             assert result.structuredContent["ok"]
-            rejected = await session.call_tool("workflow_run", {"command": "_worker"})
+            rejected = await session.call_tool("af_forge_run", {"command": "_worker"})
             assert rejected.isError
 
     asyncio.run(check())
