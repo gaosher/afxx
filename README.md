@@ -252,6 +252,13 @@ uv pip install -e '.[dev]'
 
 ### 命令分组
 
-`af-forge help` 显示顶层命令；`af-forge issue --help` 显示问题处理操作。旧的连字符子命令不再作为 CLI 入口。
+顶层命令按用途分为四类，命令名称保持不变：
+
+- **远端环境**：`init`、`update`、`check`
+- **远端工作流**：`deploy`、`replay`、`status`
+- **问题验证**：`issue claim|preview|status|wait|verify|renew`
+- **本地操作**：`doctor`、`config init`
+
+`af-forge help` 显示带分类前缀的顶层命令；`af-forge issue --help` 显示问题处理操作，`af-forge config --help` 显示配置操作。旧的连字符子命令不再作为 CLI 入口。
 
 MCP 使用相同命令路径：`workflow_help({"command":"issue"})` 查看分组，`workflow_help({"command":"issue verify"})` 查看操作参数；`workflow_run({"command":"issue claim"})` 执行操作。参数放在 `arguments` 数组中，例如 `{"command":"issue verify","arguments":["--issue-id","F152","--job-id","<job-id>"]}`。JSON 响应的 `command` 使用空格分隔路径；任务记录中的内部操作标识保持不变。

@@ -99,19 +99,19 @@ def parse_arguments():
         "issue-renew",
     )
     descriptions = {
-        "init": "初始化远端 Python 和 CANN 环境",
-        "update": "按配置更新远端 Python 依赖，默认不更新 CANN",
-        "deploy": "同步本地源码到远端，编包并安装 AF",
-        "replay": "使用已部署的 AF 复跑指定 seed",
-        "check": "检查远端运行环境及 Python 依赖",
-        "issue-claim": "从 AFX 平台领取待修复问题",
-        "issue-preview": "查看问题的复现用例和失败摘要",
-        "issue-status": "查询平台验证和回归结果",
-        "issue-wait": "轮询等待平台验证和回归结果",
-        "issue-verify": "针对已部署的 AF 向平台提交验证",
-        "issue-renew": "续期已领取问题的租约",
-        "status": "查询远端 workflow 任务状态",
-        "doctor": "检查本地配置、连接工具及登录状态",
+        "init": "远端环境：初始化 Python 和 CANN 环境",
+        "update": "远端环境：按配置更新 Python 依赖，默认不更新 CANN",
+        "check": "远端环境：检查运行环境及 Python 依赖",
+        "deploy": "远端工作流：同步本地源码，编包并安装 AF",
+        "replay": "远端工作流：使用已部署的 AF 复跑指定 seed",
+        "status": "远端工作流：查询 workflow 任务状态",
+        "issue-claim": "问题验证：从 AFX 平台领取待修复问题",
+        "issue-preview": "问题验证：查看复现用例和失败摘要",
+        "issue-status": "问题验证：查询平台验证和回归结果",
+        "issue-wait": "问题验证：轮询等待验证和回归结果",
+        "issue-verify": "问题验证：针对已部署的 AF 提交验证",
+        "issue-renew": "问题验证：续期已领取问题的租约",
+        "doctor": "本地检查：检查配置、连接工具及登录状态",
     }
     for name in (*jobs, *issues, "status", "doctor"):
         parent = commands
@@ -168,7 +168,7 @@ def parse_arguments():
             uploads.add_argument("--upload", action="store_true", default=None)
             uploads.add_argument("--no-upload", dest="upload", action="store_false")
     config_parser = commands.add_parser(
-        "config", help="管理本地配置", description="管理本地配置",
+        "config", help="本地配置：生成和管理配置", description="本地配置：生成和管理配置",
         usage="%(prog)s <操作> [参数]", allow_abbrev=False,
     )
     config_commands = config_parser.add_subparsers(
