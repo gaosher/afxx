@@ -83,12 +83,14 @@ def parse_arguments():
     )
     commands = parser.add_subparsers(dest="command", required=True, title="命令", metavar="", prog="af-forge")
     groups = {}
-    jobs = (
+    env_jobs = (
         "init",
         "update",
+        "check",
+    )
+    jobs = (
         "deploy",
         "replay",
-        "check",
     )
     issues = (
         "issue-claim",
@@ -113,13 +115,17 @@ def parse_arguments():
         "issue-renew": "问题验证：续期已领取问题的租约",
         "doctor": "本地检查：检查配置、连接工具及登录状态",
     }
-    for name in (*jobs, *issues, "status", "doctor"):
+    for name in (*env_jobs, *jobs, *issues, "status", "doctor"):
         parent = commands
         leaf = name
-        if name.startswith(("issue-", "config-")):
-            group, leaf = name.split("-", 1)
+        if name in env_jobs or name.startswith(("issue-", "config-")):
+            group = "env" if name in env_jobs else name.split("-", 1)[0]
+            leaf = name if group == "env" else name.split("-", 1)[1]
             if group not in groups:
-                summary = "领取问题、提交验证及查询回归结果"
+                summary = {
+                    "env": "管理远端 Python、CANN 和依赖环境",
+                    "issue": "领取问题、提交验证及查询回归结果",
+                }[group]
                 group_parser = commands.add_parser(
                     group, help=summary, description=summary,
                     usage=f"%(prog)s <操作> [参数]", allow_abbrev=False,
@@ -135,9 +141,9 @@ def parse_arguments():
             required=name in ("init", "update"),
             default=None if name in ("init", "update") else workflow_config.default_config_path(),
         )
-        if name in jobs or name == "doctor":
+        if name in (*env_jobs, *jobs) or name == "doctor":
             cmd.add_argument("--dry-run", action="store_true")
-        if name in jobs or name == "issue-claim":
+        if name in (*env_jobs, *jobs) or name == "issue-claim":
             cmd.add_argument("--request-id")
         if name in ("init", "update"):
             cmd.add_argument("--detach", action="store_true")

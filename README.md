@@ -6,7 +6,7 @@
 
 - [配置说明与默认值](docs/CONFIGURATION.md) · [YAML 模板](af_forge/resources/config.example.yaml)
 - [本地依赖](docs/LOCAL_DEPENDENCIES.md)
-- [Agent 调用约定](docs/AGENT_USAGE.md)
+- [Agent 调用约定](docs/AGENT_USAGE.md) · [问题修复 Skill](skills/af-forge-repair/SKILL.md)
 - [设计与模块边界](docs/DESIGN.md)
 
 ## 工具目录
@@ -75,10 +75,10 @@ doctor 校验配置、本地连接工具和 npussh 登录。远端依赖由 init
 ## 初始化和更新环境
 
 ```bash
-af-forge init --config ~/.config/af-forge/config.yaml
-af-forge check
+af-forge env init --config ~/.config/af-forge/config.yaml
+af-forge env check
 # 修改配置后更新 torch_npu / AFX
-af-forge update --config ~/.config/af-forge/config.yaml
+af-forge env update --config ~/.config/af-forge/config.yaml
 ```
 
 init 自动上传配置并准备 Python 3.11、CANN 和专用 venv。update 更新 torch_npu/AFX，保留现有 CANN。init/update 默认跟随远端日志；`--detach` 仅提交任务，后续用 status 查询。
@@ -254,7 +254,7 @@ uv pip install -e '.[dev]'
 
 顶层命令按用途分为四类，命令名称保持不变：
 
-- **远端环境**：`init`、`update`、`check`
+- **远端环境**：`env init`、`env update`、`env check`
 - **远端工作流**：`deploy`、`replay`、`status`
 - **问题验证**：`issue claim|preview|status|wait|verify|renew`
 - **本地操作**：`doctor`、`config init`
@@ -262,3 +262,14 @@ uv pip install -e '.[dev]'
 `af-forge help` 显示带分类前缀的顶层命令；`af-forge issue --help` 显示问题处理操作，`af-forge config --help` 显示配置操作。旧的连字符子命令不再作为 CLI 入口。
 
 MCP 使用相同命令路径：`af_forge_help({"command":"issue"})` 查看分组，`af_forge_help({"command":"issue verify"})` 查看操作参数；`af_forge_run({"command":"issue claim"})` 执行操作。参数放在 `arguments` 数组中，例如 `{"command":"issue verify","arguments":["--issue-id","F152","--job-id","<job-id>"]}`。JSON 响应的 `command` 使用空格分隔路径；任务记录中的内部操作标识保持不变。
+
+## 问题修复 Skill
+
+`af-forge-repair` 编排领取、复现定位、修改、deploy、verify、回归和修复提交。使用现有 Forge CLI/MCP，不另实现客户端。安装到 Codex 的 skills 目录（目标已存在时先检查本地修改）：
+
+```bash
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R skills/af-forge-repair "${CODEX_HOME:-$HOME/.codex}/skills/"
+```
+
+调用示例：`使用 $af-forge-repair 修复 AFX issue F152，验证和回归通过后 commit，等待检视。`

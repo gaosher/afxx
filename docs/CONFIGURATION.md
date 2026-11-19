@@ -10,7 +10,7 @@ af-forge config init --source /absolute/path/graph-autofusion --output ~/.config
 
 `config init` 自动填写 `local.source_dir`，保留模板注释并拒绝覆盖已有文件。填写 `connection.environment`、`workflow_root`、`build.llvm_build_dir` 和 `build.lld_bin`；根据需要修改 Python/CANN 选项。私人配置不要纳入版本控制。
 
-`af-forge init` 和 `af-forge update` 必须显式传入 `--config`，不会使用环境变量或默认路径。其他命令的配置按 `--config`、`AF_FORGE_CONFIG`、当前目录 `af-forge-config.yaml`、用户配置目录 `~/.config/af-forge/config.yaml` 的顺序选择（支持 `XDG_CONFIG_HOME`）。源码仓库由 `local.source_dir` 指定，命令可在任意目录执行。
+`af-forge env init` 和 `af-forge env update` 必须显式传入 `--config`，不会使用环境变量或默认路径。其他命令的配置按 `--config`、`AF_FORGE_CONFIG`、当前目录 `af-forge-config.yaml`、用户配置目录 `~/.config/af-forge/config.yaml` 的顺序选择（支持 `XDG_CONFIG_HOME`）。源码仓库由 `local.source_dir` 指定，命令可在任意目录执行。
 
 配置使用 YAML 普通映射、列表和标量。日期、版本号使用带引号的字符串。加载器拒绝重复键、自定义标签、合并键及不支持的数据类型。路径填写绝对路径，配置中的 `~`、`$HOME` 不展开。远端运行路径采用字母、数字及 `_./+-`，避免空格和 shell 元字符。
 
@@ -51,8 +51,8 @@ Python 3.11 由工具自动准备；LLVM 和 LLD 仍由远端提供。修改 wor
 ## 初始化和更新环境
 
 ```bash
-af-forge init --config ~/.config/af-forge/config.yaml
-af-forge check
+af-forge env init --config ~/.config/af-forge/config.yaml
+af-forge env check
 ```
 
 init 自动上传配置和工具，在 `<workflow_root>/python/` 内准备独立 Python 3.11，无需预装系统 Python 3.11。引导阶段使用 curl 从 PyPI 下载固定版本 uv wheel，校验 SHA-256 后只取其中的 uv 可执行文件，再由 uv 下载托管 Python。下载过程不依赖系统 Python 的 SSL 或 SQLite。
@@ -80,7 +80,7 @@ Python 环境锁包含 `nnsmith-autofusex==0.1.2.post1`，venv 内使用 uv 0.11
 更新环境：
 
 ```bash
-af-forge update --config ~/.config/af-forge/config.yaml
+af-forge env update --config ~/.config/af-forge/config.yaml
 ```
 
 AFX 客户端由官方命令独立运行；Forge 在 verify 前负责启动检查，update 不停止或重启它。更新与安装保留环境占用检查，发现正在使用的库时会报错。

@@ -21,11 +21,11 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent
 
 Command = Literal[
-    "init",
-    "update",
+    "env init",
+    "env update",
+    "env check",
     "deploy",
     "replay",
-    "check",
     "doctor",
     "status",
     "issue claim",
@@ -97,7 +97,7 @@ def create_server(default_config=None):
         path = config if config is not None else default_config
         if path is not None and command != "config init":
             arguments = ["--config", path, *arguments]
-        if command in ("init", "update") and "--detach" not in arguments:
+        if command in ("env init", "env update") and "--detach" not in arguments:
             arguments.append("--detach")
         code, output = await invoke([*command.split(), *arguments])
         try:
