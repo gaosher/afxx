@@ -1,0 +1,33 @@
+# 修复完成后替换占位符；直接作为 issue summarize --summary-file 的输入。
+# kind 按问题类型选择 bugfix_function、bugfix_accuracy 或 perf_tuning 等平台类型。
+kind: bugfix_function
+title: "<修复标题>"
+symptom: |
+  <触发条件、原始 seed/Shape 和失败现象>
+root_cause: |
+  <根因与定位依据>
+solution: |
+  <修改方案、影响范围及为何能解决问题>
+fix_ref: "<实际修复commit的完整SHA；未提交代码时删除此字段>"
+body_md: |
+  ## 问题与基线
+  - Issue: <issue-id>
+  - upstream/master 基线 SHA: <本轮固定的完整SHA>
+  - 基线部署 job: <baseline-deploy-job-id>
+  - 原始 seed / Shape / dtype / 后端 / 芯片: <实际复现条件>
+  - 基线失败证据: <日志或报告位置及关键结论>
+
+  ## 修复与测试
+  - 修改范围及要点: <文件或模块与修改说明>
+  - 测试命令与结果: <实际执行命令及结果>
+  - 修复后原始用例结果: <结果及报告位置>
+
+  ## 候选部署与平台验证
+  - 候选部署 job: <deploy-job-id>
+  - AF 版本: <实际版本>
+  - pyautofuse.so SHA-256: <实际哈希>
+  - Verify: <round_no、结果及证据位置>
+  - Regression: <round_no、结果及证据位置；无候选时明确说明>
+
+  ## 检视重点与限制
+  <影响范围、仍有的限制及需要检视的事项；无已知限制时如实说明>

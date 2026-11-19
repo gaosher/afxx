@@ -300,7 +300,7 @@ MCP 使用相同命令路径：`af_forge_help({"command":"issue"})` 查看分组
 
 ## 问题修复 Skill
 
-`af-forge-repair` 编排领取、复现定位、修改、deploy、verify、回归和修复提交。使用现有 Forge CLI/MCP，不另实现客户端。安装到 Codex 的 skills 目录（目标已存在时先检查本地修改）：
+`af-forge-repair` 编排领取、复现定位、修改、deploy、verify、回归和修复提交，最终生成带修复及验证证据的可提交 summary.yaml，供人工检视后使用 issue summarize 发布。使用现有 Forge CLI/MCP，不另实现客户端。安装到 Codex 的 skills 目录（目标已存在时先检查本地修改）：
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
