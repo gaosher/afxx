@@ -324,13 +324,54 @@ def verify(c, job, lease=None):
         return submit_issue_round(c, path, state, lease, package)
 
 
+def issue_detail(c, issue_id):
+    validate_issue_id(issue_id)
+    value = call(c, "GET", f"/api/issues/{issue_id}")
+    workflow_common.require_code(
+        isinstance(value, dict) and value.get("issue_id") == issue_id,
+        "PLATFORM_RESPONSE_INVALID", "issue identity mismatch",
+    )
+    return value
+
+
+def issue_tasks(c, issue_id, round_no):
+    validate_issue_id(issue_id)
+    workflow_common.require(type(round_no) is int and 1 <= round_no <= 999999,
+                            "round number must be between 1 and 999999")
+    value = call(c, "GET", f"/api/issues/{issue_id}/rounds/{round_no}/tasks")
+    workflow_common.require_code(isinstance(value, list) and all(isinstance(task, dict) for task in value),
+                                 "PLATFORM_RESPONSE_INVALID", "invalid round tasks response")
+    return {"issue_id": issue_id, "round_no": round_no, "tasks": value}
+
+
+def regression_preview(c, issue_id):
+    validate_issue_id(issue_id)
+    value = call(c, "GET", "/api/regression/preview?" + urllib.parse.urlencode({"issue_id": issue_id}))
+    workflow_common.require_code(
+        isinstance(value, dict) and value.get("issue_id") == issue_id,
+        "PLATFORM_RESPONSE_INVALID", "regression preview identity mismatch",
+    )
+    return value
+
+
+def execution_detail(c, exec_uuid):
+    # AFX ingestion accepts opaque execution IDs, not only canonical UUIDs.
+    workflow_common.require(isinstance(exec_uuid, str) and re.fullmatch(r"[A-Za-z0-9_-]{8,64}", exec_uuid),
+                            "execution UUID must contain 8 to 64 letters, digits, underscores or hyphens")
+    value = call(c, "GET", "/api/executions/" + exec_uuid)
+    workflow_common.require_code(
+        isinstance(value, dict) and value.get("exec_uuid") == exec_uuid,
+        "PLATFORM_RESPONSE_INVALID", "execution identity mismatch",
+    )
+    return value
+
+
 def poll(c, issue_id, round_no):
     validate_issue_id(issue_id)
     workflow_common.require(
         type(round_no) is int and round_no > 0, "round number must be positive"
     )
-    detail = call(c, "GET", f"/api/issues/{issue_id}")
-    workflow_common.require(detail["issue_id"] == issue_id, "issue identity mismatch")
+    detail = issue_detail(c, issue_id)
     rounds = detail["rounds"]
     verification = next((r for r in rounds if r["round_no"] == round_no), None)
     workflow_common.require(

@@ -103,6 +103,22 @@ def test_mcp_stdio(tmp_path):
             )
             assert not result.isError
             assert result.structuredContent["ok"]
+            query_commands = {
+                "issue detail": ["--issue-id", "F152"],
+                "issue tasks": ["--issue-id", "F152", "--round-no", "2"],
+                "issue regression-preview": ["--issue-id", "F152"],
+                "execution show": ["--exec-uuid", "exec-0001"],
+            }
+            for command, arguments in query_commands.items():
+                help_result = await session.call_tool("af_forge_help", {"command": command})
+                assert not help_result.isError and arguments[0] in help_result.content[0].text
+                response = await session.call_tool("af_forge_run", {
+                    "command": command, "arguments": arguments,
+                    "config": str(tmp_path / "missing.yaml"),
+                })
+                assert response.isError
+                assert response.structuredContent["command"] == command
+                assert response.structuredContent["error"]["code"] == "CONFIG_INVALID"
             rejected = await session.call_tool("af_forge_run", {"command": "_worker"})
             assert rejected.isError
 

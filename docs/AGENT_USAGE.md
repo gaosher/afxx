@@ -13,6 +13,7 @@
 | check | 提交远端依赖检查 | 任务 success、依赖检查通过 |
 | status | 查询远端 job | 查询成功后继续检查返回的任务 state |
 | issue claim / issue preview / issue renew | 本地直接调用平台 HTTPS | 保存领取响应、预览或续租到期时间 |
+| issue detail / issue tasks / issue regression-preview / execution show | 本地只读查询平台，不要求租约或 NPU 连接 | ok=true 后读取 data；空 tasks/cases 不代表通过 |
 | issue verify | 通过 npussh 在远端提交平台请求 | 返回 state=submitted，保存 round_no |
 | issue status | 本地查询平台指定验证轮次 | 检查 terminal 和 outcome |
 | issue wait | 本地持续查询平台并续租 | terminal=true 且 outcome=passed |
@@ -105,3 +106,16 @@ Python 更新失败时同时读取 result.json.error 和 rollback，分别确认
 环境一致性差异以 WARNING 写入 job.log，不作为 deploy/replay 的失败条件。发生差异时 job 配置保留提交值，不附加旧环境锁；不要将其视为实际环境的精确快照。运行依赖检查和 AF 部署产物完整性检查仍需通过。
 
 客户端启动失败返回 PLATFORM_CLIENT_START_FAILED，查看远端 afx-client/client.log。PLATFORM_CLIENT_MISMATCH 表示存活进程的配置或 AF 身份不匹配；PLATFORM_CLIENT_UNTRACKED 表示同一 HOME 存在无法确认启动环境的进程。上述错误均不提交 verify，也不停止已有进程。
+
+## 平台只读证据查询
+
+- `issue detail --issue-id F152`：返回完整 issue 详情，包含 status、租约、rounds 和 events。
+- `issue tasks --issue-id F152 --round-no 2`：返回 `{issue_id, round_no, tasks}`；round_no 为实际 verify 或 regress 轮次，范围 1–999999。不要总用 verify 的轮次查询回归失败。
+- `issue regression-preview --issue-id F152`：平台当前预测的回归集合，实际执行集以轮次 tasks 为准。
+- `execution show --exec-uuid exec-0001`：读取执行详情、环境、Shape 和日志。AFX 的执行 UUID 是 8–64 位字母、数字、下划线或连字符；不是数据库数值 exec_id，也不要求标准 UUID 格式。
+
+四个命令均复用本地 platform.token_file 和统一 JSON/错误码，不创建远端 job，不改变 issue 状态。MCP 使用相同命令路径，例如 `af_forge_run({"command":"issue tasks","arguments":["--issue-id","F152","--round-no","2"]})`。404 返回 PLATFORM_NOT_FOUND；异常成功响应返回 PLATFORM_RESPONSE_INVALID。
+
+保留平台日志的 log_truncated/log_missing 标记；缺失日志不合成为空日志。任务接口不保证包含 exec_uuid，未拿到可核验执行 ID 时，使用已有 claim 复现信息、任务 detail、客户端日志或平台界面继续定位，不猜测 ID。
+
+当前不提供 knowledge 查询命令。修复总结先保留本地并等待人工检视，不能因为本地 commit 完成就声称平台已经 resolved。

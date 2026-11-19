@@ -144,6 +144,19 @@ verify 在远端核对部署记录与实际加载的 AF，确认官方客户端�
 
 status/wait 查询指定 verify 轮次及紧随其后、包身份一致的 regress 轮次。回归仍在执行时不会把验证通过视为整个流程通过；后续修复的轮次不会覆盖本次结果。失败或超时返回错误码及轮次详情，超时后可继续查询同一 round_no。修复总结由平台处理。
 
+### 查询平台定位信息
+
+以下命令只读，不需要先 claim，也不连接 NPU：
+
+```bash
+af-forge issue detail --issue-id F152
+af-forge issue tasks --issue-id F152 --round-no 1
+af-forge issue regression-preview --issue-id F152
+af-forge execution show --exec-uuid <exec_uuid>
+```
+
+`detail` 返回生命周期、租约、轮次和事件；`tasks` 查询实际验证或回归轮次，返回 issue_id、round_no 和 tasks。回归候选预览不等于最终执行集。`execution show` 使用执行 UUID（不是数值 exec_id），返回环境、Shape、日志及平台的 log_truncated/log_missing 标记；不将截断日志标为完整。修复总结先在本地整理，等待人工检视。
+
 ## AFX 常驻客户端
 
 Forge 在本地控制远端任务；AFX 官方客户端在 NPU 上独立运行，负责心跳、上传、复测领取和平台更新。`issue verify` 提交前调用官方命令启动客户端，使用配置中的 venv/CANN 和 replay.devices。相同环境的已有进程直接复用；环境或 AF 包变化时报错，不自动停止或重启。Forge 不实现上传、心跳或复测循环。
@@ -256,7 +269,7 @@ uv pip install -e '.[dev]'
 
 - **远端环境**：`env init`、`env update`、`env check`
 - **远端工作流**：`deploy`、`replay`、`status`
-- **问题验证**：`issue claim|preview|status|wait|verify|renew`
+- **问题验证**：`issue claim|preview|detail|tasks|regression-preview|status|wait|verify|renew`、`execution show`
 - **本地操作**：`doctor`、`config init`
 
 `af-forge help` 显示带分类前缀的顶层命令；`af-forge issue --help` 显示问题处理操作，`af-forge config --help` 显示配置操作。旧的连字符子命令不再作为 CLI 入口。

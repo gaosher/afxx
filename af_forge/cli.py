@@ -70,7 +70,7 @@ def response(command, data=None, error=None):
     return {
         "schema_version": 1,
         "ok": error is None,
-        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "config-")) else command,
+        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-")) else command,
         "data": data,
         "error": None if error is None else {"code": error.code, "message": str(error)},
     }
@@ -99,6 +99,9 @@ def parse_arguments():
         "issue-wait",
         "issue-verify",
         "issue-renew",
+        "issue-detail",
+        "issue-tasks",
+        "issue-regression-preview",
     )
     descriptions = {
         "init": "远端环境：初始化 Python 和 CANN 环境",
@@ -113,18 +116,23 @@ def parse_arguments():
         "issue-wait": "问题验证：轮询等待验证和回归结果",
         "issue-verify": "问题验证：针对已部署的 AF 提交验证",
         "issue-renew": "问题验证：续期已领取问题的租约",
+        "issue-detail": "问题查询：查看生命周期、租约和历史轮次",
+        "issue-tasks": "问题查询：查看指定轮次的任务与失败信息",
+        "issue-regression-preview": "问题查询：预览平台回归候选集",
+        "execution-show": "执行查询：查看执行详情、Shape 和日志",
         "doctor": "本地检查：检查配置、连接工具及登录状态",
     }
-    for name in (*env_jobs, *jobs, *issues, "status", "doctor"):
+    for name in (*env_jobs, *jobs, *issues, "execution-show", "status", "doctor"):
         parent = commands
         leaf = name
-        if name in env_jobs or name.startswith(("issue-", "config-")):
+        if name in env_jobs or name.startswith(("issue-", "execution-", "config-")):
             group = "env" if name in env_jobs else name.split("-", 1)[0]
             leaf = name if group == "env" else name.split("-", 1)[1]
             if group not in groups:
                 summary = {
                     "env": "管理远端 Python、CANN 和依赖环境",
                     "issue": "领取问题、提交验证及查询回归结果",
+                    "execution": "查询平台执行详情和日志",
                 }[group]
                 group_parser = commands.add_parser(
                     group, help=summary, description=summary,
@@ -156,6 +164,10 @@ def parse_arguments():
                              help="AFX platform issue, e.g. F152")
         if name in ("issue-wait", "issue-status"):
             cmd.add_argument("--round-no", type=int, required=True, help="verification round returned by issue verify")
+        if name == "issue-tasks":
+            cmd.add_argument("--round-no", type=int, required=True, help="verify or regression round number")
+        if name == "execution-show":
+            cmd.add_argument("--exec-uuid", required=True, help="AFX execution UUID, not numeric exec_id")
         if name == "issue-wait":
             cmd.add_argument("--timeout", type=float, default=3600)
         if name in ("status", "issue-verify"):
@@ -238,6 +250,8 @@ def main():
             "CONFIG_INVALID",
             "init/update requires python_env configuration",
         )
+    if args.command == "execution-show":
+        return platform.execution_detail(c, args.exec_uuid)
     if args.command.startswith("issue-"):
         workflow_config.platform_settings(c)
         if args.command == "issue-claim":
@@ -245,6 +259,12 @@ def main():
             if args.request_id is None:
                 print(f"issue claim --request-id {request_id}", file=sys.stderr, flush=True)
             return platform.claim(c, request_id, issue_id=args.issue_id)
+        if args.command == "issue-detail":
+            return platform.issue_detail(c, args.issue_id)
+        if args.command == "issue-tasks":
+            return platform.issue_tasks(c, args.issue_id, args.round_no)
+        if args.command == "issue-regression-preview":
+            return platform.regression_preview(c, args.issue_id)
         if args.command == "issue-renew":
             return platform.renew(c, platform.claimed(c, args.issue_id))
         if args.command == "issue-preview":
@@ -371,7 +391,7 @@ def main():
 
 def cli():
     command = sys.argv[1] if len(sys.argv) > 1 else None
-    if command in ("issue", "config") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
+    if command in ("issue", "execution", "config") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()

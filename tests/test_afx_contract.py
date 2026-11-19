@@ -77,16 +77,16 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     import json
     import af_forge.cli
     from af_forge import jobs
-    from autofusex.platform import auth, issues
+    from autofusex.platform import auth, issues, regression, retests, queries
     from autofusex.platform.ingest import Ingestor
     from autofusex.platform.store import Store
 
     store = Store(tmp_path / "numbered-platform")
     auth.add_user(store, "dev", "developer")
 
-    def principal(kind):
+    def principal():
         return auth.authenticate(
-            store, "Bearer " + auth.issue_token(store, "dev", kind)
+            store, "Bearer " + auth.issue_token(store, "dev")
         )
 
     upload = {
@@ -112,23 +112,30 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
                 "function_status": "compile_fail",
                 "fail_stage": "schedule",
                 "log_summary": "schedule failed",
+                "log": "schedule failed: test execution log",
                 "created_at": 1000,
                 "e2e_ns": 10,
             }
         ],
     }
     result = Ingestor(store).upload(
-        principal("client"), upload, json.dumps(upload).encode()
+        principal(), upload, json.dumps(upload).encode()
     )
     assert result["results"][0]["status"] == "accepted", result["results"]
     number = issues.list_issues(store)["issues"][0]["issue_id"]
-    agent = principal("agent")
+    agent = principal()
     verify_keys = []
 
     def api(c, method, path, body=None, **opts):
         if method == "GET":
-            assert path == f"/api/issues/{number}"
-            return issues.issue_detail(store, number)
+            if path == f"/api/issues/{number}":
+                return issues.issue_detail(store, number)
+            if path == f"/api/issues/{number}/rounds/1/tasks":
+                return retests.round_tasks(store, number, 1)
+            if path == f"/api/regression/preview?issue_id={number}":
+                return regression.preview(store, number)
+            assert path == "/api/executions/exec-0001"
+            return queries.execution_detail(store, "exec-0001")
         assert method == "POST"
         if path == "/api/issues/claim":
             assert body["issue_id"] == number
@@ -182,3 +189,13 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
 
     pending = cli("issue status", "--round-no", "1")
     assert pending["terminal"] is False and pending["verification"]["kind"] == "verify"
+
+    assert cli("issue detail")["issue_id"] == number
+    tasks = cli("issue tasks", "--round-no", "1")
+    assert len(tasks["tasks"]) == 1 and tasks["tasks"][0]["case_key"] == "E" + "0" * 25 + "1"
+    preview = cli("issue regression-preview")
+    assert preview["issue_id"] == number and "cases" in preview
+    monkeypatch.setattr(sys, "argv", ["af-forge", "execution", "show", "--exec-uuid", "exec-0001"])
+    execution = af_forge.cli.main()
+    assert execution["log"] == "schedule failed: test execution log"
+    assert execution["log_truncated"] is False
