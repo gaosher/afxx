@@ -115,6 +115,8 @@ def test_remote_concurrent_launch_and_uncertain_intent(tmp_path):
     job = tmp_path / "job"
     job.mkdir()
     (job / "afxx").mkdir()
+    # Match the uploaded regular package so an installed AFXX cannot shadow it.
+    (job / "afxx/__init__.py").touch()
     (job / "afxx/cli.py").write_text(
         "from pathlib import Path\np=Path(__file__).parent.parent/'starts'\nwith p.open('a') as f:f.write('start\\n')\n"
     )
