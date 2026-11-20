@@ -1,0 +1,95 @@
+name: Publish to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # Update together with AFX contract validation.
+      AFX_REVISION: 4d8eaf9fb23a108281d6525305c41397b53812a0
+      AFX_SOURCE: ${{ runner.temp }}/afx-source
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check tag matches package version
+        run: |
+          python - <<'PYTHON'
+          import os
+          import tomllib
+
+          with open("pyproject.toml", "rb") as stream:
+              version = tomllib.load(stream)["project"]["version"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          if tag != f"v{version}":
+              raise SystemExit(f"Tag {tag} does not match package version v{version}")
+          PYTHON
+
+      - name: Prepare AFX contract source
+        run: |
+          git init "$AFX_SOURCE"
+          git -C "$AFX_SOURCE" remote add origin https://gitcode.com/xingzhixiong/Autofuse-Debugger.git
+          git -C "$AFX_SOURCE" fetch --depth=1 origin "$AFX_REVISION"
+          git -C "$AFX_SOURCE" checkout --detach FETCH_HEAD
+          test "$(git -C "$AFX_SOURCE" rev-parse HEAD)" = "$AFX_REVISION"
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rsync
+          python -m pip install '.[dev]' twine "$AFX_SOURCE"
+
+      - name: Run tests including AFX contracts
+        run: python -m pytest tests -q --require-afx-contracts
+
+      - name: Build and check distributions
+        run: |
+          python -m build
+          python -m twine check dist/*
+
+      - name: Verify wheel installation outside source tree
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-check"
+          "$RUNNER_TEMP/wheel-check/bin/python" -m pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/wheel-check/bin/afxx" help
+          "$RUNNER_TEMP/wheel-check/bin/afxx" mcp --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/afxx
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

@@ -379,6 +379,25 @@ uv pip install -e '.[dev]'
 
 产物位于 `dist/`。wheel 包含远端运行模块、包源配置和 YAML 模板，不包含用户配置、token、源码快照或本地状态。本工具采用 [Apache License 2.0](LICENSE)。
 
+## 发布到 PyPI
+
+发布工作流位于 [publish.yml](.github/workflows/publish.yml)，推送 `v*` tag 时触发。流程检查 tag 与 `pyproject.toml` 版本一致，运行完整测试（包括固定 AFX commit 的契约测试），构建并检查 wheel/sdist，验证 wheel 安装，最后上传 PyPI。普通分支推送不会发布。
+
+首次发布前需配置：
+
+1. GitHub 仓库 `gaosher/afxx` 的 Settings → Environments 中创建 `pypi`。
+2. 在 [PyPI Publishing](https://pypi.org/manage/account/publishing/) 添加 GitHub Trusted Publisher：项目 `afxx`、Owner `gaosher`、Repository `afxx`、Workflow `publish.yml`、Environment `pypi`。已有项目则在项目的 Publishing 页面配置。无需保存 PyPI token；首次发布时包名必须可用。
+
+提交代码与版本号后发布，例如 `pyproject.toml` 中版本为 `0.1.0`：
+
+```bash
+git push -u origin main
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+到 GitHub Actions 查看结果。后续发布需递增版本号，不覆盖已发布文件。AFX 契约源码通过 HTTPS 从 GitCode 拉取，版本固定在工作流的 `AFX_REVISION`；更新该值时需重新验证契约测试。源码获取或测试失败都会阻止发布。
+
 ## 问题修复 Skill
 
 `afxxrepair` 编排领取、复现定位、修改、deploy、verify、回归和修复提交，最终生成带修复及验证证据的可提交 summary.yaml，供人工检视后使用 issue summarize 发布。使用现有 AFXX CLI/MCP，不另实现客户端。安装到 Codex 的 skills 目录（目标已存在时先检查本地修改）：
