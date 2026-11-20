@@ -367,7 +367,7 @@ uv pip install -e '.[dev]'
 .venv/bin/python -m build
 ```
 
-产物位于 `dist/`。wheel 包含远端运行模块、包源配置和 YAML 模板，不包含用户配置、token、源码快照或本地状态。本工具沿用 [CANN Open Software License Agreement Version 2.0](LICENSE)。
+产物位于 `dist/`。wheel 包含远端运行模块、包源配置和 YAML 模板，不包含用户配置、token、源码快照或本地状态。本工具采用 [Apache License 2.0](LICENSE)。
 
 ## 问题修复 Skill
 
