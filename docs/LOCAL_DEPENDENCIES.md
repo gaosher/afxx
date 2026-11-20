@@ -13,7 +13,7 @@
 | rsync | 系统 rsync | 任务文件传输 |
 
 ```bash
-python3 -m pip install /absolute/path/afxx-0.1.0-py3-none-any.whl
+python3 -m pip install /absolute/path/afxx-1.0-py3-none-any.whl
 npm install -g npussh@0.2.4
 npussh login
 npussh list

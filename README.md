@@ -49,7 +49,7 @@ afxx/
 安装 AFXX 并登录 NPU 服务：
 
 ```bash
-python3 -m pip install /absolute/path/afxx-0.1.0-py3-none-any.whl
+python3 -m pip install /absolute/path/afxx-1.0-py3-none-any.whl
 npussh login
 npussh list
 ```
@@ -388,12 +388,12 @@ uv pip install -e '.[dev]'
 1. GitHub 仓库 `gaosher/afxx` 的 Settings → Environments 中创建 `pypi`。
 2. 在 [PyPI Publishing](https://pypi.org/manage/account/publishing/) 添加 GitHub Trusted Publisher：项目 `afxx`、Owner `gaosher`、Repository `afxx`、Workflow `publish.yml`、Environment `pypi`。已有项目则在项目的 Publishing 页面配置。无需保存 PyPI token；首次发布时包名必须可用。
 
-提交代码与版本号后发布，例如 `pyproject.toml` 中版本为 `0.1.0`：
+提交代码与版本号后发布，例如 `pyproject.toml` 中版本为 `1.0`：
 
 ```bash
 git push -u origin main
-git tag v0.1.0
-git push origin v0.1.0
+git tag v1.0
+git push origin v1.0
 ```
 
 到 GitHub Actions 查看结果。后续发布需递增版本号，不覆盖已发布文件。AFX 契约源码通过 HTTPS 从 GitCode 拉取，版本固定在工作流的 `AFX_REVISION`；更新该值时需重新验证契约测试。源码获取或测试失败都会阻止发布。
