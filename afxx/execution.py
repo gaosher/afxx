@@ -8,10 +8,10 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from af_forge.afx import replay as replay_adapter
-from af_forge import common as workflow_common
-from af_forge.environment import runtime as workflow_runtime
-from af_forge import source as workflow_source
+from afxx.afx import replay as replay_adapter
+from afxx import common as workflow_common
+from afxx.environment import runtime as workflow_runtime
+from afxx import source as workflow_source
 
 
 def deploy(c, job):
@@ -33,7 +33,7 @@ def deploy(c, job):
         build_dir = source / "build"
         workflow_common.require(not build_dir.is_symlink(), "build directory may not be a symlink")
         build_dir.mkdir(exist_ok=True)
-        # Remove the obsolete Forge stamp when reusing a pre-existing build tree.
+        # Remove the obsolete AFXX stamp when reusing a pre-existing build tree.
         (build_dir / ".workflow-environment.json").unlink(missing_ok=True)
         output = job / "packages"
         output.mkdir()
@@ -121,7 +121,7 @@ def deploy(c, job):
 
 
 def record_environment(c, job):
-    from af_forge.environment import snapshot
+    from afxx.environment import snapshot
 
     workflow_common.phase(job, "environment_snapshot")
     return snapshot.capture(c, job)

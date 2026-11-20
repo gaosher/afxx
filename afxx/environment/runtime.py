@@ -10,7 +10,7 @@ import signal
 import subprocess
 import sys
 import tempfile
-from af_forge import common as workflow_common
+from afxx import common as workflow_common
 
 
 def registry(c):
@@ -204,7 +204,7 @@ def venv_preflight(c, env, job, scope):
         [
             python(c),
             "-m",
-            "af_forge.environment.runtime",
+            "afxx.environment.runtime",
             "_python_check",
             "autofusex",
             scope,

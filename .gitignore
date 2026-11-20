@@ -7,4 +7,4 @@ build/
 dist/
 configs/*
 !configs/config.example.yaml
-af-forge-config.yaml
+afxx-config.yaml

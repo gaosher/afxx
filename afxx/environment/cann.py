@@ -1,7 +1,7 @@
 """Bootstrap a missing CANN from a configured release catalog; never upgrade an existing installation."""
 
 from html.parser import HTMLParser
-from af_forge import common as workflow_common
+from afxx import common as workflow_common
 
 import json
 import os

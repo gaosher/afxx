@@ -6,7 +6,7 @@ import sys
 
 import pytest
 
-from af_forge import credentials as auth, common, config, cli, jobs
+from afxx import credentials as auth, common, config, cli, jobs
 
 
 def test_prepare_existing_and_prompt(platform_cfg, monkeypatch):
@@ -96,7 +96,7 @@ def test_cli_init_sync_after_success_only(platform_cfg, monkeypatch, state):
     platform_cfg['python_env'] = {}
     monkeypatch.setattr(config,'config',lambda *_:platform_cfg)
     monkeypatch.setattr(jobs,'local_preflight',lambda *a:None)
-    monkeypatch.setattr(sys,'argv',['af-forge','env','init','--detach'])
+    monkeypatch.setattr(sys,'argv',['afxx','env','init','--detach'])
     calls=[]
     monkeypatch.setattr(auth,'prepare',lambda c:calls.append('prepare'))
     monkeypatch.setattr(jobs,'submit',lambda *a: calls.append('submit') or {'job':'a'*32,'state':state})
@@ -109,7 +109,7 @@ def test_dry_run_never_reads_credentials(platform_cfg, monkeypatch):
     platform_cfg['python_env'] = {}
     monkeypatch.setattr(config,'config',lambda *_:platform_cfg)
     monkeypatch.setattr(jobs,'local_preflight',lambda *a:None)
-    monkeypatch.setattr(sys,'argv',['af-forge','env','init','--dry-run'])
+    monkeypatch.setattr(sys,'argv',['afxx','env','init','--dry-run'])
     monkeypatch.setattr(auth,'prepare',lambda c:pytest.fail('dry run reads credentials'))
     monkeypatch.setattr(jobs,'submit',lambda *a:{'job':'a'*32,'state':'prepared'})
     cli.main()
@@ -121,7 +121,7 @@ def test_empty_token_paths_default_under_user_and_workflow_roots(platform_cfg, m
     platform_cfg['workflow_root']='/mnt/workspace/test-auth'
     platform_cfg['platform'].update(token_file=value, remote_token_file=value, client_token_file=value)
     result=config.normalize_config(platform_cfg)
-    assert result['platform']['token_file']==str(tmp_path/'.config/af-forge/auth/afx.token')
+    assert result['platform']['token_file']==str(tmp_path/'.config/afxx/auth/afx.token')
     assert result['platform']['remote_token_file']==str(Path(platform_cfg['workflow_root'])/'auth/afx.token')
     assert result['platform']['client_token_file']==result['platform']['remote_token_file']
 

@@ -5,8 +5,8 @@ import json
 import subprocess
 from pathlib import Path
 
-from af_forge import common
-from af_forge.environment import runtime
+from afxx import common
+from afxx.environment import runtime
 
 PACKAGE_PROBE = r"""
 import importlib.metadata as md, json, platform, sys

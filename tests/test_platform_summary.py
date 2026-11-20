@@ -1,8 +1,8 @@
 import json
 import sys
 import pytest
-from af_forge import common as w, config, jobs, cli
-from af_forge.afx import platform as p
+from afxx import common as w, config, jobs, cli
+from afxx.afx import platform as p
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def test_invalid_summary_does_not_post(platform_cfg, summary, monkeypatch, text)
 
 def test_summary_cli_preserves_errors_without_npu(platform_cfg, summary, monkeypatch, capsys):
     code = "PLATFORM_LEASE_LOST"
-    monkeypatch.setattr(sys, "argv", ["af-forge", "issue", "summarize", "--issue-id", "F152", "--summary-file", str(summary), "--request-id", "summary-1"])
+    monkeypatch.setattr(sys, "argv", ["afxx", "issue", "summarize", "--issue-id", "F152", "--summary-file", str(summary), "--request-id", "summary-1"])
     monkeypatch.setattr(config, "config", lambda _: platform_cfg)
     monkeypatch.setattr(jobs, "local_preflight", lambda *a: pytest.fail("no NPU connection"))
     def fail(*a):
@@ -61,7 +61,7 @@ def test_summary_cli_preserves_errors_without_npu(platform_cfg, summary, monkeyp
 
 
 def test_summary_requires_explicit_request_id(monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["af-forge", "issue", "summarize", "--issue-id", "F152", "--summary-file", "summary.yaml"])
+    monkeypatch.setattr(sys, "argv", ["afxx", "issue", "summarize", "--issue-id", "F152", "--summary-file", "summary.yaml"])
     assert cli.cli() == 2
     assert json.loads(capsys.readouterr().out)["error"]["code"] == "INVALID_ARGUMENT"
 

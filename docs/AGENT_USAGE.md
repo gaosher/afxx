@@ -1,6 +1,6 @@
 # Agent 调用约定
 
-所有命令（包括 env init/update）默认读取 `~/.config/af-forge/config.yaml`，仅显式 `--config` 覆盖。不读取 AF_FORGE_CONFIG、XDG_CONFIG_HOME 或工作目录配置。`config init --source <源码目录>` 在默认位置生成配置；`--output` 可指定其他位置，已有文件不会覆盖。
+所有命令（包括 env init/update）默认读取 `~/.config/afxx/config.yaml`，仅显式 `--config` 覆盖。不读取 AFXX_CONFIG、XDG_CONFIG_HOME 或工作目录配置。`config init --source <源码目录>` 在默认位置生成配置；`--output` 可指定其他位置，已有文件不会覆盖。
 
 ## 命令与完成条件
 
@@ -37,8 +37,8 @@
 ## 部署和任务轮询
 
 ```bash
-af-forge deploy --request-id deploy-001
-af-forge status --job-id <job-id>
+afxx deploy --request-id deploy-001
+afxx status --job-id <job-id>
 ```
 
 提交前生成并保存 request-id，允许 1–128 位字母、数字、下划线、点或连字符。init/update/deploy/replay/check支持此参数。省略时自动生成，但若整个响应丢失，将无法从响应取回该值。
@@ -58,13 +58,13 @@ init/update 默认跟随远端日志，Ctrl+C 停止本地查看，任务仍可�
 ## 平台修复流程
 
 ```bash
-af-forge issue claim --request-id claim-001
-af-forge issue preview --issue-id F152
-af-forge issue renew --issue-id F152
-af-forge deploy --issue-id F152 --request-id deploy-001
-af-forge status --job-id <job-id>
-af-forge issue verify --issue-id F152 --job-id <job-id>
-af-forge issue wait --issue-id F152 --round-no <round_no>
+afxx issue claim --request-id claim-001
+afxx issue preview --issue-id F152
+afxx issue renew --issue-id F152
+afxx deploy --issue-id F152 --request-id deploy-001
+afxx status --job-id <job-id>
+afxx issue verify --issue-id F152 --job-id <job-id>
+afxx issue wait --issue-id F152 --round-no <round_no>
 ```
 
 claim 可用 --issue-id 指定问题；省略时由平台分配。领取回执存于 issues/<issue_id>.json，包含复现信息和租约。重复请求复用 request-id；无任务时返回 null。preview 默认输出失败摘要及去重 seed，--full 返回完整复现信息。
@@ -73,7 +73,7 @@ verify 与 deploy 分离，在远端采集实际 AF 身份，核对部署后提�
 
 status/wait 以 verify 返回的 round_no 定位验证，跟踪同一候选包的下一轮 regress。只有相关轮次全部通过才返回 outcome=passed。wait 遇到失败和 invalid 均返回 PLATFORM_VERIFICATION_FAILED；等待超时可继续查同一轮次。查询保留历史轮次身份，不使用其他修复的结果。
 
-AFX 官方客户端在 NPU 独立常驻，通过 `afx platform client run --retest` 启动。verify 提交前通过官方 CLI 检查并启动客户端；不屏蔽平台更新行为，不自动停止或重启。需配置 platform.client_token_file。部署、更新仍执行环境占用检查。不要将 Forge 的锁视为独立客户端的并发保护。
+AFX 官方客户端在 NPU 独立常驻，通过 `afx platform client run --retest` 启动。verify 提交前通过官方 CLI 检查并启动客户端；不屏蔽平台更新行为，不自动停止或重启。需配置 platform.client_token_file。部署、更新仍执行环境占用检查。不要将 AFXX 的锁视为独立客户端的并发保护。
 
 ## 错误处理
 
@@ -116,7 +116,7 @@ deploy/replay/check 保留提交配置，并将现场采集的 Python 包版本�
 - `issue regression-preview --issue-id F152`：平台当前预测的回归集合，实际执行集以轮次 tasks 为准。
 - `execution show --exec-uuid exec-0001`：读取执行详情、环境、Shape 和日志。AFX 的执行 UUID 是 8–64 位字母、数字、下划线或连字符；不是数据库数值 exec_id，也不要求标准 UUID 格式。
 
-四个命令均复用本地 platform.token_file 和统一 JSON/错误码，不创建远端 job，不改变 issue 状态。MCP 使用相同命令路径，例如 `af_forge_run({"command":"issue tasks","arguments":["--issue-id","F152","--round-no","2"]})`。404 返回 PLATFORM_NOT_FOUND；异常成功响应返回 PLATFORM_RESPONSE_INVALID。
+四个命令均复用本地 platform.token_file 和统一 JSON/错误码，不创建远端 job，不改变 issue 状态。MCP 使用相同命令路径，例如 `afxx_run({"command":"issue tasks","arguments":["--issue-id","F152","--round-no","2"]})`。404 返回 PLATFORM_NOT_FOUND；异常成功响应返回 PLATFORM_RESPONSE_INVALID。
 
 保留平台日志的 log_truncated/log_missing 标记；缺失日志不合成为空日志。任务接口不保证包含 exec_uuid，未拿到可核验执行 ID 时，使用已有 claim 复现信息、任务 detail、客户端日志或平台界面继续定位，不猜测 ID。
 
@@ -135,13 +135,13 @@ SUMMARY_INVALID 表示本地文件或字段有误；PLATFORM_WRONG_STATE、PLATF
 ## 证据分页与续读
 
 ```bash
-af-forge evidence list --config "$CONFIG" --job-id <replay-job-id>
+afxx evidence list --config "$CONFIG" --job-id <replay-job-id>
 # 清单被截断时，用返回的 next_offset 继续分页（offset 为文件序号）。
-af-forge evidence list --config "$CONFIG" --job-id <replay-job-id> --offset <next_offset>
-af-forge evidence read --config "$CONFIG" --job-id <replay-job-id> \
+afxx evidence list --config "$CONFIG" --job-id <replay-job-id> --offset <next_offset>
+afxx evidence read --config "$CONFIG" --job-id <replay-job-id> \
   --path <files中的远端绝对路径> --offset 0 --limit 8192
 # 读取后续字节时同时传首次返回的 sha256，拒绝拼接已变化的文件。
-af-forge evidence read --config "$CONFIG" --job-id <replay-job-id> \
+afxx evidence read --config "$CONFIG" --job-id <replay-job-id> \
   --path <同一文件路径> --offset <next_offset> --limit 8192 --sha256 <首次返回的sha256>
 ```
 
@@ -155,21 +155,21 @@ MCP 对应 command 为 `evidence list` / `evidence read`，参数与 CLI 相同�
 
 ```bash
 # 运行中返回概要和 cursor；replay 终态自动下载全量现场。
-af-forge status --config "$CONFIG" --job-id <job-id>
+afxx status --config "$CONFIG" --job-id <job-id>
 # 默认 attempt 只返回简短身份、状态、错误摘要；详细字段需显式选择。
-af-forge status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id>
-af-forge status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id> \
+afxx status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id>
+afxx status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id> \
   --fields error_stage,error_summary,diagnostic_view.summary,shape_results
 # 独立读取环境或图，避免把整份 attempt 放入上下文。
-af-forge status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id> \
+afxx status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id> \
   --fields contexts.environment
 # 只等待变化/终态；没有变化时返回小型 timeout 回执。
-af-forge status --config "$CONFIG" --job-id <job-id> --wait --since <cursor> --timeout 30
+afxx status --config "$CONFIG" --job-id <job-id> --wait --since <cursor> --timeout 30
 ```
 
-replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/af-forge-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。
+replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。
 
-非 replay 终态仍返回概要和 cursor；`--attempt` 与 `--wait` 互斥。完整本地文件布局、缓存和失败重试规则见 [复现证据清单](../skills/af-forge-repair/references/replay-evidence.md#replay-自动返回的证据)。按需提取文件内容，不要整体读取到上下文。
+非 replay 终态仍返回概要和 cursor；`--attempt` 与 `--wait` 互斥。完整本地文件布局、缓存和失败重试规则见 [复现证据清单](../skills/afxxrepair/references/replay-evidence.md#replay-自动返回的证据)。按需提取文件内容，不要整体读取到上下文。
 
 attempt 默认字段为 id、seed_short、backend、status、error_stage、error_summary（缺失的可选字段省略），字符串最多 512 字符，裁剪字段列于 attempt_truncated_fields。`--fields` 使用逗号分隔的字段或字典点路径，例如 metadata.graph、contexts.environment、diagnostic_view.summary、shape_results；选择结果以完整字段路径为键。显式选择的大字段会完整返回，按定位需要逐次读取。未知执行返回 ATTEMPT_NOT_FOUND，未知字段返回 ATTEMPT_FIELD_NOT_FOUND，不默默忽略拼写错误。
 

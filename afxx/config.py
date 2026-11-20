@@ -9,7 +9,7 @@ import re
 import shlex
 import sys
 import urllib.parse
-from af_forge import common as workflow_common
+from afxx import common as workflow_common
 
 
 FIELDS = {
@@ -252,7 +252,7 @@ def normalize_config(raw):
     if "platform" in c:
         p = c["platform"]
         if p["token_file"] in (None, ""):
-            p["token_file"] = str(Path.home() / ".config/af-forge/auth/afx.token")
+            p["token_file"] = str(Path.home() / ".config/afxx/auth/afx.token")
         if p["remote_token_file"] in (None, ""):
             p["remote_token_file"] = under("auth/afx.token")
         if p["client_token_file"] in (None, ""):
@@ -473,7 +473,7 @@ def platform_settings(c):
 
 def default_config_path():
     """Return the fixed per-user configuration path."""
-    return Path.home() / ".config" / "af-forge" / "config.yaml"
+    return Path.home() / ".config" / "afxx" / "config.yaml"
 
 
 
@@ -485,7 +485,7 @@ def write_template(source, output):
     source = Path(source).expanduser().resolve()
     if not source.is_dir():
         raise ValueError(f"source directory does not exist: {source}")
-    text = files("af_forge").joinpath("resources/config.example.yaml").read_text(encoding="utf-8")
+    text = files("afxx").joinpath("resources/config.example.yaml").read_text(encoding="utf-8")
     text = text.replace("source_dir: null", "source_dir: " + json.dumps(str(source), ensure_ascii=False), 1)
     output = Path(output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)

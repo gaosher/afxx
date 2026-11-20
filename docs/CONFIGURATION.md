@@ -1,16 +1,16 @@
-# AF Forge 配置
+# AFXX 配置
 
-本文说明配置选择、字段默认值、环境初始化和恢复约束。日常命令流程见 [README](../README.md)，完整示例见 [带注释的 YAML 模板](../af_forge/resources/config.example.yaml)。
+本文说明配置选择、字段默认值、环境初始化和恢复约束。日常命令流程见 [README](../README.md)，完整示例见 [带注释的 YAML 模板](../afxx/resources/config.example.yaml)。
 
 ## 创建和选择配置
 
 ```bash
-af-forge config init --source /absolute/path/graph-autofusion --output ~/.config/af-forge/config.yaml
+afxx config init --source /absolute/path/graph-autofusion --output ~/.config/afxx/config.yaml
 ```
 
 `config init` 自动填写 `local.source_dir`，保留模板注释并拒绝覆盖已有文件。填写 `connection.environment`、`workflow_root`、`build.llvm_build_dir` 和 `build.lld_bin`；根据需要修改 Python/CANN 选项。私人配置不要纳入版本控制。
 
-所有命令（包括 env init/update）默认读取 `~/.config/af-forge/config.yaml`，仅显式 `--config` 覆盖。不读取 AF_FORGE_CONFIG、XDG_CONFIG_HOME 或工作目录配置。`config init --source <源码目录>` 在默认位置生成配置；`--output` 可指定其他位置，已有文件不会覆盖。
+所有命令（包括 env init/update）默认读取 `~/.config/afxx/config.yaml`，仅显式 `--config` 覆盖。不读取 AFXX_CONFIG、XDG_CONFIG_HOME 或工作目录配置。`config init --source <源码目录>` 在默认位置生成配置；`--output` 可指定其他位置，已有文件不会覆盖。
 
 配置使用 YAML 普通映射、列表和标量。日期、版本号使用带引号的字符串。加载器拒绝重复键、自定义标签、合并键及不支持的数据类型。路径填写绝对路径，配置中的 `~`、`$HOME` 不展开。远端运行路径采用字母、数字及 `_./+-`，避免空格和 shell 元字符。
 
@@ -51,8 +51,8 @@ Python 3.11 由工具自动准备；LLVM 和 LLD 仍由远端提供。修改 wor
 ## 初始化和更新环境
 
 ```bash
-af-forge env init --config ~/.config/af-forge/config.yaml
-af-forge env check
+afxx env init --config ~/.config/afxx/config.yaml
+afxx env check
 ```
 
 init 自动上传配置和工具，在 `<workflow_root>/python/` 内准备独立 Python 3.11，无需预装系统 Python 3.11。引导阶段使用 curl 从 PyPI 下载固定版本 uv wheel，校验 SHA-256 后只取其中的 uv 可执行文件，再由 uv 下载托管 Python。下载过程不依赖系统 Python 的 SSL 或 SQLite。
@@ -80,12 +80,12 @@ Python 环境锁包含 `nnsmith-autofusex==0.1.2.post1`，venv 内使用 uv 0.11
 更新环境：
 
 ```bash
-af-forge env update --config ~/.config/af-forge/config.yaml
+afxx env update --config ~/.config/afxx/config.yaml
 ```
 
-AFX 客户端由官方命令独立运行；Forge 在 verify 前负责启动检查，update 不停止或重启它。更新与安装保留环境占用检查，发现正在使用的库时会报错。
+AFX 客户端由官方命令独立运行；AFXX 在 verify 前负责启动检查，update 不停止或重启它。更新与安装保留环境占用检查，发现正在使用的库时会报错。
 
-update 保留现有 CANN。包下载要求来源仍可访问；指定版本的包必须支持当前 Python 和平台。包源默认值及 OPS 映射集中在 [package_sources.json](../af_forge/environment/package_sources.json)。
+update 保留现有 CANN。包下载要求来源仍可访问；指定版本的包必须支持当前 Python 和平台。包源默认值及 OPS 映射集中在 [package_sources.json](../afxx/environment/package_sources.json)。
 
 ## CANN 准备
 
@@ -117,9 +117,9 @@ platform:
   client_token_file: "/absolute/remote/path/client.token"
 ```
 
-Forge 的 token 需要 `issue` 权限。远端独立运行的 AFX 客户端使用自己的 client token，需要 `upload/retest` 权限；不要将默认只具备客户端权限的 token 用于 Forge 领取和提交问题。
+AFXX 的 token 需要 `issue` 权限。远端独立运行的 AFX 客户端使用自己的 client token，需要 `upload/retest` 权限；不要将默认只具备客户端权限的 token 用于 AFXX 领取和提交问题。
 
-`platform.client_token_file` 在 issue verify 时必填，为远端路径。Forge 先用官方 `client once` 检查连通和鉴权，再后台运行 `client run --retest`，设备沿用 replay.devices（auto 时查询可见卡）。启动证据和日志位于 remote.state_dir 的上一级目录下的 afx-client/。相同配置和 AF 身份复用已有进程；不自动停止旧进程。启动检查不等同于复测通过，结果仍通过 issue status/wait 查询。
+`platform.client_token_file` 在 issue verify 时必填，为远端路径。AFXX 先用官方 `client once` 检查连通和鉴权，再后台运行 `client run --retest`，设备沿用 replay.devices（auto 时查询可见卡）。启动证据和日志位于 remote.state_dir 的上一级目录下的 afx-client/。相同配置和 AF 身份复用已有进程；不自动停止旧进程。启动检查不等同于复测通过，结果仍通过 issue status/wait 查询。
 
 ## Job 环境快照
 
@@ -137,7 +137,7 @@ deploy/replay/check 在远端开始执行时保留提交的 `config.yaml`，并�
 
 恢复使用内嵌 Python 依赖锁、实际 Daily 日期、CANN 发布号及包哈希。基础 Python 版本必须匹配，包源或共享 wheel 需仍可访问。外部 CANN 缺少安装收据时，只记录可探测的版本信息，恢复需准备相应安装。源码、seed 和运行结果按各自产物保存。
 
-MCP 默认读取同一固定配置；需要覆盖时，通过调用的 `config` 字段、`arguments` 中的 `--config`，或启动 `af-forge-mcp --config ...` 提供。
+MCP 默认读取同一固定配置；需要覆盖时，通过调用的 `config` 字段、`arguments` 中的 `--config`，或启动 `afxx mcp --config ...` 提供。
 
 ## Replay 定位采集
 
@@ -148,24 +148,24 @@ replay:
   dump: true
 ```
 
-开启后，Forge 设置 AF `codegen_compile_debug=true`（debug_dir 为结果目录下的 dump/）、`TORCH_COMPILE_DEBUG=1`、`DUMP_GE_GRAPH=1`、`DUMP_GRAPH_LEVEL=1`、`DUMP_GRAPH_PATH=<结果目录>/dump/ge`，以及 `ASCEND_GLOBAL_LOG_LEVEL=0`、`ASCEND_SLOG_PRINT_TO_STDOUT=1`。实际注入参数记录于 job 的 result.json/replay_environment；dump 参数仅传给实际执行用例的 AFX 进程及其子进程。设备自动探测、seed 解析、结果查询和上传沿用基础环境及本次任务的 AUTOFUSEX_HOME。
+开启后，AFXX 设置 AF `codegen_compile_debug=true`（debug_dir 为结果目录下的 dump/）、`TORCH_COMPILE_DEBUG=1`、`DUMP_GE_GRAPH=1`、`DUMP_GRAPH_LEVEL=1`、`DUMP_GRAPH_PATH=<结果目录>/dump/ge`，以及 `ASCEND_GLOBAL_LOG_LEVEL=0`、`ASCEND_SLOG_PRINT_TO_STDOUT=1`。实际注入参数记录于 job 的 result.json/replay_environment；dump 参数仅传给实际执行用例的 AFX 进程及其子进程。设备自动探测、seed 解析、结果查询和上传沿用基础环境及本次任务的 AUTOFUSEX_HOME。
 
 AF 图、逐 pass MLIR 和生成代码位于结果目录 dump/；GE 图位于 dump/ge/；PyTorch 调试产物默认位于 job 目录 torch_compile_debug/，Inductor cache 位于结果目录 cache/。日志保留在 job.log 和 AFX worker 日志中。只有执行到对应阶段才产生文件，具体产物取决于后端及安装版本。
 
-`--save` 始终保存 AFX 结果到 results.sqlite，与 dump 独立。dump 不自动保存所有输入/输出张量，也不强制同步运行或禁用缓存。性能验收应关闭 dump，避免调试开销影响结论。完整收集标准见 [复现证据清单](../skills/af-forge-repair/references/replay-evidence.md)。
+`--save` 始终保存 AFX 结果到 results.sqlite，与 dump 独立。dump 不自动保存所有输入/输出张量，也不强制同步运行或禁用缓存。性能验收应关闭 dump，避免调试开销影响结论。完整收集标准见 [复现证据清单](../skills/afxxrepair/references/replay-evidence.md)。
 
-replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/af-forge-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 下载覆盖结果目录和 job 的诊断目录，不受报告摘录的 128 文件/文本长度限制；不跟随符号链接，不下载含凭据的 sync.json，跳过原因记在 evidence.json。开启 dump 不保证每个阶段都生成文件。
+replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 下载覆盖结果目录和 job 的诊断目录，不受报告摘录的 128 文件/文本长度限制；不跟随符号链接，不下载含凭据的 sync.json，跳过原因记在 evidence.json。开启 dump 不保证每个阶段都生成文件。
 
 
 ## Init 平台凭据准备
 
 未配置 platform 时，init 不读取或创建 token。配置 platform.url 和 agent_id 后：
 
-- platform.token_file 省略、null 或空字符串时，默认 `~/.config/af-forge/auth/afx.token`。
+- platform.token_file 省略、null 或空字符串时，默认 `~/.config/afxx/auth/afx.token`。
 - platform.remote_token_file 留空时，默认 `<workflow_root>/auth/afx.token`。
 - platform.client_token_file 留空时，复用 remote_token_file；显式指定时两处都会收到同一个 token。
 
-init 提交前复用本地 token；文件不存在时仅在交互终端隐藏输入一次，保存为 0600，再通过 `/api/me` 验证身份。已存在但为空或不可读的文件会报错，不静默覆盖。本地 token 必须位于同步源码目录之外。token 由平台签发，Forge 不签发、不轮换；用户需具有相应领取、验证、上传和复测权限，具体权限仍由平台接口检查。
+init 提交前复用本地 token；文件不存在时仅在交互终端隐藏输入一次，保存为 0600，再通过 `/api/me` 验证身份。已存在但为空或不可读的文件会报错，不静默覆盖。本地 token 必须位于同步源码目录之外。token 由平台签发，AFXX 不签发、不轮换；用户需具有相应领取、验证、上传和复测权限，具体权限仍由平台接口检查。
 
 环境 init 成功后通过 SSH 标准输入同步到远端，文件权限为 0600，token 内容不进入命令参数、配置快照、job 文件或日志。相同 token 复用；任一目标已有不同 token 时停止，不覆盖原凭据。配置文件只保存路径。
 

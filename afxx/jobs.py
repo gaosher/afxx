@@ -11,12 +11,12 @@ import signal
 import subprocess
 import sys
 import uuid
-from af_forge import bundle as workflow_bundle
-from af_forge import common as workflow_common
-from af_forge import config as workflow_config
-from af_forge import execution as workflow_execution
-from af_forge.environment import runtime as workflow_runtime
-from af_forge import source as workflow_source
+from afxx import bundle as workflow_bundle
+from afxx import common as workflow_common
+from afxx import config as workflow_config
+from afxx import execution as workflow_execution
+from afxx.environment import runtime as workflow_runtime
+from afxx import source as workflow_source
 
 
 def confirm_submission(record, saved, local, status):
@@ -87,12 +87,12 @@ def worker(job):
             )
         workflow_common.phase(job, "starting")
         if request["command"] == "deploy":
-            from af_forge.afx import platform as platform_adapter
+            from afxx.afx import platform as platform_adapter
             with platform_adapter.deployment_lease(c, job):
                 workflow_execution.deploy(c, job)
         elif request["command"] in ("init", "update"):
             workflow_common.phase(job, request["command"])
-            from af_forge.environment import bootstrap
+            from afxx.environment import bootstrap
 
             workflow_common.phase(job, "python_bootstrap")
             interpreter = bootstrap.prepare(c, job)
@@ -101,7 +101,7 @@ def worker(job):
                 [
                     interpreter,
                     "-m",
-                    "af_forge.environment.python",
+                    "afxx.environment.python",
                     "_" + request["command"] + "_job",
                     job,
                 ],
@@ -350,7 +350,7 @@ with (p/'.submit.lock').open('a') as guard:
   write(p/'launch.json',{'state':'starting','job':p.name})
   write(p/'status.json',{'state':'queued','job':p.name})
   with (p/'job.log').open('ab') as log:
-   child=subprocess.Popen([sys.executable,'-m','af_forge.cli','_worker',str(p)],stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True,cwd=p)
+   child=subprocess.Popen([sys.executable,'-m','afxx.cli','_worker',str(p)],stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True,cwd=p)
   write(p/'launch.json',{'state':'started','pid':child.pid,'job':p.name})
   data=inspect()
  if action=='view':
@@ -509,7 +509,7 @@ def submit(c, request, request_id, dry_run):
 
 def query_evidence(c, job_id, action, *, path=None, offset=0, limit=8192, sha256=None):
     import inspect
-    from af_forge.afx import replay
+    from afxx.afx import replay
     workflow_common.require_code(offset >= 0 and 1 <= limit <= 65536,
                                  "INVALID_ARGUMENT", "offset >= 0; limit must be 1..65536")
     code = "import json,os,re,sys\nfrom pathlib import Path\n"
@@ -537,8 +537,8 @@ except (OSError, ValueError, KeyError) as error:
 
 def query_status(c, job_id, *, full=False, attempt_id=None, fields=None):
     import inspect
-    from af_forge.job_view import status_view
-    from af_forge.afx.replay import failure_index
+    from afxx.job_view import status_view
+    from afxx.afx.replay import failure_index
     code = inspect.getsource(failure_index) + "\n" + inspect.getsource(status_view) + "\n" + REMOTE_JOB
     data = remote(c, ["python3", "-c", code, str(Path(c["remote"]["state_dir"]) / job_id),
                       "view", json.dumps(dict(full=full, attempt_id=attempt_id, fields=fields))])
@@ -565,7 +565,7 @@ def wait_status(c, job_id, *, since=None, timeout=30):
         workflow_common.require_code(data["state"] != "not_found", "JOB_NOT_FOUND", "未找到任务：" + job_id)
         cursor = status_cursor(data)
         if data["state"] in {"success", "failed", "unknown"}:
-            from af_forge import credentials
+            from afxx import credentials
             data = credentials.complete_init(c, job_id, data)
             result = localize_replay(c, job_id, data)
             if "evidence_path" in result:
@@ -583,6 +583,6 @@ def wait_status(c, job_id, *, since=None, timeout=30):
 def localize_replay(c, job_id, data):
     if data.get("state") not in {"success", "failed"} or not ("replay" in data or data.get("task_type") == "replay"):
         return data
-    from af_forge import evidence_bundle
+    from afxx import evidence_bundle
     directory = evidence_bundle.download(c, job_id, remote)
     return evidence_bundle.terminal_result(directory, dict(data, job_id=job_id))

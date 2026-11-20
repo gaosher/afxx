@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 import pytest
-from af_forge import common, jobs, evidence_bundle as bundle
+from afxx import common, jobs, evidence_bundle as bundle
 
 
 @pytest.fixture

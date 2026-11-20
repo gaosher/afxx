@@ -1,7 +1,7 @@
-from af_forge import common as workflow_common
-from af_forge import config as workflow_config
-from af_forge import execution as workflow_execution
-from af_forge.environment import runtime as workflow_runtime
+from afxx import common as workflow_common
+from afxx import config as workflow_config
+from afxx import execution as workflow_execution
+from afxx.environment import runtime as workflow_runtime
 
 import io
 import json
@@ -13,7 +13,7 @@ import zipfile
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from af_forge.environment import python as e
+from afxx.environment import python as e
 
 
 @pytest.fixture

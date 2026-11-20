@@ -8,8 +8,8 @@ from pathlib import Path
 import subprocess
 import sys
 
-from af_forge import bundle as workflow_bundle
-from af_forge import jobs as workflow_jobs
+from afxx import bundle as workflow_bundle
+from afxx import jobs as workflow_jobs
 
 
 def test_module_dependencies_are_acyclic_and_do_not_import_cli():
@@ -35,7 +35,7 @@ def test_module_dependencies_are_acyclic_and_do_not_import_cli():
                 imports.add(base)
                 imports.update(base + "." + item.name for item in node.names)
         edges[name] = imports & names
-        assert "af_forge.cli" not in edges[name]
+        assert "afxx.cli" not in edges[name]
 
     def visit(name, ancestors):
         assert name not in ancestors, f"cyclic dependency: {ancestors} -> {name}"
@@ -71,7 +71,7 @@ if sys.argv[3]:
 for name in json.loads(sys.argv[2]):
     module = importlib.import_module(name)
     assert root in Path(module.__file__).resolve().parents, module.__file__
-assert json.loads((root / 'af_forge/environment/package_sources.json').read_text())
+assert json.loads((root / 'afxx/environment/package_sources.json').read_text())
 """
     completed = subprocess.run(
         [
@@ -98,7 +98,7 @@ def test_copied_runtime_dependency_probe_is_executable(tmp_path):
         [
             sys.executable,
             "-m",
-            "af_forge.environment.runtime",
+            "afxx.environment.runtime",
             "_python_check",
             "missing_workflow_fixture",
             "replay",

@@ -1,13 +1,13 @@
-# af-forge 命令参考
+# afxx 命令参考
 
-所有命令以 `af-forge` 开头，参数放在子命令之后：
+所有命令以 `afxx` 开头，参数放在子命令之后：
 
 ```bash
-af-forge env init --config /path/config.yaml
+afxx env init --config /path/config.yaml
 ```
 
 - 本文的"必填"仅指**命令行参数**。远端地址、源码路径、构建并行度等来自配置文件，见 [配置说明](CONFIGURATION.md)。
-- 具体命令的帮助：`af-forge <命令> --help`。
+- 具体命令的帮助：`afxx <命令> --help`。
 
 ## 目录
 
@@ -27,11 +27,11 @@ af-forge env init --config /path/config.yaml
 
 ## 1. 命令速查
 
-按一级命令（`af-forge` 后的第一个词）分成若干子表。带二级命令的，二级命令紧跟其后，如 `af-forge env init`。
+按一级命令（`afxx` 后的第一个词）分成若干子表。带二级命令的，二级命令紧跟其后，如 `afxx env init`。
 
 ### 无二级命令
 
-直接使用，如 `af-forge deploy`。
+直接使用，如 `afxx deploy`。
 
 | 命令 | 作用 | 执行方式 |
 |---|---|---|
@@ -100,11 +100,11 @@ af-forge env init --config /path/config.yaml
 | 参数 | 适用命令 | 说明 |
 |---|---|---|
 | `-h` / `--help` | 所有命令及命令分组 | 显示帮助；不读取配置，不连接远端 |
-| `--config PATH` | 除 `help`、`config init` 外的业务命令 | 默认 `~/.config/af-forge/config.yaml`。仅使用显式指定或默认路径，**不会**查找工作目录或配置环境变量 |
+| `--config PATH` | 除 `help`、`config init` 外的业务命令 | 默认 `~/.config/afxx/config.yaml`。仅使用显式指定或默认路径，**不会**查找工作目录或配置环境变量 |
 | `--request-id ID` | `env init/update/check`、`deploy`、`replay`、`issue claim`、`issue summarize` | 见下方规则 |
 | `--dry-run` | `env init/update/check`、`deploy`、`replay`、`doctor` | 默认关闭；跳过远端连接，见 [第 10 节](#10-dry-run-说明) |
 | `--detach` | `env init`、`env update` | 默认关闭（CLI 跟随日志直到结束）。开启后提交即返回，用 `status` 查询。MCP 下自动开启 |
-| `--job-id ID`（别名 `--job`） | `replay`、`status`、`issue verify`、`evidence list/read` | Forge 的 32 位小写十六进制任务 ID。各命令引用的 job 类型见各节 |
+| `--job-id ID`（别名 `--job`） | `replay`、`status`、`issue verify`、`evidence list/read` | AFXX 的 32 位小写十六进制任务 ID。各命令引用的 job 类型见各节 |
 
 **`--request-id` 规则**
 
@@ -120,9 +120,9 @@ af-forge env init --config /path/config.yaml
 | ID | 示例 / 格式 | 用在哪里 |
 |---|---|---|
 | 平台问题 ID | `F152` | `issue *` 命令的 `--issue-id` |
-| Forge job ID | 32 位小写十六进制 | `--job-id`：deploy job 或 replay job，因命令而异 |
+| AFXX job ID | 32 位小写十六进制 | `--job-id`：deploy job 或 replay job，因命令而异 |
 | AFX attempt ID | AFX 单次执行 ID | `status --attempt` |
-| 平台 exec UUID | 平台返回的 exec_uuid，未必为标准 UUID；8–64 位字母、数字、`_`、`-` | `execution show --exec-uuid`（不接受数字 exec_id 或 Forge job ID） |
+| 平台 exec UUID | 平台返回的 exec_uuid，未必为标准 UUID；8–64 位字母、数字、`_`、`-` | `execution show --exec-uuid`（不接受数字 exec_id 或 AFXX job ID） |
 
 `--job-id` 引用哪类 job：
 
@@ -144,7 +144,7 @@ af-forge env init --config /path/config.yaml
 | 参数 | 必填 | 说明 |
 |---|---|---|
 | `--source PATH` | 是 | 本地源码目录 |
-| `--output PATH` | 否 | 默认 `~/.config/af-forge/config.yaml` |
+| `--output PATH` | 否 | 默认 `~/.config/afxx/config.yaml` |
 
 - 不覆盖已有文件。
 - 不接受 `--config`。
@@ -269,7 +269,7 @@ af-forge env init --config /path/config.yaml
 | `issue status` | `--issue-id ID`、`--round-no N` | 查询一次；`round-no` 使用 `verify` 的返回值 |
 | `issue wait` | `--issue-id ID`、`--round-no N` | `--timeout SECONDS`：默认 3600，必须为有限正数；**agent 建议传 30**。等待期间自动续租，仅在变化时报告进度；超时返回 PLATFORM_WAIT_TIMEOUT，可继续等待同一轮次 |
 
-验证通过后的回归由平台安排，没有单独的 Forge regression run 命令。
+验证通过后的回归由平台安排，没有单独的 AFXX regression run 命令。
 
 ### 提交总结
 
@@ -300,10 +300,10 @@ MCP 使用与 CLI 相同的命令路径和参数。
 
 ```text
 # 查询帮助
-af_forge_help({"command": "replay"})
+afxx_help({"command": "replay"})
 
 # 执行命令
-af_forge_run({
+afxx_run({
   "command": "replay",
   "arguments": ["--job-id", "<deploy-job-id>", "--seed", "<seed>", "--dump"]
 })
@@ -311,3 +311,7 @@ af_forge_run({
 
 - 使用非默认配置时，通过工具的 `config` 字段指定。
 - MCP 仅对 `env init` / `env update` 自动开启 `--detach`；其他命令保持 CLI 行为。
+
+## MCP 服务
+
+`afxx mcp [--config PATH]` 启动 stdio MCP 服务，由 MCP 客户端管理进程。该命令不输出普通 CLI 的 JSON 响应，不触发 NPU 操作；`afxx mcp --help` 查看参数。

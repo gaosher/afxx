@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from af_forge import common, execution
-from af_forge.environment import runtime, snapshot
+from afxx import common, execution
+from afxx.environment import runtime, snapshot
 
 
 def test_live_snapshot_preserves_config_without_state_or_wheel(

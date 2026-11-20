@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Create an isolated AF venv or update one managed torch_npu/AFX wheel on the NPU host."""
 
-from af_forge import common as workflow_common
-from af_forge import config as workflow_config
-from af_forge import execution as workflow_execution
-from af_forge.environment import runtime as workflow_runtime
+from afxx import common as workflow_common
+from afxx import config as workflow_config
+from afxx import execution as workflow_execution
+from afxx.environment import runtime as workflow_runtime
 
 import argparse
 import datetime
@@ -30,8 +30,8 @@ except ImportError:  # Host-side tests on Python <3.11. NPU runner uses Python 3
 import uuid
 import zipfile
 
-from af_forge.environment import cann as af_cann_env
-from af_forge.environment import bootstrap
+from afxx.environment import cann as af_cann_env
+from afxx.environment import bootstrap
 
 FIELDS = {
     "uv_bin",
@@ -294,7 +294,7 @@ def resolve(c, artifacts, job, previous=None, changed=()):
         "torch-npu @ " + Path(artifacts["torch_npu"]["path"]).as_uri(),
         "autofusex[execution] @ " + Path(artifacts["afx"]["path"]).as_uri(),
     ]
-    text = '[project]\nname = "af-forge-environment"\nversion = "0.0.0"\nrequires-python = ">=3.11,<3.12"\n'
+    text = '[project]\nname = "afxx-environment"\nversion = "0.0.0"\nrequires-python = ">=3.11,<3.12"\n'
     text += "dependencies = " + json.dumps(roots) + "\n"
     if p["index_url"]:
         text += (

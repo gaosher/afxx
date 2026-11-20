@@ -1,9 +1,9 @@
 """AFX issue protocol and remote verification submission."""
 
 import sys
-from af_forge import common as workflow_common
-from af_forge import config as workflow_config
-from af_forge.environment import runtime as workflow_runtime
+from afxx import common as workflow_common
+from afxx import config as workflow_config
+from afxx.environment import runtime as workflow_runtime
 
 import contextlib
 import json
@@ -298,7 +298,7 @@ def submit_issue_round(c, path, state, lease, package):
         all(state["body"].get(k) == v for k, v in candidate.items()),
         "prepared verification belongs to another lease or AF package",
     )
-    from af_forge.afx import launcher
+    from afxx.afx import launcher
 
     launcher.ensure_started(c, package)
     result = call(

@@ -1,12 +1,12 @@
 """Agent response and retry contracts; no NPU or network needed."""
 
-import af_forge.cli
-import af_forge.cli as w
+import afxx.cli
+import afxx.cli as w
 import shutil
-from af_forge import common as workflow_common
-from af_forge import execution as workflow_execution
-from af_forge import jobs as workflow_jobs
-from af_forge import source as workflow_source
+from afxx import common as workflow_common
+from afxx import execution as workflow_execution
+from afxx import jobs as workflow_jobs
+from afxx import source as workflow_source
 
 import concurrent.futures
 import json
@@ -114,8 +114,8 @@ def test_interrupted_preparation_never_reuses_partial_snapshot(cfg, monkeypatch)
 def test_remote_concurrent_launch_and_uncertain_intent(tmp_path):
     job = tmp_path / "job"
     job.mkdir()
-    (job / "af_forge").mkdir()
-    (job / "af_forge/cli.py").write_text(
+    (job / "afxx").mkdir()
+    (job / "afxx/cli.py").write_text(
         "from pathlib import Path\np=Path(__file__).parent.parent/'starts'\nwith p.open('a') as f:f.write('start\\n')\n"
     )
 
@@ -146,18 +146,18 @@ def test_remote_concurrent_launch_and_uncertain_intent(tmp_path):
 def test_doctor_has_no_task_or_remote_side_effect(
     cfg, tmp_path, monkeypatch, capsys, use_default
 ):
-    script = tmp_path / "tool" / "af_forge/cli.py"
+    script = tmp_path / "tool" / "afxx/cli.py"
     monkeypatch.setattr(w, "__file__", str(script))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
     p = (
-        tmp_path / ".config/af-forge/config.yaml"
+        tmp_path / ".config/afxx/config.yaml"
         if use_default
         else tmp_path / "custom.yaml"
     )
     workflow_common.write(p, cfg)
     args = [] if use_default else ["--config", str(p)]
-    monkeypatch.setattr(sys, "argv", ["af_forge/cli.py", "doctor", *args])
+    monkeypatch.setattr(sys, "argv", ["afxx/cli.py", "doctor", *args])
     calls = []
     monkeypatch.setattr(workflow_jobs, "local_preflight", lambda *a: calls.append(a))
     monkeypatch.setattr(
@@ -165,7 +165,7 @@ def test_doctor_has_no_task_or_remote_side_effect(
         "query_job",
         lambda *a: pytest.fail("doctor must not connect to NPU"),
     )
-    assert af_forge.cli.cli() == 0
+    assert afxx.cli.cli() == 0
     result = json.loads(capsys.readouterr().out)
     assert result["ok"] and result["data"]["login"] == "passed"
     assert calls == [("deploy", False)]
@@ -185,7 +185,7 @@ def test_doctor_has_no_task_or_remote_side_effect(
 )
 def test_cli_errors_are_single_json_response(args, code):
     result = subprocess.run(
-        [sys.executable, "-m", "af_forge.cli", *args], capture_output=True, text=True
+        [sys.executable, "-m", "afxx.cli", *args], capture_output=True, text=True
     )
     assert result.returncode == 2
     envelope = json.loads(result.stdout)
@@ -226,7 +226,7 @@ def test_status_failure_is_successful_query(cfg, tmp_path, monkeypatch, capsys):
     p = tmp_path / "config.yaml"
     workflow_common.write(p, cfg)
     monkeypatch.setattr(
-        sys, "argv", ["af_forge/cli.py", "status", "--config", str(p), "--job", "a" * 32]
+        sys, "argv", ["afxx/cli.py", "status", "--config", str(p), "--job", "a" * 32]
     )
     monkeypatch.setattr(workflow_jobs, "local_preflight", lambda *a: None)
     monkeypatch.setattr(
@@ -234,7 +234,7 @@ def test_status_failure_is_successful_query(cfg, tmp_path, monkeypatch, capsys):
         "query_status",
         lambda *a, **kw: {"state": "failed", "error_code": "REPLAY_FAILED"},
     )
-    assert af_forge.cli.cli() == 0
+    assert afxx.cli.cli() == 0
     envelope = json.loads(capsys.readouterr().out)
     assert envelope["ok"] and envelope["data"]["state"] == "failed"
     assert envelope["data"]["error_code"] == "REPLAY_FAILED"
@@ -372,13 +372,13 @@ def test_status_exposes_cleanup_without_source_inventory(tmp_path):
 
 @pytest.mark.parametrize("mode", ["init", "update"])
 def test_env_command_transfers_frozen_config_and_runs_installer(cfg, monkeypatch, mode):
-    from af_forge.environment import bootstrap
+    from afxx.environment import bootstrap
     monkeypatch.setattr(bootstrap, "prepare", lambda c, job: "/fixture/python3.11")
     monkeypatch.setattr(shutil, "which", lambda name: name)
     cfg["python_env"] = {"base_python": "/fixture/python3.11"}
     job = Path(workflow_jobs.submit(cfg, request(mode), "env-request", True)["local"])
-    assert (job / "af_forge/environment/python.py").is_file() and (
-        job / "af_forge/environment/cann.py"
+    assert (job / "afxx/environment/python.py").is_file() and (
+        job / "afxx/environment/cann.py"
     ).is_file()
     assert not (job / "snapshot").exists()
 
@@ -387,7 +387,7 @@ def test_env_command_transfers_frozen_config_and_runs_installer(cfg, monkeypatch
         assert argv == [
             "/fixture/python3.11",
             "-m",
-            "af_forge.environment.python",
+            "afxx.environment.python",
             f"_{mode}_job",
             job,
         ]
@@ -402,7 +402,7 @@ def test_env_command_transfers_frozen_config_and_runs_installer(cfg, monkeypatch
 
 
 def test_init_status_identifies_failed_python_bootstrap(cfg, monkeypatch):
-    from af_forge.environment import bootstrap
+    from afxx.environment import bootstrap
     cfg["python_env"] = {"base_python": "/missing/python"}
     job = Path(workflow_jobs.submit(cfg, request("init"), "missing-tool", True)["local"])
     def fail(*args):
@@ -464,14 +464,14 @@ def test_init_response_leaves_detailed_dependency_report_for_status():
         "environment.json": {"dependencies": {"checks": [{"stdout": "detailed probe output"}]}},
     }
     data = {"job": "job", "request_id": "request", "state": "success", "status": status}
-    assert af_forge.cli.response("init", data)["data"] == {
+    assert afxx.cli.response("init", data)["data"] == {
         "job_id": "job",
         "request_id": "request",
         "state": "success",
         "artifact": "/job/result.json",
         "log": "/job/job.log",
     }
-    assert af_forge.cli.response("status", status)["data"] == status
+    assert afxx.cli.response("status", status)["data"] == status
 
 
 @pytest.mark.parametrize(

@@ -1,8 +1,8 @@
 import json
 import sys
 import pytest
-from af_forge import cli, config, jobs, common
-from af_forge.afx import platform as p
+from afxx import cli, config, jobs, common
+from afxx.afx import platform as p
 
 
 CASES = [
@@ -15,7 +15,7 @@ CASES = [
 
 @pytest.mark.parametrize("args,path,data", CASES)
 def test_queries_are_local_read_only_without_claim(platform_cfg, monkeypatch, capsys, args, path, data):
-    monkeypatch.setattr(sys, "argv", ["af-forge", *args])
+    monkeypatch.setattr(sys, "argv", ["afxx", *args])
     monkeypatch.setattr(config, "config", lambda _: platform_cfg)
     monkeypatch.setattr(jobs, "local_preflight", lambda *a: pytest.fail("must not use NPU"))
     monkeypatch.setattr(p, "claimed", lambda *a: pytest.fail("must not require lease"))
@@ -40,7 +40,7 @@ def test_queries_are_local_read_only_without_claim(platform_cfg, monkeypatch, ca
     ["execution", "show", "--exec-uuid", "123"],
 ])
 def test_invalid_query_never_reaches_platform(platform_cfg, monkeypatch, capsys, args):
-    monkeypatch.setattr(sys, "argv", ["af-forge", *args])
+    monkeypatch.setattr(sys, "argv", ["afxx", *args])
     monkeypatch.setattr(config, "config", lambda _: platform_cfg)
     monkeypatch.setattr(p, "call", lambda *a, **k: pytest.fail("invalid request"))
     assert cli.cli() == 2
@@ -49,7 +49,7 @@ def test_invalid_query_never_reaches_platform(platform_cfg, monkeypatch, capsys,
 
 def test_query_platform_errors_propagate(platform_cfg, monkeypatch, capsys):
     args = ["issue", "detail", "--issue-id", "F152"]
-    monkeypatch.setattr(sys, "argv", ["af-forge", *args])
+    monkeypatch.setattr(sys, "argv", ["afxx", *args])
     monkeypatch.setattr(config, "config", lambda _: platform_cfg)
     def fail(*a, **kw):
         raise common.WorkflowError("PLATFORM_NOT_FOUND", "not found")
@@ -81,7 +81,7 @@ def test_query_rejects_malformed_response(platform_cfg, monkeypatch, query, args
 
 @pytest.mark.parametrize("action,method", [("renew", "renew"), ("status", "poll"), ("wait", "wait")])
 def test_issue_control_commands_route_and_return_public_response(platform_cfg, monkeypatch, capsys, action, method):
-    args = ["af-forge", "issue", action, "--issue-id", "F152"]
+    args = ["afxx", "issue", action, "--issue-id", "F152"]
     if action != "renew":
         args += ["--round-no", "2"]
     monkeypatch.setattr(sys, "argv", args)

@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import zipfile
 
-from af_forge import common as common
+from afxx import common as common
 
 UV_VERSION = "0.11.32"
 

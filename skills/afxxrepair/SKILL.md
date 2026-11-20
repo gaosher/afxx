@@ -1,17 +1,17 @@
 ---
-name: af-forge-repair
-description: 使用 AF Forge 领取 AFX 平台 issue，复现并定位 graph-autofusion 问题，实施修复、部署、提交验证与等待回归，通过后整理总结并 commit 等待检视。用于用户要求执行这套修复闭环或继续已有修复任务时。
+name: afxxrepair
+description: 使用 AFXX 领取 AFX 平台 issue，复现并定位 graph-autofusion 问题，实施修复、部署、提交验证与等待回归，通过后整理总结并 commit 等待检视。用于用户要求执行这套修复闭环或继续已有修复任务时。
 ---
 
-# AF Forge 问题修复
+# AFXX 问题修复
 
 目标：claim → 复现与定位 → 修改 → deploy → verify → 回归 → 总结、commit、待检视。失败时依据证据返回定位；环境或权限阻塞单独报告。创建/讨论 workflow 本身不代表要立即领取问题。
 
 ## 执行约定
 
-- Forge 在本地调用，NPU 作为执行资源。使用已配置的 `af-forge`，或 MCP 的 `af_forge_help` / `af_forge_run`；不要重写同步、编包、安装或客户端复测循环。
-- 开始时查 `af-forge help` 及本次需要的子命令帮助，以已安装版本为准。环境命令可能分组为 `env init/update/check`；所有命令默认读取 `~/.config/af-forge/config.yaml`，用户指定配置时使用该路径；不能因复现需要就擅自替换既有环境。
-- 启动时将选定配置展开为绝对路径，展示配置路径、connection.environment、workflow_root、local.source_dir 和平台地址（不输出 token）。默认配置不存在时提示 `af-forge config init --source <源码目录>` 或请求已有配置路径，不搜索环境变量或当前目录。领取阶段示例使用默认配置；用户指定其他配置时追加 `--config <绝对路径>`。创建 worktree 任务配置后，按第 2 步切换，后续示例显式携带该配置（MCP 传 `config`）。
+- AFXX 在本地调用，NPU 作为执行资源。使用已配置的 `afxx`，或 MCP 的 `afxx_help` / `afxx_run`；不要重写同步、编包、安装或客户端复测循环。
+- 开始时查 `afxx help` 及本次需要的子命令帮助，以已安装版本为准。环境命令可能分组为 `env init/update/check`；所有命令默认读取 `~/.config/afxx/config.yaml`，用户指定配置时使用该路径；不能因复现需要就擅自替换既有环境。
+- 启动时将选定配置展开为绝对路径，展示配置路径、connection.environment、workflow_root、local.source_dir 和平台地址（不输出 token）。默认配置不存在时提示 `afxx config init --source <源码目录>` 或请求已有配置路径，不搜索环境变量或当前目录。领取阶段示例使用默认配置；用户指定其他配置时追加 `--config <绝对路径>`。创建 worktree 任务配置后，按第 2 步切换，后续示例显式携带该配置（MCP 传 `config`）。
 - 从配置定位 `local.source_dir`，在目标源码仓库读取 AGENTS.md，遵循其开发、测试、构建和提交要求。先记录原有修改，不覆盖或提交用户无关改动。
 - 用户要求执行完整修复流程时，按授权范围领取、部署、verify 和本地 commit；已有授权不重复询问。只做诊断或讨论时不发起这些写操作。不自动 push、合并或关闭 issue。
 - 远端 verify/续租使用 `platform.remote_token_file`，AFX client 使用 `platform.client_token_file`。配置 platform 后，env init 会复用或隐藏输入本地 token，并在环境成功后同步；异步 init 用 status/wait 完成同步。修复时复用已有凭据，遇到缺失或鉴权错误报告具体字段；不要为领取问题重建环境或重新签发 token。
@@ -21,15 +21,15 @@ description: 使用 AF Forge 领取 AFX 平台 issue，复现并定位 graph-aut
 ## 1. 领取 issue
 
 ```bash
-af-forge doctor
-af-forge issue claim --request-id <本次领取请求ID>
+afxx doctor
+afxx issue claim --request-id <本次领取请求ID>
 # 指定问题时增加 --issue-id F152
 ```
 
 保存实际返回的 issue_id，不固定使用示例编号。data=null 表示暂无任务，正常结束并报告，不循环刷 claim。继续已有任务时先读取其领取记录和租约，不重复领取。
 
 ```bash
-af-forge issue preview --issue-id <issue-id> --full
+afxx issue preview --issue-id <issue-id> --full
 ```
 
 读取复现信息、失败摘要和 related_knowledge。preview 是受影响用例，不等于平台回归候选集。不另安排定时续租；恢复搁置任务或遇到租约错误时核对所有权和到期时间，必要时执行 `issue renew`。租约失效或被接管后停止写操作。
@@ -48,14 +48,14 @@ TASK_CONFIG="/absolute/path/to/task-config.yaml"
 
 以下示例按 worktree 任务配置编写；未创建任务配置且使用默认配置时，省略 `--config "$TASK_CONFIG"`。
 
-基线和候选复现均使用 `replay --dump`，由 Forge 开启本次任务的定位采集，无需修改 `replay.dump`。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集和读取证据。
+基线和候选复现均使用 `replay --dump`，由 AFXX 开启本次任务的定位采集，无需修改 `replay.dump`。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集和读取证据。
 
 ### 2.1 Deploy 主线基线
 
 修改源码前，先部署上述主线 worktree。deploy 会同步未提交修改，提交前必须确认 worktree 干净，不包含会被同步的额外源码文件。
 
 ```bash
-af-forge deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <基线部署请求ID>
+afxx deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <基线部署请求ID>
 ```
 
 记录返回的 `job_id` 为基线 deploy job，并保存对应的主线 SHA。这个步骤仅部署，不提交平台 verify。
@@ -71,9 +71,9 @@ af-forge deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <基�
 ### 2.2 等待基线部署成功
 
 ```bash
-af-forge status --config "$TASK_CONFIG" --job-id <基线deploy-job-id>
+afxx status --config "$TASK_CONFIG" --job-id <基线deploy-job-id>
 # 尚未结束时，用上次返回的 cursor 等待变化；超时继续查询同一 job。
-af-forge status --config "$TASK_CONFIG" --job-id <基线deploy-job-id> \
+afxx status --config "$TASK_CONFIG" --job-id <基线deploy-job-id> \
   --wait --since <cursor> --timeout 30
 ```
 
@@ -84,8 +84,8 @@ af-forge status --config "$TASK_CONFIG" --job-id <基线deploy-job-id> \
 对 nnsmith seed，明确引用刚完成或已核验复用的基线 deploy job：
 
 ```bash
-af-forge replay --config "$TASK_CONFIG" --dump --job-id <基线deploy-job-id> --seed <原始seed> --request-id <复现请求ID>
-af-forge status --config "$TASK_CONFIG" --job-id <replay-job-id>
+afxx replay --config "$TASK_CONFIG" --dump --job-id <基线deploy-job-id> --seed <原始seed> --request-id <复现请求ID>
+afxx status --config "$TASK_CONFIG" --job-id <replay-job-id>
 ```
 
 记录 replay 返回的新 job ID，后续查询使用 replay job，不能与基线 deploy job 混淆。
@@ -94,7 +94,7 @@ af-forge status --config "$TASK_CONFIG" --job-id <replay-job-id>
 
 用 status/wait 等到终态并取得 evidence_path，再按 [复现证据清单](references/replay-evidence.md#replay-自动返回的证据) 读取必要的本地报告、日志和 dump。缺失证据注明原因；保持原 seed、输入和精度语义。
 
-非 nnsmith 用例使用平台给出的复现方式和目标环境，不强行传入 Forge seed 接口。失败无法复现时，先比较环境、包版本和用例条件；明确“未复现”及缺失证据，不直接宣称修复。
+非 nnsmith 用例使用平台给出的复现方式和目标环境，不强行传入 AFXX seed 接口。失败无法复现时，先比较环境、包版本和用例条件；明确“未复现”及缺失证据，不直接宣称修复。
 
 ## 3. 实施修改
 
@@ -105,24 +105,24 @@ af-forge status --config "$TASK_CONFIG" --job-id <replay-job-id>
 ## 4. 部署修复版本
 
 ```bash
-af-forge deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <本轮唯一部署请求ID>
-af-forge status --config "$TASK_CONFIG" --job-id <deploy-job-id>
+afxx deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <本轮唯一部署请求ID>
+afxx status --config "$TASK_CONFIG" --job-id <deploy-job-id>
 ```
 
 部署和 replay 等待时，保存首次 status 的 cursor，使用 `status --config "$TASK_CONFIG" --wait --since <cursor> --timeout 30`（带同一 job ID）；无变化只得到 timeout 回执，继续沿用返回 cursor，不重复读取概要或提交任务。无 cursor 时该命令以首次查询为基线。replay 终态直接返回 state、evidence_path、failures，不再需要 cursor。event=attention 表示状态不确定，应排查进程。等待 job state=success，并保留部署记录和源码/包身份。构建或安装失败先处理对应失败，不进入 verify。候选部署后可用同一原始 seed 快速 replay；平台验证仍是下一步独立验收。
 
-环境一致性 WARNING 不会自动阻止 Forge；agent 应读懂差异，并确认候选环境能用于该问题。不能把带差异的配置视为精确复现证据。平台复测执行期间不覆盖它使用的候选环境。
+环境一致性 WARNING 不会自动阻止 AFXX；agent 应读懂差异，并确认候选环境能用于该问题。不能把带差异的配置视为精确复现证据。平台复测执行期间不覆盖它使用的候选环境。
 
 ## 5. 提交并等待 verify
 
 ```bash
-af-forge issue verify --config "$TASK_CONFIG" --issue-id <issue-id> --job-id <deploy-job-id>
+afxx issue verify --config "$TASK_CONFIG" --issue-id <issue-id> --job-id <deploy-job-id>
 ```
 
 verify 在远端核对候选 AF 身份，确保官方 AFX client 启动，再向平台提交；客户端 token 由配置的 `platform.client_token_file` 提供。保存返回的 verify round_no，`submitted` 只表示提交成功。
 
 ```bash
-af-forge issue status --config "$TASK_CONFIG" --issue-id <issue-id> --round-no <verify-round-no>
+afxx issue status --config "$TASK_CONFIG" --issue-id <issue-id> --round-no <verify-round-no>
 ```
 
 agent 使用 `issue wait --config "$TASK_CONFIG" --timeout 30` 等待原轮次，不另安排例行续租；等待内部仅在状态变化时报告，超时仅保留问题/轮次引用。超时继续等待原轮次，不重复提交。只在新阶段、新失败或完成时向用户汇报。
@@ -132,11 +132,11 @@ agent 使用 `issue wait --config "$TASK_CONFIG" --timeout 30` 等待原轮次�
 - outcome=invalid：优先排查包身份、结果缺失和执行环境，不等同于代码缺陷。
 - verification.outcome=passed：转第 6 步；不能提前 commit 为已验证修复。
 
-失败任务查询、环境阻塞和客户端身份处理按 [平台定位参考](references/platform-evidence.md)。尤其第二轮 deploy 后可能遇到存活客户端的旧 AF 身份：当前 Forge 不自动 stop/restart，此时报告阻塞，不绕过检查或误报循环成功。
+失败任务查询、环境阻塞和客户端身份处理按 [平台定位参考](references/platform-evidence.md)。尤其第二轮 deploy 后可能遇到存活客户端的旧 AF 身份：当前 AFXX 不自动 stop/restart，此时报告阻塞，不绕过检查或误报循环成功。
 
 ## 6. 等待关联回归
 
-平台在 verify 通过后自动选择并执行回归，无需再次提交 verify 来“触发回归”。继续查询同一个 verify round_no；Forge 返回其 verification 和关联 regression。
+平台在 verify 通过后自动选择并执行回归，无需再次提交 verify 来“触发回归”。继续查询同一个 verify round_no；AFXX 返回其 verification 和关联 regression。
 
 - regression 存在且未结束：继续等待。
 - regression.outcome=failed：提取新增失败用例和证据，回到第 2/3 步；保留原问题 seed 和本次回归失败用例作为后续验证目标。
@@ -158,7 +158,7 @@ agent 使用 `issue wait --config "$TASK_CONFIG" --timeout 30` 等待原轮次�
 6. 向用户交付修复 commit、summary.yaml 的绝对路径、验证结论和以下提交命令，报告“修复已验证并提交，summary.yaml 待人工检视”。
 
 ```bash
-af-forge issue summarize --config "$TASK_CONFIG" --issue-id <issue-id> \
+afxx issue summarize --config "$TASK_CONFIG" --issue-id <issue-id> \
   --summary-file <summary.yaml的绝对路径> --request-id <本次总结请求ID>
 ```
 

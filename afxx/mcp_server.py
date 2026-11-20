@@ -40,7 +40,7 @@ async def invoke(arguments):
     process = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
-        "af_forge.cli",
+        "afxx.cli",
         *arguments,
         stdout=asyncio.subprocess.PIPE,
         stderr=None,
@@ -64,22 +64,22 @@ async def invoke(arguments):
 
 def create_server(default_config=None):
     server = FastMCP(
-        "AF Forge",
+        "AFXX",
         instructions=(
-            "Use af_forge_help for command options. Commands may change the NPU environment "
+            "Use afxx_help for command options. Commands may change the NPU environment "
             "or platform state. init/update return a job ID; poll status. deploy and "
             "issue verify are separate actions. stderr carries diagnostic logs."
         ),
     )
 
     @server.tool()
-    async def af_forge_help(command: Command | Literal["issue", "execution", "config", "evidence"] | None = None) -> str:
+    async def afxx_help(command: Command | Literal["issue", "execution", "config", "evidence"] | None = None) -> str:
         """Read CLI command options without loading config or contacting the NPU."""
         _, output = await invoke((command.split() if command else []) + ["--help"])
         return output
 
     @server.tool()
-    async def af_forge_run(
+    async def afxx_run(
         command: Command,
         arguments: list[str] | None = None,
         config: str | None = None,
@@ -95,7 +95,7 @@ def create_server(default_config=None):
         init/update are detached; use status --job-id to poll. Public commands only.
         Init needs an existing local token file when platform is configured (no interactive prompt).
         Successful init status/wait also synchronizes credentials to the NPU.
-        All commands default to ~/.config/af-forge/config.yaml.
+        All commands default to ~/.config/afxx/config.yaml.
         Override via tool config, --config argument, or server --config.
         """
         arguments = list(arguments or [])
@@ -131,10 +131,10 @@ def create_server(default_config=None):
     return server
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="afxx mcp", description=__doc__, allow_abbrev=False)
     parser.add_argument("--config", help="default workflow configuration path")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     create_server(args.config).run(transport="stdio")
 
 

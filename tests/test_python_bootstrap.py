@@ -9,8 +9,8 @@ import sys
 import zipfile
 
 import pytest
-from af_forge.environment import bootstrap as b
-from af_forge import common
+from afxx.environment import bootstrap as b
+from afxx import common
 
 
 @pytest.fixture
@@ -170,7 +170,7 @@ def test_uv_download_hash_and_atomic_publish(tmp_path, monkeypatch, bad_hash):
 def test_install_rejects_python_before_cann_or_target_venv(
     env_cfg, tmp_path, monkeypatch
 ):
-    from af_forge.environment import python as installer
+    from afxx.environment import python as installer
 
     def fail(*a):
         raise common.WorkflowError("PYTHON_BOOTSTRAP_FAILED", "ssl unavailable")

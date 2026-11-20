@@ -6,8 +6,8 @@ from pathlib import Path
 import shutil
 import tempfile
 import uuid
-from af_forge import common
-from af_forge.afx.replay import failure_index
+from afxx import common
+from afxx.afx.replay import failure_index
 
 
 def manifest(job, fallback_results):
@@ -92,7 +92,7 @@ def valid_cache(directory):
 
 
 def cache_root():
-    return Path("/tmp") / ("af-forge-evidence-" + str(os.getuid()))
+    return Path("/tmp") / ("afxx-evidence-" + str(os.getuid()))
 
 
 def download(c, job_id, remote):

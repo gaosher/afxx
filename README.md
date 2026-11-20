@@ -1,21 +1,21 @@
-# AF Forge
+# AFXX — AFX Extensions
 
-本工具从本地工作区同步源码到 NPU 环境，构建和安装 AF，并管理 Python 环境、固定 seed 复跑及 AFX 平台验证。源码同步包含未提交修改，使用 npursync 传输冻结快照。
+AFXX 是适配 AFX 的开发与问题修复工具包，从本地工作区同步源码到 NPU 环境，构建和安装 AF，并管理 Python 环境、固定 seed 复跑及 AFX 平台验证。源码同步包含未提交修改，使用 npursync 传输冻结快照。
 
-安装后使用 `af-forge` 命令；`af-forge-mcp` 提供 stdio MCP 接口。命令和远端任务共用同一套业务模块，上传文件从已安装的 wheel 中取得，无需保留本工具源码。源码仓库由配置指定，命令可在任意目录执行。
+安装后使用 `afxx` 命令；`afxx mcp` 提供 stdio MCP 接口。命令和远端任务共用同一套业务模块，上传文件从已安装的 wheel 中取得，无需保留本工具源码。源码仓库由配置指定，命令可在任意目录执行。
 
-- [命令参考与参数矩阵](docs/af-forge-commands.md)
-- [配置说明与默认值](docs/CONFIGURATION.md) · [YAML 模板](af_forge/resources/config.example.yaml)
-- [Agent 调用约定](docs/AGENT_USAGE.md) · [问题修复 Skill](skills/af-forge-repair/SKILL.md)
+- [命令参考与参数矩阵](docs/afxx-commands.md)
+- [配置说明与默认值](docs/CONFIGURATION.md) · [YAML 模板](afxx/resources/config.example.yaml)
+- [Agent 调用约定](docs/AGENT_USAGE.md) · [问题修复 Skill](skills/afxxrepair/SKILL.md)
 - [设计与模块边界](docs/DESIGN.md)
 
 ## 工具目录
 
 ```text
-af-forge/
+afxx/
 ├── README.md
 ├── pyproject.toml          # wheel、依赖和命令入口
-├── af_forge/               # Python 包
+├── afxx/               # Python 包
 │   ├── cli.py              # CLI 命令入口
 │   ├── mcp_server.py       # stdio MCP 到 CLI 协议适配
 │   ├── resources/config.example.yaml # 带注释配置模板
@@ -38,65 +38,65 @@ af-forge/
 └── tests/                  # 单元与接口测试
 ```
 
-内部模块通过 `af_forge` 包导入；远端任务保留相同包结构。日常调用已安装的 `af-forge`；agent 也可通过 `af-forge-mcp` 使用同一组命令。
+内部模块通过 `afxx` 包导入；远端任务保留相同包结构。日常调用已安装的 `afxx`；agent 也可通过 `afxx mcp` 使用同一组命令。
 
-查看全部命令：`af-forge help`。
+查看全部命令：`afxx help`。
 
 ## 安装与配置
 
-本地需准备 **Python 3.11+（含 pip）、Git、Node.js 20+、npussh/npursync、OpenSSH 客户端和 rsync**，并确保命令在 PATH 中可用。npursync 随 npussh 提供；PyYAML 和 MCP SDK 随 Forge wheel 自动安装。版本要求、安装方式及检查范围见 [本地依赖说明](docs/LOCAL_DEPENDENCIES.md#本地启动环境)。
+本地需准备 **Python 3.11+（含 pip）、Git、Node.js 20+、npussh/npursync、OpenSSH 客户端和 rsync**，并确保命令在 PATH 中可用。npursync 随 npussh 提供；PyYAML 和 MCP SDK 随 AFXX wheel 自动安装。版本要求、安装方式及检查范围见 [本地依赖说明](docs/LOCAL_DEPENDENCIES.md#本地启动环境)。
 
-安装 Forge 并登录 NPU 服务：
+安装 AFXX 并登录 NPU 服务：
 
 ```bash
-python3 -m pip install /absolute/path/af_forge-0.1.0-py3-none-any.whl
+python3 -m pip install /absolute/path/afxx-0.1.0-py3-none-any.whl
 npussh login
 npussh list
 ```
 
-生成本地配置，默认保存到 `~/.config/af-forge/config.yaml`：
+生成本地配置，默认保存到 `~/.config/afxx/config.yaml`：
 
 ```bash
-af-forge config init --source /absolute/path/graph-autofusion
+afxx config init --source /absolute/path/graph-autofusion
 ```
 
-可用 `af-forge config init --output` 指定其他位置。使用非默认位置时，后续命令需显式传 `--config /absolute/path/config.yaml`。
-所有命令默认读取 `~/.config/af-forge/config.yaml`；仅 `--config` 显式覆盖。
+可用 `afxx config init --output` 指定其他位置。使用非默认位置时，后续命令需显式传 `--config /absolute/path/config.yaml`。
+所有命令默认读取 `~/.config/afxx/config.yaml`；仅 `--config` 显式覆盖。
 
 编辑生成的配置，填写连接环境、workflow_root 和远端 LLVM/LLD 路径。字段说明、路径推导和 Python/CANN 选项见 [配置文档](docs/CONFIGURATION.md)。
 
 源码目录由配置显式指定，工具目录可以放在仓库之外；部署仍遵循 graph-autofusion 的 build.sh、构建产物和安装约定。
 
 ```bash
-af-forge doctor
+afxx doctor
 ```
 
 doctor 校验配置、本地连接工具和 npussh 登录。远端依赖由 init/check 及各操作的预检负责。
 
 ## 命令与参数矩阵
 
-完整命令速查、必填参数、默认值、ID 类型、dry-run 和 MCP 行为见 [命令参考](docs/af-forge-commands.md)。也可执行 `af-forge <命令> --help` 查看当前安装版本的参数。
+完整命令速查、必填参数、默认值、ID 类型、dry-run 和 MCP 行为见 [命令参考](docs/afxx-commands.md)。也可执行 `afxx <命令> --help` 查看当前安装版本的参数。
 
 ## 初始化和更新环境
 
 ```bash
-af-forge env init
-af-forge env check
+afxx env init
+afxx env check
 # 修改配置后更新 torch_npu / AFX
-af-forge env update
+afxx env update
 ```
 
 init 自动上传配置并准备 Python 3.11、CANN 和专用 venv。update 更新 torch_npu/AFX，保留现有 CANN。init/update 默认跟随远端日志；`--detach` 仅提交任务，后续用 status 查询。
 
-配置 platform 后，init 优先复用本地 token 文件，缺失时在交互终端隐藏输入；环境成功后自动同步到 NPU。路径留空时使用 `~/.config/af-forge/auth/afx.token` 和 `<workflow_root>/auth/afx.token`。非交互调用需预先准备本地文件；detach/MCP 提交后通过 status/wait 完成成功后的同步。
+配置 platform 后，init 优先复用本地 token 文件，缺失时在交互终端隐藏输入；环境成功后自动同步到 NPU。路径留空时使用 `~/.config/afxx/auth/afx.token` 和 `<workflow_root>/auth/afx.token`。非交互调用需预先准备本地文件；detach/MCP 提交后通过 status/wait 完成成功后的同步。
 
 首次初始化、包源、版本选择和失败恢复规则见 [环境配置](docs/CONFIGURATION.md#初始化和更新环境)。
 
 ## 部署源码与 AF
 
 ```bash
-af-forge deploy --request-id deploy-001
-af-forge status --job-id <job-id>
+afxx deploy --request-id deploy-001
+afxx status --job-id <job-id>
 ```
 
 提交返回 job ID。远端先采集实际环境快照、检查运行依赖，再同步源码，执行 `bash build.sh --pkg --enable-mlir -j 8`，将本轮产物写入 job 的 packages/，随后校验并升级安装 AF。安装后验证实际加载的 pyautofuse、adapter、codegen 文件与本轮构建产物一致。
@@ -107,7 +107,7 @@ af-forge status --job-id <job-id>
 
 ```bash
 # 离线校验并生成本地快照
-af-forge deploy --dry-run
+afxx deploy --dry-run
 
 # 查看远端任务日志
 npussh <environment> 'tail -n 100 /remote/workflow-state/<job-id>/job.log'
@@ -126,12 +126,12 @@ npussh <environment> 'tail -n 100 /remote/workflow-state/<job-id>/job.log'
 平台提供 `/api/issues` 且 agent token 拥有 `issue` 权限时，可以直接使用功能、精度或性能问题编号（F、A、P 加 1 至 9 位数字）。
 
 ```bash
-af-forge issue claim --issue-id F152
-af-forge issue preview --issue-id F152
-af-forge issue renew --issue-id F152
-af-forge deploy --issue-id F152 --request-id deploy-F152-1
+afxx issue claim --issue-id F152
+afxx issue preview --issue-id F152
+afxx issue renew --issue-id F152
+afxx deploy --issue-id F152 --request-id deploy-F152-1
 # 用 status --job-id 确认这次部署成功后提交
-af-forge issue verify --issue-id F152 --job-id <deploy-job-id>
+afxx issue verify --issue-id F152 --job-id <deploy-job-id>
 ```
 
 领取成功后终端显示问题摘要。完整回执保存在本机 `issues/<issue_id>.json`；编号问题的 preview 默认输出缩进 JSON，包含失败摘要和去重后的全部 nnsmith seed。若领取回执被截断，preview 会从平台分页读取当前受影响的用例。加 `--full` 可查看领取时保存的复现详情和相关知识。编号领取可显式传 `--request-id`；省略时 CLI 在发送前将生成的 ID 写入 stderr，重试使用同一个 ID。修复期间按租约到期时间提前续租，关联部署期间 workflow 自动续租。验证以实测 AF 版本及 pyautofuse.so 哈希提交，返回 `data.round_no`。平台按芯片和包身份调度已注册客户端。
@@ -141,10 +141,10 @@ af-forge issue verify --issue-id F152 --job-id <deploy-job-id>
 省略 `--issue-id` 时，平台分配一个待修复问题；没有任务时返回 `data=null`。
 
 ```bash
-af-forge issue claim --request-id claim-001
+afxx issue claim --request-id claim-001
 # 使用 verify 返回的 round_no
-af-forge issue status --issue-id F152 --round-no 1
-af-forge issue wait --issue-id F152 --round-no 1 --timeout 3600
+afxx issue status --issue-id F152 --round-no 1
+afxx issue wait --issue-id F152 --round-no 1 --timeout 3600
 ```
 
 verify 在远端核对部署记录与实际加载的 AF，确认官方客户端已启动后向 `/api/issues/{id}/verify` 提交 lease_id、fix_version、fix_sha256 和 request_key。job 的 platform.json 保存固定请求和回执。网络失败后重试同一部署会复用请求键；不同修复使用新的部署 job。
@@ -156,17 +156,17 @@ status/wait 查询指定 verify 轮次及紧随其后、包身份一致的 regre
 以下命令只读，不需要先 claim，也不连接 NPU：
 
 ```bash
-af-forge issue detail --issue-id F152
-af-forge issue tasks --issue-id F152 --round-no 1
-af-forge issue regression-preview --issue-id F152
-af-forge execution show --exec-uuid <exec_uuid>
+afxx issue detail --issue-id F152
+afxx issue tasks --issue-id F152 --round-no 1
+afxx issue regression-preview --issue-id F152
+afxx execution show --exec-uuid <exec_uuid>
 ```
 
 `detail` 返回生命周期、租约、轮次和事件；`tasks` 查询实际验证或回归轮次，返回 issue_id、round_no 和 tasks。回归候选预览不等于最终执行集。`execution show` 使用执行 UUID（不是数值 exec_id），返回环境、Shape、日志及平台的 log_truncated/log_missing 标记；不将截断日志标为完整。修复总结先在本地整理、人工检视，再通过独立的 `issue summarize` 显式发布。
 
 ### 检视后提交修复总结
 
-先将已检视的总结保存为本地 `summary.yaml`（直接填写知识字段，不加 knowledge 外层）。YAML 是 Forge 的本地输入格式，便于编辑和检视；平台接收的是 Forge 转换后的 JSON 请求，并不要求 YAML：
+先将已检视的总结保存为本地 `summary.yaml`（直接填写知识字段，不加 knowledge 外层）。YAML 是 AFXX 的本地输入格式，便于编辑和检视；平台接收的是 AFXX 转换后的 JSON 请求，并不要求 YAML：
 
 ```yaml
 kind: bugfix_function
@@ -178,7 +178,7 @@ fix_ref: "实际修复 commit SHA"
 ```
 
 ```bash
-af-forge issue summarize --issue-id F152 \
+afxx issue summarize --issue-id F152 \
   --summary-file /absolute/path/summary.yaml --request-id summary-F152-001
 ```
 
@@ -188,7 +188,7 @@ af-forge issue summarize --issue-id F152 \
 
 ## AFX 常驻客户端
 
-Forge 在本地控制远端任务；AFX 官方客户端在 NPU 上独立运行，负责心跳、上传、复测领取和平台更新。`issue verify` 提交前调用官方命令启动客户端，使用配置中的 venv/CANN 和 replay.devices。相同环境的已有进程直接复用；启动命令或环境变量变化时报错。AF 包哈希变化时复用已有客户端，其缓存刷新能力取决于 AFX 实现。Forge 不实现上传、心跳或复测循环。
+AFXX 在本地控制远端任务；AFX 官方客户端在 NPU 上独立运行，负责心跳、上传、复测领取和平台更新。`issue verify` 提交前调用官方命令启动客户端，使用配置中的 venv/CANN 和 replay.devices。相同环境的已有进程直接复用；启动命令或环境变量变化时报错。AF 包哈希变化时复用已有客户端，其缓存刷新能力取决于 AFX 实现。AFXX 不实现上传、心跳或复测循环。
 
 配置 `platform.client_token_file` 后无需手工启动。客户端文件位于远端 state_dir 的上一级目录下的 `afx-client/`，日志为 `client.log`。也可在独立 HOME 中手工启动官方客户端，例如：
 
@@ -202,7 +202,7 @@ afx platform client run --endpoint https://autofuse.online \
   --results "$AUTOFUSEX_HOME/results/results.sqlite" --retest --device npu:0
 ```
 
-SQLite 数据库由 AFX 创建，不必手工建立空文件。`--retest` 启用平台复测任务领取；客户端需报告与 verify 提交相符的后端版本、哈希和芯片信息。包更新、注册和调度遵循 AFX 自身行为。Forge 的环境锁仅协调 Forge 任务，不代表独立客户端也持有这些锁。
+SQLite 数据库由 AFX 创建，不必手工建立空文件。`--retest` 启用平台复测任务领取；客户端需报告与 verify 提交相符的后端版本、哈希和芯片信息。包更新、注册和调度遵循 AFX 自身行为。AFXX 的环境锁仅协调 AFXX 任务，不代表独立客户端也持有这些锁。
 
 ### 遗留问题：手动 replay 临时占用单卡
 
@@ -210,16 +210,16 @@ SQLite 数据库由 AFX 创建，不必手工建立空文件。`--retest` 启用
 
 预期平时所有卡都可执行平台任务。手动 replay 到来时，优先使用空闲卡；否则选定一张卡，暂停向该卡启动新任务，等待当前任务结束后执行 replay，其他卡继续工作。replay 完成、失败或取消后自动恢复该卡的平台任务。
 
-AFX 需要提供按卡独立执行和本机让卡协调，Forge 调用该能力并展示等待状态。让卡本身在本机完成；已领取但未执行的平台任务需要明确续租或归还策略，优先评估按空闲卡领取、避免预取积压任务的方式。平台接口是否需要扩展待实现时核实。共享 AF 安装目录的 deploy 仍需协调所有正在使用该包的任务。
+AFX 需要提供按卡独立执行和本机让卡协调，AFXX 调用该能力并展示等待状态。让卡本身在本机完成；已领取但未执行的平台任务需要明确续租或归还策略，优先评估按空闲卡领取、避免预取积压任务的方式。平台接口是否需要扩展待实现时核实。共享 AF 安装目录的 deploy 仍需协调所有正在使用该包的任务。
 
 
 ## 独立 seed 复跑
 
 ```bash
-af-forge replay \
+afxx replay \
   --job-id <deploy-job-id> --seed <seed>
 
-af-forge replay \
+afxx replay \
   --job-id <deploy-job-id> --seeds-file /absolute/path/seeds.txt
 ```
 
@@ -246,7 +246,7 @@ Shape 数量由 AFX 解码 seed 得到：静态为 1，动态为 2–8。结果�
     ├── request.json            请求及提交记录
     ├── source.json             deploy 源码清单、哈希及快照清理结果
     ├── snapshot/               待同步源码的普通目录树，启动确认后清理
-    └── af_forge/               随任务上传的执行模块
+    └── afxx/               随任务上传的执行模块
 ```
 
 远端默认布局如下；显式配置路径时以实际配置为准。job 内文件按任务类型和执行阶段生成，不是每个任务都有全部文件：
@@ -286,7 +286,7 @@ Shape 数量由 AFX 解码 seed 得到：静态为 1，动态为 2–8。结果�
 replay 终态下载的证据在本机 `/tmp`，响应中的 `evidence_path` 给出准确路径：
 
 ```text
-/tmp/af-forge-evidence-<uid>/<job-id>-<环境标识>/
+/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/
 ├── evidence.json               完整清单、远端/本地路径、大小及哈希
 ├── job/                        下载的报告、任务日志及调试文件
 └── results/                    下载的完整 dump、日志、缓存和结果数据库
@@ -322,30 +322,30 @@ AFX_SOURCE=/absolute/path/Autofuse-Debugger python3 -m pytest tests -q --require
 
 ## MCP 接入
 
-MCP 是可选接入方式：agent 可直接执行 `af-forge` CLI，也可通过 MCP 调用同一套功能。`af-forge-mcp` 在本地由 agent 客户端启动，通过标准输入/输出（stdio）通信；不需要在 NPU 上启动 MCP 服务，也不需要配置 HTTP 地址。
+MCP 是可选接入方式：agent 可直接执行 `afxx` CLI，也可通过 MCP 调用同一套功能。`afxx mcp` 在本地由 agent 客户端启动，通过标准输入/输出（stdio）通信；不需要在 NPU 上启动 MCP 服务，也不需要配置 HTTP 地址。
 
 ### 接入 Codex
 
-安装 Forge wheel 后，在本地终端执行：
+安装 AFXX wheel 后，在本地终端执行：
 
 ```bash
 # 查找 wheel 提供的 MCP 入口
-command -v af-forge-mcp
+command -v afxx
 
 # 将上一条输出的绝对路径填到这里
-codex mcp add af-forge -- /absolute/path/to/af-forge-mcp
+codex mcp add afxx -- /absolute/path/to/afxx mcp
 codex mcp list
 ```
 
-默认使用 `~/.config/af-forge/config.yaml`。如果要固定使用另一份配置，注册时将参数传给 af-forge-mcp：
+默认使用 `~/.config/afxx/config.yaml`。如果要固定使用另一份配置，注册时将参数传给 afxx mcp：
 
 ```bash
-codex mcp add af-forge -- /absolute/path/to/af-forge-mcp --config /absolute/path/config.yaml
+codex mcp add afxx -- /absolute/path/to/afxx mcp --config /absolute/path/config.yaml
 ```
 
-两种注册方式选一种。注册后，在加载了该 MCP 的 agent 会话里请求：“使用 af-forge MCP 查看 deploy 命令帮助”。应调用 `af_forge_help`，无需执行真实部署。`codex mcp list` 只确认注册信息，工具调用成功才表示接入可用。
+两种注册方式选一种。注册后，在加载了该 MCP 的 agent 会话里请求：“使用 afxx MCP 查看 deploy 命令帮助”。应调用 `afxx_help`，无需执行真实部署。`codex mcp list` 只确认注册信息，工具调用成功才表示接入可用。
 
-绝对路径用于让客户端找到可执行文件；若只写 `af-forge-mcp`，客户端进程的 PATH 必须包含它所在的目录。实际远端操作还要求客户端环境能找到 npussh 等连接工具。
+绝对路径用于让客户端找到可执行文件；若 command 只写 `afxx`，客户端进程的 PATH 必须包含它所在的目录，args 中填写 `mcp`。实际远端操作还要求客户端环境能找到 npussh 等连接工具。
 
 ### 其他支持 stdio 的客户端
 
@@ -354,17 +354,17 @@ codex mcp add af-forge -- /absolute/path/to/af-forge-mcp --config /absolute/path
 ```json
 {
   "mcpServers": {
-    "af-forge": {
-      "command": "/absolute/path/to/af-forge-mcp",
-      "args": []
+    "afxx": {
+      "command": "/absolute/path/to/afxx",
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-如需指定其他配置，将 args 改为 `["--config", "/absolute/path/config.yaml"]`。无需手动在终端常驻运行 af-forge-mcp，客户端负责启动它。
+如需指定其他配置，将 args 改为 `["mcp", "--config", "/absolute/path/config.yaml"]`。无需手动在终端常驻运行 afxx mcp，客户端负责启动它。
 
-提供两个工具：`af_forge_help(command)` 查询命令参数；`af_forge_run(command, arguments, config)` 执行命令并返回原有 JSON 响应，失败同时标记 MCP `isError`。例如 `{"command":"deploy","arguments":["--request-id","fix-001"]}`，随后用 `{"command":"status","arguments":["--job-id","<job-id>"]}` 查询。`arguments` 是参数数组，不经过 shell。
+提供两个工具：`afxx_help(command)` 查询命令参数；`afxx_run(command, arguments, config)` 执行命令并返回原有 JSON 响应，失败同时标记 MCP `isError`。例如 `{"command":"deploy","arguments":["--request-id","fix-001"]}`，随后用 `{"command":"status","arguments":["--job-id","<job-id>"]}` 查询。`arguments` 是参数数组，不经过 shell。
 
 `init/update` 通过 MCP 自动使用 `--detach`，不会占住会话等待远端安装；其他命令保持 CLI 行为。取消 MCP 调用停止本地 CLI 子进程，已提交的远端任务仍可通过 job ID 查询。标准输出仅用于 MCP 协议，诊断日志写到标准错误。只有公开命令可通过 MCP 调用；内部 worker 入口不开放。MCP 不额外增加平台行为或自动提交 verify。
 
@@ -381,15 +381,15 @@ uv pip install -e '.[dev]'
 
 ## 问题修复 Skill
 
-`af-forge-repair` 编排领取、复现定位、修改、deploy、verify、回归和修复提交，最终生成带修复及验证证据的可提交 summary.yaml，供人工检视后使用 issue summarize 发布。使用现有 Forge CLI/MCP，不另实现客户端。安装到 Codex 的 skills 目录（目标已存在时先检查本地修改）：
+`afxxrepair` 编排领取、复现定位、修改、deploy、verify、回归和修复提交，最终生成带修复及验证证据的可提交 summary.yaml，供人工检视后使用 issue summarize 发布。使用现有 AFXX CLI/MCP，不另实现客户端。安装到 Codex 的 skills 目录（目标已存在时先检查本地修改）：
 
 ```bash
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-cp -R skills/af-forge-repair "${CODEX_HOME:-$HOME/.codex}/skills/"
+cp -R skills/afxxrepair "${CODEX_HOME:-$HOME/.codex}/skills/"
 ```
 
-调用示例：`使用 $af-forge-repair 修复 AFX issue F152，验证和回归通过后 commit，等待检视。`
+调用示例：`使用 $afxxrepair 修复 AFX issue F152，验证和回归通过后 commit，等待检视。`
 
-replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/af-forge-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 单个执行可用 `status --attempt <id> --fields ...` 按字段查询。详见 [证据读取说明](docs/AGENT_USAGE.md#status-概要字段查询与等待)。
+replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 单个执行可用 `status --attempt <id> --fields ...` 按字段查询。详见 [证据读取说明](docs/AGENT_USAGE.md#status-概要字段查询与等待)。
 
-定位复现可使用 `af-forge replay --dump --job-id <deploy-job-id> --seed <seed>`；`--dump` 仅覆盖本次任务并保存到 job 配置，原配置文件不变。
+定位复现可使用 `afxx replay --dump --job-id <deploy-job-id> --seed <seed>`；`--dump` 仅覆盖本次任务并保存到 job 配置，原配置文件不变。

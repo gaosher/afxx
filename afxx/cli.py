@@ -11,14 +11,14 @@ import shlex
 import subprocess
 import sys
 import uuid
-from af_forge.afx import platform
-from af_forge.afx import replay as replay_adapter
-from af_forge import common as workflow_common
-from af_forge import config as workflow_config
-from af_forge import jobs as workflow_jobs
-from af_forge import credentials
-from af_forge.job_view import status_view
-from af_forge.environment import runtime as workflow_runtime
+from afxx.afx import platform
+from afxx.afx import replay as replay_adapter
+from afxx import common as workflow_common
+from afxx import config as workflow_config
+from afxx import jobs as workflow_jobs
+from afxx import credentials
+from afxx.job_view import status_view
+from afxx.environment import runtime as workflow_runtime
 
 
 class AgentParser(argparse.ArgumentParser):
@@ -74,10 +74,10 @@ def response(command, data=None, error=None):
 
 def parse_arguments():
     parser = AgentParser(
-        prog="af-forge", usage="%(prog)s <命令> [参数]",
-        description="AF Forge · 环境管理、源码部署与 AFX 验证", allow_abbrev=False,
+        prog="afxx", usage="%(prog)s <命令> [参数]",
+        description="AFXX · 环境管理、源码部署与 AFX 验证", allow_abbrev=False,
     )
-    commands = parser.add_subparsers(dest="command", required=True, title="命令", metavar="", prog="af-forge")
+    commands = parser.add_subparsers(dest="command", required=True, title="命令", metavar="", prog="afxx")
     groups = {}
     env_jobs = (
         "init",
@@ -140,7 +140,7 @@ def parse_arguments():
                     usage=f"%(prog)s <操作> [参数]", allow_abbrev=False,
                 )
                 groups[group] = group_parser.add_subparsers(
-                    dest="action", required=True, title="操作", metavar="", prog=f"af-forge {group}",
+                    dest="action", required=True, title="操作", metavar="", prog=f"afxx {group}",
                 )
             parent = groups[group]
         cmd = parent.add_parser(leaf, help=descriptions[name], description=descriptions[name], allow_abbrev=False)
@@ -148,7 +148,7 @@ def parse_arguments():
         cmd.add_argument(
             "--config",
             default=workflow_config.default_config_path(),
-            help="配置文件（默认 ~/.config/af-forge/config.yaml）",
+            help="配置文件（默认 ~/.config/afxx/config.yaml）",
         )
         if name in (*env_jobs, *jobs) or name == "doctor":
             cmd.add_argument("--dry-run", action="store_true")
@@ -208,13 +208,15 @@ def parse_arguments():
         usage="%(prog)s <操作> [参数]", allow_abbrev=False,
     )
     config_commands = config_parser.add_subparsers(
-        dest="action", required=True, title="操作", metavar="", prog="af-forge config",
+        dest="action", required=True, title="操作", metavar="", prog="afxx config",
     )
     template = config_commands.add_parser("init", help="生成带注释的配置模板", allow_abbrev=False)
     template.set_defaults(command="config-init")
     template.add_argument("--source", required=True, help="local graph-autofusion repository")
     template.add_argument("--output", default=workflow_config.default_config_path(),
-                          help="输出路径（默认 ~/.config/af-forge/config.yaml；不覆盖已有文件）")
+                          help="输出路径（默认 ~/.config/afxx/config.yaml；不覆盖已有文件）")
+    mcp_parser = commands.add_parser("mcp", help="启动 stdio MCP 服务", allow_abbrev=False)
+    mcp_parser.add_argument("--config", help="默认配置文件覆盖路径")
     commands.add_parser("help", help="显示全部命令及功能说明", allow_abbrev=False)
     parser.set_defaults(
         issue_id=None,
@@ -262,7 +264,7 @@ def main():
         raise
     except FileNotFoundError as error:
         raise workflow_common.WorkflowError(
-            "CONFIG_INVALID", f"配置文件不存在：{args.config}；请运行 af-forge config init --source <源码目录>，或用 --config 指定已有配置。"
+            "CONFIG_INVALID", f"配置文件不存在：{args.config}；请运行 afxx config init --source <源码目录>，或用 --config 指定已有配置。"
         ) from error
     except (ValueError, OSError, TypeError) as error:
         raise workflow_common.WorkflowError("CONFIG_INVALID", str(error)) from error
@@ -306,7 +308,7 @@ def main():
         directory = str(Path(c["remote"]["state_dir"]) / args.job)
         lease = platform.claimed(c, args.issue_id) if args.issue_id else None
         context = {key: lease[key] for key in ("id", "lease_id")} if lease else None
-        code = "import sys,json; sys.path.insert(0,sys.argv[1]); from af_forge.afx import platform as p; print(json.dumps(p.retry_remote(sys.argv[1],json.loads(sys.argv[2]))))"
+        code = "import sys,json; sys.path.insert(0,sys.argv[1]); from afxx.afx import platform as p; print(json.dumps(p.retry_remote(sys.argv[1],json.loads(sys.argv[2]))))"
         result = workflow_jobs.remote(
             c, [workflow_runtime.python(c), "-c", code, directory, json.dumps(context)]
         )
@@ -440,6 +442,11 @@ def main():
 
 
 def cli():
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+        from afxx.mcp_server import main as mcp_main
+
+        mcp_main(sys.argv[2:])
+        return 0
     command = sys.argv[1] if len(sys.argv) > 1 else None
     if command in ("issue", "execution", "config", "evidence") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]

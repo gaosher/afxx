@@ -1,16 +1,16 @@
 """Workflow contracts, using private directories and fake build/install commands."""
 
-import af_forge.cli
-import af_forge.cli as w
+import afxx.cli
+import afxx.cli as w
 import os
 import shutil
 import subprocess
-from af_forge import common as workflow_common
-from af_forge import config as workflow_config
-from af_forge import execution as workflow_execution
-from af_forge import jobs as workflow_jobs
-from af_forge.environment import runtime as workflow_runtime
-from af_forge import source as workflow_source
+from afxx import common as workflow_common
+from afxx import config as workflow_config
+from afxx import execution as workflow_execution
+from afxx import jobs as workflow_jobs
+from afxx.environment import runtime as workflow_runtime
+from afxx import source as workflow_source
 
 import json
 from pathlib import Path
@@ -221,7 +221,7 @@ def test_cli_dry_run_never_connects(cfg, tmp_path):
     completed = subprocess.run(
         [
             sys.executable,
-            "-m", "af_forge.cli",
+            "-m", "afxx.cli",
             "deploy",
             "--config",
             str(p),
@@ -235,9 +235,9 @@ def test_cli_dry_run_never_connects(cfg, tmp_path):
     assert envelope["ok"]
     result = envelope["data"]
     assert Path(result["local"], "source.json").exists()
-    assert Path(result["local"], "af_forge/afx/replay.py").is_file()
+    assert Path(result["local"], "afxx/afx/replay.py").is_file()
     staged = subprocess.run(
-        [sys.executable, "-m", "af_forge.cli", "--help"],
+        [sys.executable, "-m", "afxx.cli", "--help"],
         cwd=result["local"],
         capture_output=True,
         text=True,
@@ -315,7 +315,7 @@ def test_deploy_publishes_only_verified_install(
         )
 
         monkeypatch.setattr(
-            "af_forge.afx.platform.verify",
+            "afxx.afx.platform.verify",
             lambda *a: pytest.fail("deploy must not submit verify"),
         )
     if failure:
@@ -739,11 +739,11 @@ def test_cli_preflight_failure_creates_no_task(cfg, tmp_path, monkeypatch):
     path = tmp_path / "config.yaml"
     workflow_common.write(path, cfg)
     monkeypatch.setattr(
-        sys, "argv", ["af_forge/cli.py", "deploy", "--config", str(path)]
+        sys, "argv", ["afxx/cli.py", "deploy", "--config", str(path)]
     )
     monkeypatch.setattr(shutil, "which", lambda _: None)
     with pytest.raises(ValueError, match="缺少本地依赖"):
-        af_forge.cli.main()
+        afxx.cli.main()
     assert not Path(cfg["local"]["state_dir"]).exists()
 
 
@@ -884,7 +884,7 @@ def test_resolved_yaml_can_run_from_standalone_tools(cfg, tmp_path, monkeypatch)
     monkeypatch.setattr(
         workflow_config,
         "__file__",
-        str(tmp_path / "standalone/af_forge/config.py"),
+        str(tmp_path / "standalone/afxx/config.py"),
     )
     assert workflow_config.config(path) == normalized
 
@@ -1126,7 +1126,7 @@ def test_replay_dump_override_is_frozen_without_editing_config(cfg, tmp_path, co
     original = yaml.safe_dump(cfg)
     path.write_text(original)
     result = subprocess.run(
-        [sys.executable, "-m", "af_forge.cli", "replay", "--config", str(path),
+        [sys.executable, "-m", "afxx.cli", "replay", "--config", str(path),
          "--deployment", "/remote/result.json", "--seed", "F0SQR0HF7D3QEYXA8AE8QS7927Z", "--dry-run",
          *(["--dump"] if flag else [])], capture_output=True, text=True,
     )

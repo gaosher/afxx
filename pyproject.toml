@@ -3,9 +3,9 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "af-forge"
+name = "afxx"
 version = "0.1.0"
-description = "Local and NPU development workflows for Graph-autofusion"
+description = "AFX Extensions: development and repair toolkit for AFX"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -16,11 +16,10 @@ dependencies = ["PyYAML>=6,<7", "mcp>=1.26,<2"]
 dev = ["pytest", "jsonschema", "build", "ruff"]
 
 [project.scripts]
-af-forge = "af_forge.cli:cli"
-af-forge-mcp = "af_forge.mcp_server:main"
+afxx = "afxx.cli:cli"
 
 [tool.setuptools.packages.find]
-include = ["af_forge*"]
+include = ["afxx*"]
 
 [tool.setuptools.package-data]
-af_forge = ["resources/*.yaml", "environment/*.json"]
+afxx = ["resources/*.yaml", "environment/*.json"]

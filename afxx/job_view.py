@@ -1,7 +1,7 @@
 """Public job views; persisted reports remain complete and unchanged."""
 
 
-from af_forge.afx.replay import failure_index
+from afxx.afx.replay import failure_index
 
 
 def status_view(data, full=False, attempt_id=None, fields=None):

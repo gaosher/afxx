@@ -5,10 +5,10 @@ from pathlib import Path
 import subprocess
 import time
 
-from af_forge import common as w
-from af_forge import config
-from af_forge.environment import runtime
-from af_forge.afx import replay
+from afxx import common as w
+from afxx import config
+from afxx.environment import runtime
+from afxx.afx import replay
 
 
 def process_identity(pid):

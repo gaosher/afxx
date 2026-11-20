@@ -1,8 +1,8 @@
 from pathlib import Path
 import subprocess
 import pytest
-from af_forge import common as w
-from af_forge.afx import launcher as l
+from afxx import common as w
+from afxx.afx import launcher as l
 
 
 @pytest.fixture

@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import stat
 import sys
-from af_forge import common as workflow_common
+from afxx import common as workflow_common
 
 
 def entry(path):

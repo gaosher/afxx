@@ -13,7 +13,7 @@
 | rsync | 系统 rsync | 任务文件传输 |
 
 ```bash
-python3 -m pip install /absolute/path/af_forge-0.1.0-py3-none-any.whl
+python3 -m pip install /absolute/path/afxx-0.1.0-py3-none-any.whl
 npm install -g npussh@0.2.4
 npussh login
 npussh list
@@ -41,7 +41,7 @@ status 和 issue-* 命令要求实际查询或操作，不支持 dry-run。init/
 
 CANN 在 init 中检查或安装，AF run 包在 deploy 中构建和安装。远端需具备下载配置包源的访问能力。平台请求需要 HTTPS 连通性和有效用户凭据。AFX 官方客户端独立运行，按 AFX 文档准备其运行依赖。
 
-任务上传时的 config.yaml 使用可由标准库读取的 JSON 表示。环境冻结后写入 YAML，平台重试使用专用 venv 中的 PyYAML 读取。直接在工具目录执行 `python -m af_forge.environment.python` 的 YAML 入口时，启动解释器也需要 PyYAML。
+任务上传时的 config.yaml 使用可由标准库读取的 JSON 表示。环境冻结后写入 YAML，平台重试使用专用 venv 中的 PyYAML 读取。直接在工具目录执行 `python -m afxx.environment.python` 的 YAML 入口时，启动解释器也需要 PyYAML。
 
 ## 测试依赖
 

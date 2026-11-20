@@ -7,7 +7,7 @@ import sys
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from af_forge.afx import replay as adapter
+from afxx.afx import replay as adapter
 
 
 def results(shapes=3):

@@ -1,16 +1,16 @@
 # 复现证据清单
 
-定位复现使用 `af-forge replay --dump ...`，覆盖本次任务的 replay.dump 并冻结到 job 配置，不修改原配置。未传 --dump 时沿用配置，普通 replay 默认 false；这些设置仅作用于本次 Forge replay，不改变平台常驻 client。读取 job 的终态、`result.json` 和 `job.log`；以 report 的 results_dir、runtime、resources、replay_environment 为实际记录，不能仅引用配置期望值。
+定位复现使用 `afxx replay --dump ...`，覆盖本次任务的 replay.dump 并冻结到 job 配置，不修改原配置。未传 --dump 时沿用配置，普通 replay 默认 false；这些设置仅作用于本次 AFXX replay，不改变平台常驻 client。读取 job 的终态、`result.json` 和 `job.log`；以 report 的 results_dir、runtime、resources、replay_environment 为实际记录，不能仅引用配置期望值。
 
 ## 准备阶段失败
 
 1. 用 `status` 或 `wait` 确认原 replay job 已失败，再查 `job.log` 中报错的子命令。设备自动探测和 seed 解析都可能读取 JSON，仅凭 JSON 解析异常无法区分。若目标 seed 尚未执行，记录“准备失败，尚未复现”。
-2. 保留原设备和 worker 配置。若准备阶段的 JSON 混入 CANN 日志，核对 Forge 版本和探测进程继承的环境；Forge 的 dump 参数应只作用于实际执行用例的进程及其子进程。
+2. 保留原设备和 worker 配置。若准备阶段的 JSON 混入 CANN 日志，核对 AFXX 版本和探测进程继承的环境；AFXX 的 dump 参数应只作用于实际执行用例的进程及其子进程。
 3. 以实际执行记录核对失败阶段与平台关键诊断；涉及 dump 的结论需指向实际生成的文件。
 
 ## 必需信息
 
-- 问题与输入：issue_id、case_key/执行 UUID（平台执行记录的标识，若提供；不同于 Forge job_id 和 AFX attempt_id）、原始完整 seed、复现命令、静态/动态模式、每个失败 shape_index 对应的 Shape、dtype、后端。从平台执行详情和 AFX 保存的 attempt/shape 结果读取；仅有 seed 时不编造输入明细。
+- 问题与输入：issue_id、case_key/执行 UUID（平台执行记录的标识，若提供；不同于 AFXX job_id 和 AFX attempt_id）、原始完整 seed、复现命令、静态/动态模式、每个失败 shape_index 对应的 Shape、dtype、后端。从平台执行详情和 AFX 保存的 attempt/shape 结果读取；仅有 seed 时不编造输入明细。
 - 基线与环境：源码 SHA、是否存在额外改动、基线/候选 deploy job 和 replay job、芯片/设备、Python、torch、torch_npu、AFX、CANN 实际版本、已加载 AF 路径/version/pyautofuse.so SHA-256。来自部署报告、runtime 和执行详情；记录环境一致性警告。
 - 失败证据：终态、失败阶段、异常堆栈、失败 Shape、正确性/性能结果、原始日志及 report、results.sqlite 的绝对路径。平台日志有缺失/截断标记时，继续读取远端原始日志。用 AFX 公共结果接口读取数据库，不自行解释表结构。
 
@@ -30,13 +30,13 @@
 - `<results_dir>/dump/ge/`：GE 图（DUMP_GE_GRAPH=1、DUMP_GRAPH_LEVEL=1），仅经过对应 GE dump 点时生成，不代表任意子图均有文件。
 - `<job-dir>/torch_compile_debug/`：PyTorch 编译调试产物；Inductor cache 位于 `<results_dir>/cache/`。检查实际生成路径和日志，不以空目录代替证据。
 - `<job-dir>/job.log` 和 AFX worker 日志：包含 Ascend debug 日志；batch 模式同时保留 worker 的原始日志。
-- `results.sqlite` 保存 AFX 的结果、诊断和差异摘要，不保证保存完整输入/输出张量。Forge 没有通用张量 dump 开关，精度问题需要时按 AFX 当前支持的采集方式另行取得并记录路径。
+- `results.sqlite` 保存 AFX 的结果、诊断和差异摘要，不保证保存完整输入/输出张量。AFXX 没有通用张量 dump 开关，精度问题需要时按 AFX 当前支持的采集方式另行取得并记录路径。
 
 开关不保证每个阶段都产生文件：可能尚未执行到该阶段、命中缓存或目标构建不支持。逐项记录“已获取/不适用/缺失及原因”，证据不足以支持根因时先补采集。不要更换 seed、调整容差或改变精度语义制造通过。同步执行、禁用缓存等额外诊断设置按需使用并记入复现命令，不作为默认性能验证条件。
 
 ## Replay 自动返回的证据
 
-replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/af-forge-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。
+replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。
 
 本地目录布局：
 

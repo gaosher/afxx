@@ -4,8 +4,8 @@ import json
 import subprocess
 import sys
 import pytest
-from af_forge.job_view import status_view
-from af_forge import jobs, cli, config, common
+from afxx.job_view import status_view
+from afxx import jobs, cli, config, common
 
 
 @pytest.fixture
@@ -93,7 +93,7 @@ def test_submission_has_one_job_id_and_flat_status(report):
 
 @pytest.mark.parametrize('args', [[], ['--attempt','af-1']])
 def test_cli_detail_routing(monkeypatch, capsys, args):
-    monkeypatch.setattr(sys,'argv',['af-forge','status','--job-id','a'*32,*args])
+    monkeypatch.setattr(sys,'argv',['afxx','status','--job-id','a'*32,*args])
     monkeypatch.setattr(config,'config',lambda _: {})
     monkeypatch.setattr(jobs,'local_preflight',lambda *a:None)
     monkeypatch.setattr(jobs,'cleanup_after_status',lambda *a:None)
@@ -141,7 +141,7 @@ def test_wait_only_returns_changes_or_end(monkeypatch, scenario):
 
 @pytest.mark.parametrize('args', [['--fields','metadata'], ['--since','abc'], ['--timeout','3'], ['--full','--wait']])
 def test_invalid_status_modes(monkeypatch,capsys,args):
-    monkeypatch.setattr(sys,'argv',['af-forge','status','--job-id','a'*32,*args])
+    monkeypatch.setattr(sys,'argv',['afxx','status','--job-id','a'*32,*args])
     monkeypatch.setattr(config,'config',lambda _: {})
     monkeypatch.setattr(jobs,'local_preflight',lambda *a:None)
     assert cli.cli()==2

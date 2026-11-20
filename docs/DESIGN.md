@@ -2,11 +2,11 @@
 
 ## 目的
 
-定义 AF Forge的环境、部署、复跑及平台 issue 接口，供维护者和 agent 调用方理解状态、并发和恢复边界。操作命令见 [README](../README.md)，响应和重试规则见 [AGENT_USAGE](AGENT_USAGE.md)。
+定义 AFXX的环境、部署、复跑及平台 issue 接口，供维护者和 agent 调用方理解状态、并发和恢复边界。操作命令见 [README](../README.md)，响应和重试规则见 [AGENT_USAGE](AGENT_USAGE.md)。
 
 ## 范围
 
-实现位于独立 af-forge 仓库，调用仓库 build.sh、CANN 安装包、uv 和 AFX。覆盖环境初始化与更新、源码快照同步、AF 编包安装、固定 seed 复跑、平台 issue 验证及专用复测进程管理。
+实现位于独立 afxx 仓库，调用仓库 build.sh、CANN 安装包、uv 和 AFX。覆盖环境初始化与更新、源码快照同步、AF 编包安装、固定 seed 复跑、平台 issue 验证及专用复测进程管理。
 
 # 总体概述
 
@@ -42,7 +42,7 @@ NPU 驱动可用，用户具备目标目录权限。包源提供配置要求的 
 
 ## 整体介绍
 
-入口解析 YAML 和命令，调用远端任务协议或平台适配器。任务保留独立配置、请求和状态。环境清单存于 env-state，供 init/update 管理安装。deploy/replay/check 保留提交配置并现场采集 environment.json，不比对历史清单或检查缓存 wheel；快照用于追溯，不承诺精确重建。AFX 官方客户端在 NPU 独立常驻，Forge 在 verify 前通过远端启动器调用官方命令。
+入口解析 YAML 和命令，调用远端任务协议或平台适配器。任务保留独立配置、请求和状态。环境清单存于 env-state，供 init/update 管理安装。deploy/replay/check 保留提交配置并现场采集 environment.json，不比对历史清单或检查缓存 wheel；快照用于追溯，不承诺精确重建。AFX 官方客户端在 NPU 独立常驻，AFXX 在 verify 前通过远端启动器调用官方命令。
 
 ## 功能需求
 
@@ -78,7 +78,7 @@ NPU 驱动可用，用户具备目标目录权限。包源提供配置要求的 
 
 ### 可维护性
 
-入口只负责 CLI 解析、JSON 响应和命令分发。配置、源码同步、运行环境、部署/复测和远端作业按职责分层；共享异常、原子文件操作、进程调用和文件锁位于 af_forge.common。各模块显式导入实现所属模块，不反向导入入口，不通过入口重导出工具函数。字段归一化集中于配置加载器。复跑的 seed/命令/公共结果查询契约集中于 af_forge.afx.replay，平台 HTTP 由 af_forge.afx.platform 负责。
+入口只负责 CLI 解析、JSON 响应和命令分发。配置、源码同步、运行环境、部署/复测和远端作业按职责分层；共享异常、原子文件操作、进程调用和文件锁位于 afxx.common。各模块显式导入实现所属模块，不反向导入入口，不通过入口重导出工具函数。字段归一化集中于配置加载器。复跑的 seed/命令/公共结果查询契约集中于 afxx.afx.replay，平台 HTTP 由 afxx.afx.platform 负责。
 
 ### 可测试性
 
@@ -117,7 +117,7 @@ pytest 以临时仓库和目录验证 Git/rsync 行为，通过构建、网络�
 
 ### 执行性能
 
-独立 replay 使用 AFX 调度器及可见设备。本地 issue wait 最多每 30 秒查询一次。独立客户端的生命周期和资源由 AFX 管理，不持有 Forge 的环境锁。
+独立 replay 使用 AFX 调度器及可见设备。本地 issue wait 最多每 30 秒查询一次。独立客户端的生命周期和资源由 AFX 管理，不持有 AFXX 的环境锁。
 
 ### 内存和产物大小
 
@@ -164,27 +164,27 @@ SHA-256 用于源码、包、加载文件和锁文件一致性校验。源码同
 
 部署流程为环境校验、源码同步、构建、安装、加载核验、发布部署。安装失败使部署失效。
 
-平台流程为领取、续租、部署、显式 verify、平台调度官方客户端执行、本地查询。Forge 在 verify 前调用官方 CLI 启动客户端，不停止或重启，不阻止其平台更新行为。
+平台流程为领取、续租、部署、显式 verify、平台调度官方客户端执行、本地查询。AFXX 在 verify 前调用官方 CLI 启动客户端，不停止或重启，不阻止其平台更新行为。
 
 ### 对子模块的修改
 
 | 模块 | 职责 |
 |---|---|
-| af_forge/cli.py | CLI 参数、JSON 响应与命令分发 |
-| af_forge/common.py | 异常、文件读写与哈希、子进程、文件锁及阶段状态 |
-| af_forge/config.py | YAML 加载、默认值推导、配置与平台参数校验 |
-| af_forge/source.py | 源码快照、归属清单、同步与清理 |
-| af_forge/environment/runtime.py | 环境加载、依赖检查、库探测、部署身份与锁路径 |
-| af_forge/execution.py | deploy/replay 阶段与环境配置冻结 |
-| af_forge/jobs.py | 本地预检、幂等提交、远端作业协议及 worker 分发 |
-| af_forge/bundle.py | 远端任务共用的独立运行文件清单 |
-| af_forge/environment/bootstrap.py | 托管解释器下载、能力预检与已有解释器复用 |
-| af_forge/environment/python.py | uv 环境创建、包来源、依赖锁、更新与回滚 |
-| af_forge/environment/cann.py | CANN 检查、选包、下载、安装和清理 |
-| af_forge/environment/snapshot.py | 现场采集 job 的 Python、CANN 与 AF 身份 |
-| af_forge/afx/replay.py | seed 契约、当前 AFX CLI 参数、公共结果查询与覆盖判定 |
-| af_forge/afx/launcher.py | 官方客户端启动、存活和环境身份校验；不执行 stop |
-| af_forge/afx/platform.py | issues HTTP 请求、租约、verify 提交和结果跟踪 |
+| afxx/cli.py | CLI 参数、JSON 响应与命令分发 |
+| afxx/common.py | 异常、文件读写与哈希、子进程、文件锁及阶段状态 |
+| afxx/config.py | YAML 加载、默认值推导、配置与平台参数校验 |
+| afxx/source.py | 源码快照、归属清单、同步与清理 |
+| afxx/environment/runtime.py | 环境加载、依赖检查、库探测、部署身份与锁路径 |
+| afxx/execution.py | deploy/replay 阶段与环境配置冻结 |
+| afxx/jobs.py | 本地预检、幂等提交、远端作业协议及 worker 分发 |
+| afxx/bundle.py | 远端任务共用的独立运行文件清单 |
+| afxx/environment/bootstrap.py | 托管解释器下载、能力预检与已有解释器复用 |
+| afxx/environment/python.py | uv 环境创建、包来源、依赖锁、更新与回滚 |
+| afxx/environment/cann.py | CANN 检查、选包、下载、安装和清理 |
+| afxx/environment/snapshot.py | 现场采集 job 的 Python、CANN 与 AF 身份 |
+| afxx/afx/replay.py | seed 契约、当前 AFX CLI 参数、公共结果查询与覆盖判定 |
+| afxx/afx/launcher.py | 官方客户端启动、存活和环境身份校验；不执行 stop |
+| afxx/afx/platform.py | issues HTTP 请求、租约、verify 提交和结果跟踪 |
 
 ### 错误处理
 
@@ -235,7 +235,7 @@ python3 -m pytest tests -q
 3. 源码同步删除范围、快照清理和幂等重试符合文件所有权。
 4. 独立 replay 完整校验 CPU/AF-MLIR 及 shape，保留诊断结果。
 5. deploy 与 verify 分开，平台请求重试使用固定候选身份和幂等键。
-6. AFX 客户端独立常驻；Forge 仅负责官方命令的启动、存活检查和复用，不实现客户端循环。
+6. AFX 客户端独立常驻；AFXX 仅负责官方命令的启动、存活检查和复用，不实现客户端循环。
 7. 本地 agent 区分通过、失败和等待超时，只采用指定验证及关联回归的结果。
 8. 文档命令和参数与当前 CLI 一致，操作说明可直接用于目标环境配置。
 
@@ -248,6 +248,6 @@ python3 -m pytest tests -q
 
 ## wheel 与 MCP 接口
 
-独立仓库通过 wheel 提供 `af-forge` 和 `af-forge-mcp`。配置位于用户目录，源码路径显式指定；远端 bundle 从安装包取文件，保持原有包结构。MCP 在本地以独立 CLI 子进程执行公开命令，复用 JSON 错误码与任务协议；远端模块不依赖 MCP SDK。环境初始化与更新走异步任务，查询状态与业务操作分开。
+独立仓库通过 wheel 提供 `afxx` 和 `afxx mcp`。配置位于用户目录，源码路径显式指定；远端 bundle 从安装包取文件，保持原有包结构。MCP 在本地以独立 CLI 子进程执行公开命令，复用 JSON 错误码与任务协议；远端模块不依赖 MCP SDK。环境初始化与更新走异步任务，查询状态与业务操作分开。
 
 验证覆盖配置优先级、模板防覆盖、MCP stdio 握手和成功/失败响应、wheel 资源完整性及脱离工具源码目录的执行。此次只调整工具分发与接口，不修改 SuperKernel、Autofuse pass/codegen、C++ ABI 或设备运行时；无编译期或设备性能影响。既有任务锁、幂等请求和失败现场保留策略不变。

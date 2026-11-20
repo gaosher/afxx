@@ -1,16 +1,16 @@
-import af_forge.cli
-import af_forge.cli as w
-from af_forge import common as workflow_common
-from af_forge import config as workflow_config
-from af_forge import jobs as workflow_jobs
-from af_forge.environment import runtime as workflow_runtime
+import afxx.cli
+import afxx.cli as w
+from afxx import common as workflow_common
+from afxx import config as workflow_config
+from afxx import jobs as workflow_jobs
+from afxx.environment import runtime as workflow_runtime
 
 import json
 from pathlib import Path
 import sys
 
 import pytest
-from af_forge.afx import platform as p
+from afxx.afx import platform as p
 
 REPAIR = "F152"
 RETEST = "22222222-2222-4222-8222-222222222222"
@@ -83,7 +83,7 @@ def candidate(platform_cfg, tmp_path, monkeypatch):
         "capture",
         lambda *a, **k: json.dumps({"cann": "9.3", "autofuse_binary": "a" * 64}),
     )
-    monkeypatch.setattr("af_forge.afx.launcher.ensure_started", lambda *a: None)
+    monkeypatch.setattr("afxx.afx.launcher.ensure_started", lambda *a: None)
     return job
 
 
@@ -243,7 +243,7 @@ def test_http_envelope_and_remote_token(platform_cfg, monkeypatch):
 
 def test_issue_cli_uses_http_without_npussh(platform_cfg, monkeypatch):
     monkeypatch.setattr(
-        sys, "argv", ["af_forge/cli.py", "issue", "preview", "--issue-id", REPAIR]
+        sys, "argv", ["afxx/cli.py", "issue", "preview", "--issue-id", REPAIR]
     )
     monkeypatch.setattr(workflow_config, "config", lambda path: platform_cfg)
     monkeypatch.setattr(
@@ -252,7 +252,7 @@ def test_issue_cli_uses_http_without_npussh(platform_cfg, monkeypatch):
     monkeypatch.setattr(
         p, "preview", lambda c, i, **kwargs: {"issue_id": i, "snapshot": {}}
     )
-    assert af_forge.cli.main()["issue_id"] == REPAIR
+    assert afxx.cli.main()["issue_id"] == REPAIR
 
 
 def test_deploy_cli_freezes_issue_lease(platform_cfg, monkeypatch):
@@ -260,7 +260,7 @@ def test_deploy_cli_freezes_issue_lease(platform_cfg, monkeypatch):
         sys,
         "argv",
         [
-            "af_forge/cli.py",
+            "afxx/cli.py",
             "deploy",
             "--issue-id",
             REPAIR,
@@ -278,13 +278,13 @@ def test_deploy_cli_freezes_issue_lease(platform_cfg, monkeypatch):
         "submit",
         lambda c, r, *a: requests.append(r) or {"state": "prepared"},
     )
-    af_forge.cli.main()
+    afxx.cli.main()
     assert requests[0]["issue"] == LEASE
 
 
 def test_retry_cli_returns_remote_receipt(platform_cfg, monkeypatch):
     monkeypatch.setattr(
-        sys, "argv", ["af_forge/cli.py", "issue", "verify", "--job", "a" * 32]
+        sys, "argv", ["afxx/cli.py", "issue", "verify", "--job", "a" * 32]
     )
     monkeypatch.setattr(workflow_config, "config", lambda path: platform_cfg)
     monkeypatch.setattr(workflow_jobs, "local_preflight", lambda *a: None)
@@ -296,7 +296,7 @@ def test_retry_cli_returns_remote_receipt(platform_cfg, monkeypatch):
             "verification": {"state": "submitted", "round_no": 1},
         },
     )
-    assert af_forge.cli.main()["round_no"] == 1
+    assert afxx.cli.main()["round_no"] == 1
 
 
 def test_script_entrypoint_preserves_adapter_error_code(platform_cfg, tmp_path):
@@ -309,7 +309,7 @@ def test_script_entrypoint_preserves_adapter_error_code(platform_cfg, tmp_path):
         [
             sys.executable,
             "-m",
-            "af_forge.cli",
+            "afxx.cli",
             "issue",
             "claim",
             "--config",
@@ -357,7 +357,7 @@ def test_issue_verify_propagates_remote_failure(
     monkeypatch.setattr(
         workflow_jobs, "remote", lambda c, argv: p.retry_remote(argv[-2])
     )
-    assert af_forge.cli.cli() == 2
+    assert afxx.cli.cli() == 2
     envelope = json.loads(capsys.readouterr().out)
     assert envelope["ok"] is False
     assert envelope["error"] == {"code": expected_code, "message": str(failure)}
@@ -375,7 +375,7 @@ def test_issue_verify_accepts_text_only_failure(platform_cfg, monkeypatch):
         lambda *args: {"state": "failed", "error": "old job failed"},
     )
     with pytest.raises(workflow_common.WorkflowError, match="old job failed") as exc:
-        af_forge.cli.main()
+        afxx.cli.main()
     assert exc.value.code == "PLATFORM_VERIFY_FAILED"
 
 
@@ -394,7 +394,7 @@ def test_issue_selector_rejected_before_platform_request(
     monkeypatch.setattr(
         p, "call", lambda *a, **kw: pytest.fail("unexpected platform request")
     )
-    assert af_forge.cli.cli() == 2
+    assert afxx.cli.cli() == 2
     assert json.loads(capsys.readouterr().out)["error"]["code"] == "INVALID_ARGUMENT"
 
 
@@ -453,14 +453,14 @@ def test_regression_must_match_candidate(platform_cfg, monkeypatch):
 def test_verify_does_not_post_if_client_start_fails(platform_cfg, candidate, monkeypatch):
     def fail(*args):
         raise workflow_common.WorkflowError("PLATFORM_CLIENT_START_FAILED", "not ready")
-    monkeypatch.setattr("af_forge.afx.launcher.ensure_started", fail)
+    monkeypatch.setattr("afxx.afx.launcher.ensure_started", fail)
     monkeypatch.setattr(p, "call", lambda *a, **k: pytest.fail("must not submit before startup"))
     with pytest.raises(workflow_common.WorkflowError) as error:
         p.verify(platform_cfg, candidate)
     assert error.value.code == "PLATFORM_CLIENT_START_FAILED"
     saved = workflow_common.read(candidate / "platform.json")
     assert saved["state"] == "prepared"
-    monkeypatch.setattr("af_forge.afx.launcher.ensure_started", lambda *a: None)
+    monkeypatch.setattr("afxx.afx.launcher.ensure_started", lambda *a: None)
     monkeypatch.setattr(p, "call", lambda *a, **k: receipt())
     assert p.verify(platform_cfg, candidate)["body"] == saved["body"]
 

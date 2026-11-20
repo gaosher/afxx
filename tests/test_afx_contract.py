@@ -1,6 +1,6 @@
 """Opt-in contracts against an AFX checkout, with disposable local databases."""
 
-from af_forge import common as workflow_common
+from afxx import common as workflow_common
 
 import os
 from pathlib import Path
@@ -9,8 +9,8 @@ import sys
 
 import pytest
 from test_platform_adapter import PACKAGE
-from af_forge.afx import replay as d
-from af_forge.afx import platform as p
+from afxx.afx import replay as d
+from afxx.afx import platform as p
 
 
 @pytest.fixture
@@ -68,8 +68,8 @@ def test_real_seed_and_saved_result_cli(afx, tmp_path, count):
 def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_path):
     """Exercise the CLI through the v3 service with a temporary platform database."""
     import json
-    import af_forge.cli
-    from af_forge import jobs
+    import afxx.cli
+    from afxx import jobs
     from autofusex.platform import auth, issues, regression, retests, queries
     from autofusex.platform.ingest import Ingestor
     from autofusex.platform.store import Store
@@ -151,13 +151,13 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
         return value
 
     monkeypatch.setattr(p, "call", api)
-    monkeypatch.setattr(af_forge.cli.workflow_config, "config", lambda _: platform_cfg)
+    monkeypatch.setattr(afxx.cli.workflow_config, "config", lambda _: platform_cfg)
 
     def cli(command, *args):
         monkeypatch.setattr(
-            sys, "argv", ["af-forge", *command.split(), "--issue-id", number, *args]
+            sys, "argv", ["afxx", *command.split(), "--issue-id", number, *args]
         )
-        return af_forge.cli.main()
+        return afxx.cli.main()
 
     first = cli("issue claim")
     assert (
@@ -196,8 +196,8 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     assert len(tasks["tasks"]) == 1 and tasks["tasks"][0]["case_key"] == "E" + "0" * 25 + "1"
     preview = cli("issue regression-preview")
     assert preview["issue_id"] == number and "cases" in preview
-    monkeypatch.setattr(sys, "argv", ["af-forge", "execution", "show", "--exec-uuid", "exec-0001"])
-    execution = af_forge.cli.main()
+    monkeypatch.setattr(sys, "argv", ["afxx", "execution", "show", "--exec-uuid", "exec-0001"])
+    execution = afxx.cli.main()
     assert execution["log"] == "schedule failed: test execution log"
     assert execution["log_truncated"] is False
 

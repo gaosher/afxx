@@ -1,11 +1,11 @@
-from af_forge import common as workflow_common
+from afxx import common as workflow_common
 
 import sys
 from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from af_forge.environment import cann as e
+from afxx.environment import cann as e
 
 
 def test_existing_skip_and_failed_install_block(tmp_path, monkeypatch):

@@ -9,8 +9,8 @@ import subprocess
 import sys
 import warnings
 
-from af_forge import common, config
-from af_forge.afx import platform
+from afxx import common, config
+from afxx.afx import platform
 
 
 def install_files(paths, token):

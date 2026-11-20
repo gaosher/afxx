@@ -3,7 +3,7 @@ local:
   source_dir: null  # 本地 graph-autofusion 源码仓库绝对路径，不再按脚本位置推导
 connection:
   environment: "DevEnv_**"  # npussh 环境名或 ID
-workflow_root: "/path/to/af-forge"  # 远端统一根目录；使用独立目录
+workflow_root: "/path/to/afxx"  # 远端统一根目录；使用独立目录
 # 自动派生 python/、venv/、Ascend/cann/、graph-autofusion/ 及任务/结果目录。
 # build 位于 graph-autofusion/build/，沿用 build.sh 的目录约定。
 build:
@@ -37,6 +37,6 @@ cann:
 #   url: "https://autofuse.online"
 #   agent_id: "af-repair-agent"
 #   # init 复用本地 Bearer token；缺失时终端隐藏输入，成功后同步到 NPU（0600）。
-#   token_file: null # 默认 ~/.config/af-forge/auth/afx.token
+#   token_file: null # 默认 ~/.config/afxx/auth/afx.token
 #   remote_token_file: null # 默认 <workflow_root>/auth/afx.token
 #   client_token_file: null # 默认复用 remote_token_file，需 upload/retest 权限

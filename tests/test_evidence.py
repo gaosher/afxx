@@ -5,8 +5,8 @@ import subprocess
 import sys
 
 import pytest
-from af_forge.afx import replay
-from af_forge import jobs, cli, config
+from afxx.afx import replay
+from afxx import jobs, cli, config
 
 
 @pytest.fixture
@@ -90,7 +90,7 @@ def test_remote_evidence_protocol_runs_without_installed_forge(scene, monkeypatc
 @pytest.mark.parametrize('action', ['list', 'read'])
 def test_cli_routes_evidence_without_platform_claim(scene, monkeypatch, capsys, action):
     job, results = scene
-    args = ['af-forge', 'evidence', action, '--job-id', job.name]
+    args = ['afxx', 'evidence', action, '--job-id', job.name]
     if action == 'read': args += ['--path', str(results/'dump/a.mlir'), '--offset', '4']
     monkeypatch.setattr(sys, 'argv', args)
     monkeypatch.setattr(config, 'config', lambda _: {})
