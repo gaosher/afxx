@@ -73,7 +73,7 @@ def candidate(platform_cfg, tmp_path, monkeypatch):
         "runtime": {"pyautofuse": {"sha256": "a" * 64}},
         "installed_at": "2026-11-18T00:00:00+00:00",
     }
-    workflow_common.write(job / "deployment.json", deployment)
+    workflow_common.write(job / "result.json", deployment)
     monkeypatch.setattr(
         workflow_runtime, "current_deployment", lambda c, path: deployment
     )

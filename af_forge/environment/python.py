@@ -665,7 +665,7 @@ def restore_lock(c, pins):
 
 
 def installed_cann(c, job):
-    report = workflow_common.read(job / "cann-bootstrap.json")
+    report = workflow_common.read(job / "result.json")["cann"]
     receipt = Path(c["runtime"]["install_root"]) / ".af-cann-bootstrap.json"
     source = workflow_common.read(receipt) if receipt.is_file() else report
     release = report.get("installed_release") or source.get("release")

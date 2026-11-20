@@ -233,9 +233,9 @@ def test_new_install_creates_ready_or_invalid_environment(
     monkeypatch.setattr(
         e.af_cann_env,
         "ensure",
-        lambda c, job: workflow_common.write(
-            job / "cann-bootstrap.json",
-            {"installed_version": "9.3.0", "installed_release": "202611181234"},
+        lambda c, job: workflow_common.update_record(
+            job / "result.json",
+            cann={"installed_version": "9.3.0", "installed_release": "202611181234"},
         ),
     )
 
@@ -578,9 +578,9 @@ def test_job_yaml_restores_without_previous_job_or_dependency_resolution(
     monkeypatch.setattr(
         e.af_cann_env,
         "ensure",
-        lambda c, j: workflow_common.write(
-            j / "cann-bootstrap.json",
-            dict(installed_version="9.3.0", installed_release=cann["release"]),
+        lambda c, j: workflow_common.update_record(
+            j / "result.json",
+            cann=dict(installed_version="9.3.0", installed_release=cann["release"]),
         ),
     )
     monkeypatch.setattr(workflow_common, "run", lambda *a, **kw: None)

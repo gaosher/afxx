@@ -5,12 +5,12 @@ from af_forge.afx.replay import failure_index
 
 
 def status_view(data, full=False, attempt_id=None, fields=None):
-    names = ("report.json", "python-dependencies.json", "deployment.json", "platform.json", "result.json")
+    names = ("result.json", "environment.json", "platform.json")
     task_keys = ("job_id", "task_type", "state", "phase", "pid", "exit_code", "error_code", "error", "log", "artifact", "snapshot_cleanup")
     out = {key: data[key] for key in task_keys if key in data}
     if "job" in data:
         out["job_id"] = data["job"]
-    report = data.get("report.json", {})
+    report = data.get("result.json", {})
     attempts = report.get("attempts", [])
     if attempt_id is not None:
         selected = [item for item in attempts if item.get("id") == attempt_id]
@@ -45,15 +45,15 @@ def status_view(data, full=False, attempt_id=None, fields=None):
                     value.pop(key)
             if "job" in value:
                 value["job_id"] = value.pop("job")
-        if "report.json" in details:
-            value = details["report.json"]
+        if "result.json" in details:
+            value = details["result.json"]
             if "resources" in value:
                 value["resources"] = {k: v for k, v in value["resources"].items() if k != "results_dir"}
             if "deployment" in value:
                 value["deployment_job_id"] = value.pop("deployment")
         out["details"] = details
         return out
-    if report:
+    if "attempts" in report or data.get("task_type") == "replay":
         failed = failure_index(attempts)
         evidence = report.get("evidence", {})
         out["replay"] = {
@@ -66,7 +66,7 @@ def status_view(data, full=False, attempt_id=None, fields=None):
                          "truncated": evidence.get("truncated", False),
                          "collection_error_count": len(evidence.get("errors", []))},
         }
-    checks = data.get("python-dependencies.json")
+    checks = data.get("environment.json", {}).get("dependencies")
     if checks is not None:
         out["dependencies"] = {"passed": checks.get("passed"),
                                "failed_checks": [check for check in checks.get("checks", [])

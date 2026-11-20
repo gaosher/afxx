@@ -183,7 +183,7 @@ af-forge env init --config /path/config.yaml
 | 参数 | 必填 | 说明 |
 |---|---|---|
 | `--job-id ID` | 与 `--deployment` 二选一 | 引用成功的 deploy job（不是本次 replay job） |
-| `--deployment PATH` | 与 `--job-id` 二选一 | 远端 `deployment.json` 的绝对路径 |
+| `--deployment PATH` | 与 `--job-id` 二选一 | 远端 `result.json` 的绝对路径 |
 | `--seed SEED` | 与 `--seeds-file` 二选一 | 单个 nnsmith seed |
 | `--seeds-file PATH` | 与 `--seed` 二选一 | 本地 seed 文件，每行一个；启用批量复跑 |
 | `--dump` | 否 | 开启本次任务的定位 dump，写入冻结配置，不修改用户配置文件。省略时沿用 `replay.dump`（默认 false） |

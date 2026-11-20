@@ -15,7 +15,7 @@ def scene(tmp_path):
     job.mkdir()
     results = tmp_path / "results"
     (results / "dump").mkdir(parents=True)
-    (job / "report.json").write_text(json.dumps({"results_dir": str(results), "resources": {"dump": True}}))
+    (job / "result.json").write_text(json.dumps({"results_dir": str(results), "resources": {"dump": True}}))
     return job, results
 
 

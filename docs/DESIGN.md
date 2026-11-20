@@ -58,14 +58,14 @@ NPU 驱动可用，用户具备目标目录权限。包源提供配置要求的 
 1. 介绍。将当前本地源码构建为可核验的远端安装。
 2. 输入。有效配置、工作区文件、可选 issue 租约及 request-id。
 3. 处理。生成快照并上传，核对环境与占用情况，同步源码，编包、安装、核验实际加载来源。
-4. 输出。deployment.json、AF run 包、源码清单和任务状态。平台验证通过独立 issue verify 提交。
+4. 输出。result.json、AF run 包、源码清单和任务状态。平台验证通过独立 issue verify 提交。
 
 ### 功能需求 3 独立复跑
 
 1. 介绍。校验指定部署上的固定 seed。
-2. 输入。deployment.json 路径、单 seed 或 seed 文件、设备及上传选项。
+2. 输入。result.json 路径、单 seed 或 seed 文件、设备及上传选项。
 3. 处理。持环境共享锁检查部署和加载身份，创建独立结果目录，调用 AFX 单次或批量 CLI，核对 seed/backend/shape 集合。
-4. 输出。report.json、结果数据库、日志及可选同步请求状态。
+4. 输出。result.json、结果数据库、日志及可选同步请求状态。
 
 ### 功能需求 4 平台验证
 
@@ -150,7 +150,7 @@ deploy 可关联 issue 并续租，安装完成后返回部署状态。issue ver
 
 - config.yaml 保存任务有效配置和 environment_lock。
 - current.json 保存当前环境清单，独立于 init/update job ID。
-- source.json 保存文件清单和摘要；deployment.json 引用它并记录包及加载证据。
+- source.json 保存文件清单和摘要；result.json 引用它并记录包及加载证据。
 - request.json、launch.json、status.json 记录提交、启动和阶段状态。
 - platform.json 保存候选版本、哈希、幂等键和验证回执。
 

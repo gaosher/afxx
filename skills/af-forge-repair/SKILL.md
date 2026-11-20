@@ -63,7 +63,7 @@ af-forge deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <基�
 仅当以下条件全部满足时，才可跳过本次 deploy，复用已有基线 job：
 
 - 该 job 已成功，源码清单对应本次固定的 upstream/master SHA，且没有额外源码差异；仅有相同 HEAD 或包版本号不足以证明一致。
-- deploy 的来源、源码清单和安装身份仍可读取核验；远端当前加载的 AF 路径及 pyautofuse.so 哈希与该 job 的 deployment.json 一致，没有被后续安装替换。
+- deploy 的来源、源码清单和安装身份仍可读取核验；远端当前加载的 AF 路径及 pyautofuse.so 哈希与该 job 的 result.json 一致，没有被后续安装替换。
 - 该部署属于本次目标 NPU、CANN 安装目录和运行环境，能够通过 replay 的部署与环境检查。
 
 记录复用的 job ID、SHA 和核验依据；任一条件不满足或无法确认，都重新部署主线基线。不能用来源不明的远端现有包代替。

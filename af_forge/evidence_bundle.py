@@ -23,7 +23,7 @@ def manifest(job, fallback_results):
     request = json.loads((job / "request.json").read_text())
     if request.get("command") != "replay" or status.get("state") not in {"success", "failed"}:
         raise ValueError("evidence requires a terminal replay job")
-    report = json.loads((job / "report.json").read_text()) if (job / "report.json").exists() else {}
+    report = json.loads((job / "result.json").read_text()) if (job / "result.json").exists() else {}
     results = Path(report.get("results_dir") or fallback_results)
     roots = {"job": job, "results": results}
     files, skipped = [], []
@@ -40,7 +40,7 @@ def manifest(job, fallback_results):
         files.append({"remote_path": str(path), "group": group,
                       "relative_path": str(path.relative_to(roots[group])),
                       "size_bytes": path.stat().st_size, "sha256": h.hexdigest()})
-    for name in ("report.json", "status.json", "request.json", "python-dependencies.json"):
+    for name in ("result.json", "status.json", "request.json", "environment.json"):
         add(job / name, "job")
     for path in sorted(job.glob("*.log")):
         add(path, "job")
@@ -155,7 +155,7 @@ except (OSError, ValueError) as error:
 
 
 def terminal_result(directory, data):
-    report_path = directory / "job" / "report.json"
+    report_path = directory / "job" / "result.json"
     report = json.loads(report_path.read_text()) if report_path.exists() else {}
     attempts = report.get("attempts", [])
     by_id = {item.get("id"): item for item in attempts}

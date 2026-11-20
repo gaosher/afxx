@@ -132,9 +132,9 @@ def worker(job):
                         {
                             "init": "result.json",
                             "update": "result.json",
-                            "deploy": "deployment.json",
-                            "replay": "report.json",
-                            "check": "python-dependencies.json",
+                            "deploy": "result.json",
+                            "replay": "result.json",
+                            "check": "environment.json",
                         }[request["command"]]
                     )
                 ),
@@ -312,7 +312,7 @@ def inspect():
  if (p/'source.json').exists():
   cleanup=json.loads((p/'source.json').read_text()).get('snapshot_cleanup')
   if cleanup is not None:data['snapshot_cleanup']=cleanup
- for name in ('report.json','python-dependencies.json','deployment.json','platform.json','result.json'):
+ for name in ('result.json','environment.json','platform.json'):
   if (p/name).exists():data[name]=json.loads((p/name).read_text())
  return data
 if action=='follow':
@@ -522,7 +522,7 @@ try:
  if options['action'] == 'read':
   value = read_evidence(job, options['path'], options['offset'], options['limit'], options['sha256'])
  else:
-  report = json.loads((job/'report.json').read_text())
+  report = json.loads((job/'result.json').read_text())
   value = collect_evidence(job, Path(report['results_dir']), report.get('resources',{}).get('dump', False), options['offset'])
   associate_evidence(value, report.get('attempts', []))
  print(json.dumps({'state':'success','evidence':value}))

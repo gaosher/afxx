@@ -12,7 +12,7 @@ from af_forge import jobs, cli, config, common
 def report():
     return {'job': 'a'*32, 'state': 'failed', 'exit_code': 1, 'error': 'retest failed',
             'results_dir': '/results', 'log': '/job/job.log',
-            'report.json': {'state': 'failed', 'exit_code': 1, 'error': 'retest failed',
+            'result.json': {'state': 'failed', 'exit_code': 1, 'error': 'retest failed',
                'passed': False, 'deployment': 'b'*32, 'results_dir': '/results',
                'resources': {'results_dir': '/results', 'dump': True},
                'attempts': [{'id': 'af-1', 'seed': '123', 'backend': 'af-mlir', 'status': 'error',
@@ -22,7 +22,7 @@ def report():
                     {'id': 'cpu-1', 'backend': 'cpu', 'status': 'ok',
                      'shape_results': [{'shape_index': 1, 'correctness': 'not_checked'}]}],
                'evidence': {'files': [{'path': '/dump/a.mlir', 'excerpt': 'IR'*10000}], 'errors': []}},
-            'python-dependencies.json': {'passed': True, 'checks': [{'name': 'torch', 'passed': True, 'stdout': 'loaded'*10000}]}}
+            'environment.json': {'dependencies': {'passed': True, 'checks': [{'name': 'torch', 'passed': True, 'stdout': 'loaded'*10000}]}}}
 
 
 def test_summary_is_small_and_does_not_change_source(report):
@@ -40,13 +40,13 @@ def test_summary_is_small_and_does_not_change_source(report):
 
 def test_full_and_attempt_keep_original_afx_details(report):
     full = status_view(report, full=True)
-    detail = full['details']['report.json']
+    detail = full['details']['result.json']
     assert 'state' not in detail and 'exit_code' not in detail and 'error' not in detail
     assert 'results_dir' not in detail['resources']
     assert detail['deployment_job_id'] == 'b'*32
-    assert detail['attempts'] == report['report.json']['attempts']
-    one = status_view(report, attempt_id='af-1', fields=list(report['report.json']['attempts'][0]))
-    assert one['attempt'] == report['report.json']['attempts'][0]
+    assert detail['attempts'] == report['result.json']['attempts']
+    one = status_view(report, attempt_id='af-1', fields=list(report['result.json']['attempts'][0]))
+    assert one['attempt'] == report['result.json']['attempts'][0]
     assert 'details' not in one and 'replay' not in one
     with pytest.raises(ValueError, match='not found'):
         status_view(report, attempt_id='absent')
@@ -54,7 +54,7 @@ def test_full_and_attempt_keep_original_afx_details(report):
 
 def test_remote_returns_summary_before_transport(report, tmp_path, monkeypatch):
     job = tmp_path / ('a'*32); job.mkdir()
-    for name in ('report.json', 'python-dependencies.json'):
+    for name in ('result.json', 'environment.json'):
         (job/name).write_text(json.dumps(report[name]))
     (job/'status.json').write_text(json.dumps({k:v for k,v in report.items() if not k.endswith('.json')}))
     def remote(c, argv):
@@ -63,14 +63,14 @@ def test_remote_returns_summary_before_transport(report, tmp_path, monkeypatch):
     cfg = {'remote': {'state_dir': str(tmp_path)}}
     data = jobs.query_status(cfg, job.name)
     assert len(json.dumps(data)) < 2000
-    assert jobs.query_status(cfg, job.name, full=True)['details']['report.json']['attempts'] == report['report.json']['attempts']
+    assert jobs.query_status(cfg, job.name, full=True)['details']['result.json']['attempts'] == report['result.json']['attempts']
     assert jobs.query_status(cfg, job.name, attempt_id='af-1')['attempt']['id'] == 'af-1'
     with pytest.raises(common.WorkflowError) as error:
         jobs.query_status(cfg, job.name, attempt_id='missing')
     assert error.value.code == 'ATTEMPT_NOT_FOUND'
     assert jobs.query_status(cfg, 'c'*32)['state'] == 'not_found'
     assert not (tmp_path/('c'*32)).exists()
-    assert json.loads((job/'report.json').read_text()) == report['report.json']
+    assert json.loads((job/'result.json').read_text()) == report['result.json']
 
 
 def test_task_state_is_preserved():
@@ -79,8 +79,8 @@ def test_task_state_is_preserved():
 
 def test_failed_dependencies_excludes_successes():
     state = 'failed'
-    value = status_view({'job':'a'*32,'state':state,'python-dependencies.json':{
-        'passed':False,'checks':[{'name':'ssl','passed':False,'stderr':'missing'}, {'name':'torch','passed':True}]}})
+    value = status_view({'job':'a'*32,'state':state,'environment.json':{'dependencies':{
+        'passed':False,'checks':[{'name':'ssl','passed':False,'stderr':'missing'}, {'name':'torch','passed':True}]}}})
     assert value['state'] == state and value['dependencies']['failed_checks'][0]['name']=='ssl'
     assert len(value['dependencies']['failed_checks']) == 1
 
@@ -88,7 +88,7 @@ def test_failed_dependencies_excludes_successes():
 def test_submission_has_one_job_id_and_flat_status(report):
     data = cli.response('replay',{'job':'a'*32,'state':'failed','status':report})['data']
     assert data['job_id']=='a'*32 and 'job' not in data and 'status' not in data
-    assert 'report.json' not in data and data['replay']['passed'] is False
+    assert 'result.json' not in data and data['replay']['passed'] is False
 
 
 @pytest.mark.parametrize('args', [[], ['--attempt','af-1']])
@@ -105,7 +105,7 @@ def test_cli_detail_routing(monkeypatch, capsys, args):
 
 
 def test_default_attempt_is_small_and_fields_are_explicit(report):
-    attempt = report['report.json']['attempts'][0]
+    attempt = report['result.json']['attempts'][0]
     attempt['error_summary'] = 'error'*1000
     small = status_view(report, attempt_id='af-1')
     assert len(json.dumps(small)) < 2000

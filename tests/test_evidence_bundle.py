@@ -21,7 +21,7 @@ def scene(tmp_path, monkeypatch):
     (job/'request.json').write_text(json.dumps({'command':'replay'}))
     attempt={'id':'attempt1','seed_short':'Eseed','backend':'af-mlir','status':'error',
              'shape_results':[{'shape_index':0,'correctness':'error','error_stage':'compile','error_summary':'bad type'}]}
-    (job/'report.json').write_text(json.dumps({'results_dir':str(results),'attempts':[attempt]}))
+    (job/'result.json').write_text(json.dumps({'results_dir':str(results),'attempts':[attempt]}))
     for i in range(140): (results/'dump'/f'{i}.mlir').write_text('complete IR'*1000)
     (results/'dump'/'kernel.so').write_bytes(b'binary\0artifact')
     (results/'sync.json').write_text('SECRET')

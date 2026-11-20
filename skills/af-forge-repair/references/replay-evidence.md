@@ -1,6 +1,6 @@
 # 复现证据清单
 
-定位复现使用 `af-forge replay --dump ...`，覆盖本次任务的 replay.dump 并冻结到 job 配置，不修改原配置。未传 --dump 时沿用配置，普通 replay 默认 false；这些设置仅作用于本次 Forge replay，不改变平台常驻 client。读取 job 的终态、`report.json` 和 `job.log`；以 report 的 results_dir、runtime、resources、replay_environment 为实际记录，不能仅引用配置期望值。
+定位复现使用 `af-forge replay --dump ...`，覆盖本次任务的 replay.dump 并冻结到 job 配置，不修改原配置。未传 --dump 时沿用配置，普通 replay 默认 false；这些设置仅作用于本次 Forge replay，不改变平台常驻 client。读取 job 的终态、`result.json` 和 `job.log`；以 report 的 results_dir、runtime、resources、replay_environment 为实际记录，不能仅引用配置期望值。
 
 ## 准备阶段失败
 
@@ -43,7 +43,7 @@ replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将
 ```text
 evidence_path/
 ├── evidence.json       # 完整文件清单：remote_path、local_path、size_bytes、sha256；skipped 记录跳过原因
-├── job/                # report.json、status.json、request.json、依赖报告、job.log 及 job 内调试目录
+├── job/                # result.json、status.json、request.json、依赖报告、job.log 及 job 内调试目录
 └── results/            # dump、cache、worker 日志、results.sqlite 等结果目录中的完整普通文件
 ```
 
@@ -51,6 +51,6 @@ evidence_path/
 
 传输后逐文件校验大小和 SHA-256，完成后才发布 evidence.json。下载失败返回 EVIDENCE_DOWNLOAD_FAILED 和 partial_path，保留未完成现场；重查同一 job 可重试。完整缓存校验通过时不再传输；缺失或被修改则重新下载，旧目录保留为 .previous-*。/tmp 不是长期归档，需长期保留时自行保存。
 
-按失败基础信息挑选所需本地日志、IR、report 字段，避免把全部文件读入 agent 上下文。attempt 详情仍支持 `status --attempt <id> --fields error_stage,error_summary,shape_results`；运行时身份从本地 job/report.json 按键提取。原有 evidence list/read 可用于按需远端查询，但不是复现后的默认取证步骤。
+按失败基础信息挑选所需本地日志、IR、report 字段，避免把全部文件读入 agent 上下文。attempt 详情仍支持 `status --attempt <id> --fields error_stage,error_summary,shape_results`；运行时身份从本地 job/result.json 按键提取。原有 evidence list/read 可用于按需远端查询，但不是复现后的默认取证步骤。
 
-定位顺序：先从 failures 的 stage/error 确定失败阶段，再用 attempt_id 查本地 job/report.json 的 attempts 中 id 相同的记录，按 shape_indices 选择失败 Shape；结合 diagnostics/associations 中明确的远端路径，在 evidence.json 的 files 中匹配 remote_path，读取对应 local_path。attempt_id 是 NPU 上 AFX 为一次执行生成的 UUID，不是平台 issue ID；同一 seed 重跑有新的 attempt。没有明确文件关联时记录未关联，不能由概要推断某个 dump 属于哪个 Shape。
+定位顺序：先从 failures 的 stage/error 确定失败阶段，再用 attempt_id 查本地 job/result.json 的 attempts 中 id 相同的记录，按 shape_indices 选择失败 Shape；结合 diagnostics/associations 中明确的远端路径，在 evidence.json 的 files 中匹配 remote_path，读取对应 local_path。attempt_id 是 NPU 上 AFX 为一次执行生成的 UUID，不是平台 issue ID；同一 seed 重跑有新的 attempt。没有明确文件关联时记录未关联，不能由概要推断某个 dump 属于哪个 Shape。

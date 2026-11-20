@@ -195,7 +195,7 @@ def parse_arguments():
                 "--job-id", "--job", dest="job", help="deploy job ID"
             )
             reference.add_argument(
-                "--deployment", help="absolute remote deployment.json path"
+                "--deployment", help="absolute remote result.json path"
             )
             seeds = cmd.add_mutually_exclusive_group(required=True)
             seeds.add_argument("--seed")
@@ -365,7 +365,7 @@ def main():
             c["replay"]["dump"] = True
         if args.job:
             args.deployment = str(
-                Path(c["remote"]["state_dir"]) / args.job / "deployment.json"
+                Path(c["remote"]["state_dir"]) / args.job / "result.json"
             )
         workflow_common.require(
             args.deployment and Path(args.deployment).is_absolute(),

@@ -181,9 +181,9 @@ def ensure(c, job):
             for line in (root / "cann/compiler/version.info").read_text().splitlines()
             if "=" in line
         )
-        workflow_common.write(
-            job / "cann-bootstrap.json",
-            {
+        workflow_common.update_record(
+            job / "result.json",
+            cann={
                 "state": "existing",
                 "install_root": str(root),
                 "installed_version": info.get("Version"),
@@ -250,7 +250,7 @@ def ensure(c, job):
         download_dir=str(directory),
         state="downloading",
     )
-    workflow_common.write(job / "cann-bootstrap.json", report)
+    workflow_common.update_record(job / "result.json", cann=report)
     try:
         for component, name in release["packages"]:
             path = directory / name
@@ -276,13 +276,13 @@ def ensure(c, job):
                     "sha256": workflow_common.sha(path),
                 }
             )
-            workflow_common.write(job / "cann-bootstrap.json", report)
+            workflow_common.update_record(job / "result.json", cann=report)
     except BaseException as error:
         report.update(state="download_failed", error=str(error))
-        workflow_common.write(job / "cann-bootstrap.json", report)
+        workflow_common.update_record(job / "result.json", cann=report)
         raise
     report["state"] = "installing"
-    workflow_common.write(job / "cann-bootstrap.json", report)
+    workflow_common.update_record(job / "result.json", cann=report)
     workflow_common.write(state, report)
     workflow_common.phase(job, "cann_install")
     env = {
@@ -320,15 +320,15 @@ def ensure(c, job):
                 )
         report["state"] = "ready"
         workflow_common.write(state, report)
-        workflow_common.write(job / "cann-bootstrap.json", report)
+        workflow_common.update_record(job / "result.json", cann=report)
     except BaseException:
         report["state"] = "invalid"
         workflow_common.write(state, report)
-        workflow_common.write(job / "cann-bootstrap.json", report)
+        workflow_common.update_record(job / "result.json", cann=report)
         raise
     cleanup_packages(directory, artifacts, report)
     workflow_common.write(state, report)
-    workflow_common.write(job / "cann-bootstrap.json", report)
+    workflow_common.update_record(job / "result.json", cann=report)
 
 
 def cleanup_packages(directory, artifacts, report):

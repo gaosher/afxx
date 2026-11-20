@@ -461,7 +461,7 @@ def test_init_response_leaves_detailed_dependency_report_for_status():
         "state": "success",
         "artifact": "/job/result.json",
         "log": "/job/job.log",
-        "python-dependencies.json": {"checks": [{"stdout": "detailed probe output"}]},
+        "environment.json": {"dependencies": {"checks": [{"stdout": "detailed probe output"}]}},
     }
     data = {"job": "job", "request_id": "request", "state": "success", "status": status}
     assert af_forge.cli.response("init", data)["data"] == {
@@ -512,7 +512,7 @@ def test_replay_resolves_deploy_job_in_configured_state_dir(cfg, monkeypatch):
     monkeypatch.setattr(workflow_jobs, "submit", lambda c, request, *a: request)
     data = w.main()
     assert data["deployment"] == str(
-        Path(cfg["remote"]["state_dir"]) / deploy_job / "deployment.json"
+        Path(cfg["remote"]["state_dir"]) / deploy_job / "result.json"
     )
     assert data["seeds"] == ["123"]
 

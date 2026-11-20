@@ -340,7 +340,7 @@ def associate_evidence(evidence, attempts):
 def read_evidence(job, path, offset, limit, expected_sha256=None):
     """Read one text artifact, confined to diagnostic roots of this job."""
     import hashlib
-    report = json.loads((job / "report.json").read_text())
+    report = json.loads((job / "result.json").read_text())
     results = Path(report["results_dir"])
     path = Path(path)
     if offset < 0 or not 1 <= limit <= 65536 or not path.is_absolute() or ".." in path.parts:

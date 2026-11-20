@@ -8,7 +8,7 @@
 |---|---|---|
 | doctor | 本地校验配置、工具和 npussh 登录 | 检查通过 |
 | init / update | 提交远端任务，默认跟随日志；支持 --detach | 远端任务 success，环境清单 ready |
-| deploy | 提交远端任务，返回 job ID | status 为 success，deployment.json 有效 |
+| deploy | 提交远端任务，返回 job ID | status 为 success，result.json 有效 |
 | evidence list / evidence read | 本地通过 npussh 只读远端证据 | ok=true；按 next_offset 续读，检查 sha256 和未关联标记 |
 | replay | 提交远端任务，返回 job ID | data.state=success 且 data.replay.passed=true |
 | check | 提交远端依赖检查 | 任务 success、依赖检查通过 |
@@ -53,7 +53,7 @@ init/update 默认跟随远端日志，Ctrl+C 停止本地查看，任务仍可�
 
 本地请求锁保护冻结过程，远端启动锁和 launch.json 保护任务启动。上传中断可以重试同一请求，已确认远端启动后可清理本地快照。远端同步校验完成后清理远端快照。source.json 保存清理状态及源码清单。
 
-保留 requests/、request.json、launch.json、source.json、deployment.json 及部署注册表引用。已确认启动但远端记录丢失时返回 REMOTE_TASK_LOST。清理后的快照无法用于重新上传原任务。首次准备不完整时先排查，再为新任务选择新 ID。
+保留 requests/、request.json、launch.json、source.json、result.json 及部署注册表引用。已确认启动但远端记录丢失时返回 REMOTE_TASK_LOST。清理后的快照无法用于重新上传原任务。首次准备不完整时先排查，再为新任务选择新 ID。
 
 ## 平台修复流程
 
@@ -176,3 +176,7 @@ attempt 默认字段为 id、seed_short、backend、status、error_stage、error
 wait 默认 30 秒、允许 (0,50] 秒，CLI/MCP 均返回一次 JSON。携带 since 时与上次概要比较；未传时以首次查询为基线等待下一次变化。event=changed/terminal 返回新概要和 cursor；replay 终态直接返回上述 evidence_path 和 failures，不附 event/cursor；state=unknown 返回 event=attention，需处理进程不确定状态。没有变化时只返回 job_id、event=timeout、cursor，表示等待窗口结束而非任务失败。下一次继续使用返回的 cursor；不重复提交原任务。网络请求本身的超时独立于等待窗口。
 
 公开任务 ID 统一为 job_id，提交结果不重复返回 job 别名或嵌套 status。state 与 passed 含义不同；外层 ok 只表示查询成功。概要和字段投影在远端完成，避免轮询传回大图/日志。replay 终态优先读取本地证据文件；evidence list/read 保留为按需远端查询入口。
+
+### Job 记录入口
+
+通过 status 获取摘要，使用 status --full 获取 result.json、environment.json 和 platform.json 详情。result.json 按任务类型保存部署身份、replay 结果或环境更新/回滚结果；CANN 安装过程位于 result.json 的 cann 字段。Python 依赖检查位于 environment.json 的 dependencies 字段。请求、启动及状态继续独立保存，以保持不同进程的写入边界。

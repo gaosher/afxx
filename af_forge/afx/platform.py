@@ -351,7 +351,7 @@ def verify(c, job, lease=None):
                 ).splitlines()[-1]
             )
         )
-        deployment = workflow_runtime.current_deployment(c, job / "deployment.json")
+        deployment = workflow_runtime.current_deployment(c, job / "result.json")
         workflow_common.require(
             package["sha256"] == deployment["runtime"]["pyautofuse"]["sha256"],
             "installed AF differs from this deployment",

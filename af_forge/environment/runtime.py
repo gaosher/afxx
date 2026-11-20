@@ -227,13 +227,13 @@ def venv_preflight(c, env, job, scope):
             "stderr": result.stderr[-12000:],
             "exit_code": result.returncode,
         }
-    workflow_common.write(job / "python-dependencies.json", report)
+    workflow_common.update_record(job / "environment.json", dependencies=report)
     failed = [item["name"] for item in report["checks"] if not item["passed"]]
     workflow_common.require(
         result.returncode == 0 and report["passed"],
         "Python dependency preflight failed: "
         + ", ".join(failed)
-        + "; see python-dependencies.json",
+        + "; see environment.json",
     )
     return report
 

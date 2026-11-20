@@ -210,7 +210,7 @@ def test_build_failure_does_not_install(cfg, tmp_path, monkeypatch):
     assert cached.read_bytes() == b"existing"
     assert sum("build.sh" in command for command in commands) == 2
     assert not any("--upgrade" in a for a in commands)
-    assert not (job / "deployment.json").exists()
+    assert not (job / "result.json").exists()
 
 
 def test_cli_dry_run_never_connects(cfg, tmp_path):
@@ -322,10 +322,10 @@ def test_deploy_publishes_only_verified_install(
         with pytest.raises((ValueError, subprocess.CalledProcessError)):
             workflow_execution.deploy(cfg, job)
         assert workflow_common.read(tmp_path / "registry.json")["state"] == "invalid"
-        assert not (job / "deployment.json").exists()
+        assert not (job / "result.json").exists()
     else:
         workflow_execution.deploy(cfg, job)
-        deployment = workflow_common.read(job / "deployment.json")
+        deployment = workflow_common.read(job / "result.json")
         assert deployment["state"] == "success"
         assert "files" not in deployment["source"]
         assert deployment["source"]["sha256"] == workflow_common.sha(
@@ -337,12 +337,12 @@ def test_deploy_publishes_only_verified_install(
             "deployment",
         }
         assert (
-            workflow_runtime.current_deployment(cfg, job / "deployment.json")
+            workflow_runtime.current_deployment(cfg, job / "result.json")
             == deployment
         )
         assert workflow_common.read(
             tmp_path / "registry.json"
-        ) == workflow_runtime.deployment_reference(job / "deployment.json")
+        ) == workflow_runtime.deployment_reference(job / "result.json")
 
 
 def test_interrupted_sync_can_retry_and_remove_partial_files(
@@ -434,7 +434,7 @@ def test_replay_uses_private_results_and_existing_cli(
         "install_root": cfg["runtime"]["install_root"],
         "runtime": {},
     }
-    dep = tmp_path / "deployment.json"
+    dep = tmp_path / "result.json"
     workflow_common.write(dep, deployment)
     workflow_common.write(tmp_path / "registry.json", deployment)
     monkeypatch.setattr(workflow_runtime, "registry", lambda c: tmp_path / "registry")
@@ -474,7 +474,7 @@ def test_replay_uses_private_results_and_existing_cli(
         assert kwargs["env"]["AUTOFUSEX_HOME"] == str(
             Path(cfg["replay"]["results_dir"]) / job.name
         )
-        recorded = workflow_common.read(job / "report.json")["replay_environment"]
+        recorded = workflow_common.read(job / "result.json")["replay_environment"]
         assert all(kwargs["env"][key] == value for key, value in recorded.items())
         assert (recorded.get("TORCH_COMPILE_DEBUG") == "1") == dump
         if dump:
@@ -494,7 +494,7 @@ def test_replay_uses_private_results_and_existing_cli(
     if failure:
         with pytest.raises((ValueError, OSError)):
             workflow_execution.replay(cfg, job, request)
-        report = workflow_common.read(job / "report.json")
+        report = workflow_common.read(job / "result.json")
         assert "evidence" in report and report["evidence"]["dump_enabled"] == dump
         assert report["state"] == "failed" and report["resources"]["devices"]
         assert report["error"]
@@ -506,7 +506,7 @@ def test_replay_uses_private_results_and_existing_cli(
     assert len(commands) == 1
     assert ("--workers" in commands[0]) is batch
     assert ("--timeout" in commands[0]) is batch
-    assert workflow_common.read(job / "report.json")["resources"]["devices"] == (
+    assert workflow_common.read(job / "result.json")["resources"]["devices"] == (
         ["npu:0", "npu:1"]
         if auto and batch
         else cfg["replay"]["devices"]
@@ -514,16 +514,16 @@ def test_replay_uses_private_results_and_existing_cli(
         else ["npu:0"]
     )
     if auto:
-        assert workflow_common.read(job / "report.json")["resources"]["workers"] == (
+        assert workflow_common.read(job / "result.json")["resources"]["workers"] == (
             2 if batch else 1
         )
-    assert workflow_common.read(job / "report.json")["evidence"]["files"]
-    assert workflow_common.read(job / "report.json")["passed"]
-    assert workflow_common.read(job / "report.json")["upload"] == "disabled"
+    assert workflow_common.read(job / "result.json")["evidence"]["files"]
+    assert workflow_common.read(job / "result.json")["passed"]
+    assert workflow_common.read(job / "result.json")["upload"] == "disabled"
 
 
 def test_deployment_drift_blocks_replay(cfg, tmp_path, monkeypatch):
-    dep = tmp_path / "deployment.json"
+    dep = tmp_path / "result.json"
     workflow_common.write(
         dep,
         {
@@ -596,7 +596,7 @@ def test_dependency_failure_report_saved(cfg, tmp_path, monkeypatch):
     )
     with pytest.raises(ValueError, match="pip-check"):
         workflow_runtime.venv_preflight(cfg, {}, tmp_path, "deploy")
-    assert workflow_common.read(tmp_path / "python-dependencies.json") == report
+    assert workflow_common.read(tmp_path / "environment.json")["dependencies"] == report
 
 
 def test_dependency_failure_blocks_sync(cfg, tmp_path, monkeypatch):
@@ -975,7 +975,7 @@ def test_deployment_reference_rejects_changed_evidence(
             "base_commit": manifest["base_commit"],
         },
     }
-    path = job / "deployment.json"
+    path = job / "result.json"
     workflow_common.write(path, deployment)
     monkeypatch.setattr(workflow_runtime, "registry", lambda c: tmp_path / "registry")
     workflow_common.write(
@@ -1127,7 +1127,7 @@ def test_replay_dump_override_is_frozen_without_editing_config(cfg, tmp_path, co
     path.write_text(original)
     result = subprocess.run(
         [sys.executable, "-m", "af_forge.cli", "replay", "--config", str(path),
-         "--deployment", "/remote/deployment.json", "--seed", "F0SQR0HF7D3QEYXA8AE8QS7927Z", "--dry-run",
+         "--deployment", "/remote/result.json", "--seed", "F0SQR0HF7D3QEYXA8AE8QS7927Z", "--dry-run",
          *(["--dump"] if flag else [])], capture_output=True, text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr

@@ -111,9 +111,9 @@ def deploy(c, job):
                     datetime.timezone.utc
                 ).isoformat(),
             }
-            workflow_common.write(job / "deployment.json", record)
+            workflow_common.write(job / "result.json", record)
             workflow_common.write(
-                current, workflow_runtime.deployment_reference(job / "deployment.json")
+                current, workflow_runtime.deployment_reference(job / "result.json")
             )
         except BaseException:
             workflow_common.write(current, {"state": "invalid", "job": job.name})
@@ -193,7 +193,7 @@ def replay(c, job, request):
             deployment = workflow_runtime.current_deployment(c, request["deployment"])
             environment_snapshot = record_environment(c, job)
             workflow_common.update_record(
-                job / "report.json",
+                job / "result.json",
                 state="running",
                 passed=False,
                 deployment=deployment["job"],
@@ -219,12 +219,12 @@ def replay(c, job, request):
                     file=sys.stderr,
                     flush=True,
                 )
-            workflow_common.update_record(job / "report.json", runtime=runtime)
+            workflow_common.update_record(job / "result.json", runtime=runtime)
             results = Path(c["replay"]["results_dir"]) / job.name
             results.mkdir(parents=True, mode=0o700)
             replay_env = replay_adapter.replay_environment(results, c["replay"]["dump"])
             env = {**env, "AUTOFUSEX_HOME": replay_env["AUTOFUSEX_HOME"]}
-            workflow_common.update_record(job / "report.json", replay_environment=replay_env)
+            workflow_common.update_record(job / "result.json", replay_environment=replay_env)
             workflow_common.phase(job, "replay_prepare", results_dir=str(results))
             options = dict(c["replay"])
             if options["devices"] == "auto":
@@ -243,7 +243,7 @@ def replay(c, job, request):
                 options["devices"] = options["devices"][:1]
                 options["workers"] = 1
             workflow_common.update_record(
-                job / "report.json", resources=options, results_dir=str(results)
+                job / "result.json", resources=options, results_dir=str(results)
             )
             normalized = replay_adapter.normalized_seeds(
                 workflow_common.capture(
@@ -273,7 +273,7 @@ def replay(c, job, request):
             # --save persists evidence locally. Without sync.json no upload is configured.
             completed = workflow_common.run(command, env={**env, **replay_env}, cwd=job, check=False)
             workflow_common.update_record(
-                job / "report.json", exit_code=completed.returncode
+                job / "result.json", exit_code=completed.returncode
             )
             attempts = replay_adapter.read_results(
                 workflow_runtime.python(c),
@@ -288,7 +288,7 @@ def replay(c, job, request):
                 exit_code=completed.returncode,
                 upload="pending" if upload else "disabled",
             )
-            report = workflow_common.update_record(job / "report.json", **report)
+            report = workflow_common.update_record(job / "result.json", **report)
             if upload:
                 sync = replay_adapter.sync_command(workflow_runtime.python(c), results)
                 report["sync_start_exit_code"] = workflow_common.run(
@@ -297,19 +297,19 @@ def replay(c, job, request):
                 report["upload"] = (
                     "pending" if report["sync_start_exit_code"] == 0 else "start_failed"
                 )
-            workflow_common.update_record(job / "report.json", **report)
+            workflow_common.update_record(job / "result.json", **report)
             workflow_common.require(
                 completed.returncode == 0 and report["passed"],
-                "retest failed; see report.json",
+                "retest failed; see result.json",
             )
             workflow_common.require(
                 report["upload"] != "start_failed",
                 "tests passed but sync failed to start",
             )
-            workflow_common.update_record(job / "report.json", state="success")
+            workflow_common.update_record(job / "result.json", state="success")
     except BaseException as error:
         workflow_common.update_record(
-            job / "report.json", state="failed", error=str(error)
+            job / "result.json", state="failed", error=str(error)
         )
         raise
     finally:
@@ -319,4 +319,4 @@ def replay(c, job, request):
             replay_adapter.associate_evidence(evidence, attempts)
         except OSError as error:
             evidence = {"errors": [{"error": str(error)}], "files": []}
-        workflow_common.update_record(job / "report.json", evidence=evidence)
+        workflow_common.update_record(job / "result.json", evidence=evidence)

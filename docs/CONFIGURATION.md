@@ -148,7 +148,7 @@ replay:
   dump: true
 ```
 
-开启后，Forge 设置 AF `codegen_compile_debug=true`（debug_dir 为结果目录下的 dump/）、`TORCH_COMPILE_DEBUG=1`、`DUMP_GE_GRAPH=1`、`DUMP_GRAPH_LEVEL=1`、`DUMP_GRAPH_PATH=<结果目录>/dump/ge`，以及 `ASCEND_GLOBAL_LOG_LEVEL=0`、`ASCEND_SLOG_PRINT_TO_STDOUT=1`。实际注入参数记录于 job 的 report.json/replay_environment；dump 参数仅传给实际执行用例的 AFX 进程及其子进程。设备自动探测、seed 解析、结果查询和上传沿用基础环境及本次任务的 AUTOFUSEX_HOME。
+开启后，Forge 设置 AF `codegen_compile_debug=true`（debug_dir 为结果目录下的 dump/）、`TORCH_COMPILE_DEBUG=1`、`DUMP_GE_GRAPH=1`、`DUMP_GRAPH_LEVEL=1`、`DUMP_GRAPH_PATH=<结果目录>/dump/ge`，以及 `ASCEND_GLOBAL_LOG_LEVEL=0`、`ASCEND_SLOG_PRINT_TO_STDOUT=1`。实际注入参数记录于 job 的 result.json/replay_environment；dump 参数仅传给实际执行用例的 AFX 进程及其子进程。设备自动探测、seed 解析、结果查询和上传沿用基础环境及本次任务的 AUTOFUSEX_HOME。
 
 AF 图、逐 pass MLIR 和生成代码位于结果目录 dump/；GE 图位于 dump/ge/；PyTorch 调试产物默认位于 job 目录 torch_compile_debug/，Inductor cache 位于结果目录 cache/。日志保留在 job.log 和 AFX worker 日志中。只有执行到对应阶段才产生文件，具体产物取决于后端及安装版本。
 

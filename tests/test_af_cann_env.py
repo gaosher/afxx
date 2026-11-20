@@ -16,7 +16,7 @@ def test_existing_skip_and_failed_install_block(tmp_path, monkeypatch):
     c = {"runtime": {"install_root": str(root)}}
     monkeypatch.setattr(e, "listing", lambda _: pytest.fail("must not download"))
     e.ensure(c, tmp_path)
-    assert workflow_common.read(tmp_path / "cann-bootstrap.json")["state"] == "existing"
+    assert workflow_common.read(tmp_path / "result.json")["cann"]["state"] == "existing"
     workflow_common.write(root / ".af-cann-bootstrap.json", {"state": "invalid"})
     with pytest.raises(ValueError, match="previous CANN"):
         e.ensure(c, tmp_path)
@@ -91,6 +91,7 @@ def test_cann_install_cleans_only_successful_downloads(tmp_path, monkeypatch, fa
     root = tmp_path / "ascend"
     job = tmp_path / "job"
     job.mkdir()
+    workflow_common.write(job / "result.json", {"base_python": {"path": "/existing/python"}})
     cfg = {
         "auto_install": True,
         "repository_url": "https://fixture.invalid/",
@@ -120,7 +121,7 @@ def test_cann_install_cleans_only_successful_downloads(tmp_path, monkeypatch, fa
     monkeypatch.setattr(e.tempfile, "mkdtemp", mkdtemp)
 
     def download(url, **kw):
-        checkpoint = workflow_common.read(job / "cann-bootstrap.json")
+        checkpoint = workflow_common.read(job / "result.json")["cann"]
         assert checkpoint["download_dir"] == str(temporary)
         if failure == "download":
             raise OSError("download interrupted")
@@ -147,7 +148,7 @@ def test_cann_install_cleans_only_successful_downloads(tmp_path, monkeypatch, fa
     if failure == "download":
         with pytest.raises(OSError, match="download interrupted"):
             e.ensure(c, job)
-        report = workflow_common.read(job / "cann-bootstrap.json")
+        report = workflow_common.read(job / "result.json")["cann"]
         assert report["state"] == "download_failed"
         assert report["download_dir"] == str(temporary) and temporary.is_dir()
         assert not (root / ".af-cann-bootstrap.json").exists()
@@ -157,7 +158,8 @@ def test_cann_install_cleans_only_successful_downloads(tmp_path, monkeypatch, fa
             e.ensure(c, job)
     else:
         e.ensure(c, job)
-    report = json.loads((job / "cann-bootstrap.json").read_text())
+    assert workflow_common.read(job / "result.json")["base_python"]["path"] == "/existing/python"
+    report = json.loads((job / "result.json").read_text())["cann"]
     assert (temporary / "install.log").is_file()
     assert (temporary / "toolkit.run").exists() == fail_install
     assert (temporary / "ops.run").exists() == fail_install

@@ -229,7 +229,7 @@ Shape 数量由 AFX 解码 seed 得到：静态为 1，动态为 2–8。结果�
 
 通过要求为执行命令成功、CPU/AF-MLIR attempt 均为 ok、seed/backend/shape 完整且无重复。AF-MLIR correctness 必须为 pass，CPU 参考后端允许 not_checked 或 pass。unsupported、缺失结果和目标后端未比较均判失败。
 
-独立 replay 默认只保存结果。启用 upload 或传 --upload 时使用 upload.sync_config_path 请求 AFX 同步，--no-upload 可覆盖。report.json 中 upload=pending 表示同步已请求，服务端接收情况需另查。平台客户端会上传自己领取的验证任务结果。
+独立 replay 默认只保存结果。启用 upload 或传 --upload 时使用 upload.sync_config_path 请求 AFX 同步，--no-upload 可覆盖。result.json 中 upload=pending 表示同步已请求，服务端接收情况需另查。平台客户端会上传自己领取的验证任务结果。
 
 ## 环境清单、产物与清理
 
@@ -262,19 +262,15 @@ Shape 数量由 AFX 解码 seed 得到：静态为 1，动态为 2–8。结果�
 │   └── build/                  复用的编译目录
 ├── workflow-state/<job-id>/
 │   ├── config.yaml            提交配置；init/update 成功后附带环境锁
-│   ├── environment.json       deploy/replay/check 启动时的实际环境及采集错误
+│   ├── environment.json       实际环境、采集错误及 Python 依赖检查
 │   ├── request.json           任务请求
 │   ├── launch.json            远端启动记录
 │   ├── status.json            当前阶段与终态
 │   ├── source.json            源码清单及快照清理结果
 │   ├── snapshot/              同步校验成功后清理
-│   ├── deployment.json        部署来源及实际加载的 AF 身份
 │   ├── packages/              本轮 AF run 包
-│   ├── report.json            replay 资源、执行结果和证据索引
-│   ├── result.json            环境操作结果、更新及回滚信息
+│   ├── result.json            部署/replay/环境操作结果及产物索引
 │   ├── platform.json          verify 固定请求及平台回执
-│   ├── python-dependencies.json  Python 依赖检查报告
-│   ├── cann-bootstrap.json    CANN 安装检查与下载记录
 │   ├── job.log                任务日志
 │   └── uv.log                 Python 包安装日志
 ├── workflow-results/<job-id>/
@@ -300,7 +296,7 @@ CANN 全量安装包临时下载到 **远端** `/tmp/af-cann-<job-id>-*/`，与�
 
 源码快照 snapshot/ 为普通目录树。确认远端启动后清理本地副本，远端同步校验成功后清理远端副本。状态不明确时保留现场，dry-run 保留快照。源码清单和部署引用继续用于校验，删除快照后需另行保留源码才能恢复未提交修改。
 
-完整 CANN 下载包在安装成功后清理，失败时保留。AF run 包、共享 wheel、锁文件和任务记录持续保留，按需要归档。当前部署注册表通过路径和 SHA-256 引用 deployment.json，后者引用 source.json；后续复跑依赖这些文件。
+完整 CANN 下载包在安装成功后清理，失败时保留。AF run 包、共享 wheel、锁文件和任务记录持续保留，按需要归档。当前部署注册表通过路径和 SHA-256 引用 result.json，后者引用 source.json；后续复跑依赖这些文件。
 
 init/update 成功后的冻结配置可用于重建环境，操作与约束见 [从冻结配置重建环境](docs/CONFIGURATION.md#从冻结配置重建环境)。
 
