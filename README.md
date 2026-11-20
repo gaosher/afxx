@@ -44,6 +44,8 @@ af-forge/
 
 ## 安装与配置
 
+本地需准备 **Python 3.11+（含 pip）、Git、Node.js 20+、npussh/npursync、OpenSSH 客户端和 rsync**，并确保命令在 PATH 中可用。npursync 随 npussh 提供；PyYAML 和 MCP SDK 随 Forge wheel 自动安装。版本要求、安装方式及检查范围见 [本地依赖说明](docs/LOCAL_DEPENDENCIES.md#本地启动环境)。
+
 安装 Forge 并登录 NPU 服务：
 
 ```bash
@@ -222,21 +224,69 @@ Shape 数量由 AFX 解码 seed 得到：静态为 1，动态为 2–8。结果�
 
 ## 环境清单、产物与清理
 
-| 位置 | 内容与用途 |
-|---|---|
-| 本地 `requests/` | request-id 到冻结任务的幂等索引 |
-| 本地 `issues/<id>.json` | 平台 issue 领取响应、冻结目标及租约 |
-| job 的 `config.yaml` | 有效配置；环境操作成功或部署/复跑环境校验通过后含实际版本、日期、哈希和内嵌依赖锁 |
-| job 的 `request.json` / `launch.json` / `status.json` | 请求、远端启动凭据、阶段与终态 |
-| job 的 `source.json` | 源码清单、权限、链接、哈希及快照清理结果 |
-| job 的 `deployment.json` / `packages/` | 部署来源、加载证据及 AF run 包 |
-| job 的 `report.json` | 独立 replay 的资源、结果及同步状态 |
-| job 的 `result.json` | 环境操作结果；环境更新包含组件和回滚信息 |
-| job 的 `platform.json` | 平台 verify 固定请求及回执 |
-| job 的 `python-dependencies.json` / `cann-bootstrap.json` | 依赖检查和 CANN 安装证据 |
-| job 的 `job.log` / `uv.log` | 操作日志 |
-| `workflow-env-state/current.json` | 当前环境清单，供环境一致性校验及更新使用 |
-| `workflow-env-state/wheels/` / `locks/` | 按哈希保存 torch_npu/AFX wheel 和依赖锁 |
+本地状态根目录由 `local.state_dir` 指定，默认是 `~/.local/state/graph-autofusion/dev_workflow/jobs`：
+
+```text
+<local.state_dir>/
+├── requests/                    request-id → 冻结任务的幂等索引及锁
+├── issues/
+│   ├── <issue-id>.json          领取响应、目标环境及租约
+│   └── <issue-id>/summary.yaml  skill 生成、待人工检视的修复总结
+└── <job-id>/
+    ├── config.yaml             本地提交时冻结的配置
+    ├── request.json            请求及提交记录
+    ├── source.json             deploy 源码清单、哈希及快照清理结果
+    ├── snapshot/               待同步源码的普通目录树，启动确认后清理
+    └── af_forge/               随任务上传的执行模块
+```
+
+远端默认布局如下；显式配置路径时以实际配置为准。job 内文件按任务类型和执行阶段生成，不是每个任务都有全部文件：
+
+```text
+<workflow_root>/
+├── python/                     托管 Python 及引导工具
+├── venv/                       专用 Python 环境
+├── Ascend/cann/                CANN 安装目录
+├── auth/afx.token              默认平台凭据，不属于 job 产物
+├── graph-autofusion/           同步后的源码
+│   ├── .af-workflow            托管源码归属和哈希清单文件
+│   └── build/                  复用的编译目录
+├── workflow-state/<job-id>/
+│   ├── config.yaml            有效配置；冻结环境后含版本、日期、哈希和依赖锁
+│   ├── request.json           任务请求
+│   ├── launch.json            远端启动记录
+│   ├── status.json            当前阶段与终态
+│   ├── source.json            源码清单及快照清理结果
+│   ├── snapshot/              同步校验成功后清理
+│   ├── deployment.json        部署来源及实际加载的 AF 身份
+│   ├── packages/              本轮 AF run 包
+│   ├── report.json            replay 资源、执行结果和证据索引
+│   ├── result.json            环境操作结果、更新及回滚信息
+│   ├── platform.json          verify 固定请求及平台回执
+│   ├── python-dependencies.json  Python 依赖检查报告
+│   ├── cann-bootstrap.json    CANN 安装检查与下载记录
+│   ├── job.log                任务日志
+│   └── uv.log                 Python 包安装日志
+├── workflow-results/<job-id>/
+│   ├── results.sqlite         AFX replay 结果数据库
+│   ├── dump/                  AF/GE 图、MLIR 等定位产物
+│   └── cache/                 编译缓存；其他日志/产物按实际执行生成
+└── workflow-env-state/
+    ├── current.json           当前环境清单
+    ├── wheels/                按哈希保存的 torch_npu/AFX wheel
+    └── locks/                 Python 依赖锁文件
+```
+
+replay 终态下载的证据在本机 `/tmp`，响应中的 `evidence_path` 给出准确路径：
+
+```text
+/tmp/af-forge-evidence-<uid>/<job-id>-<环境标识>/
+├── evidence.json               完整清单、远端/本地路径、大小及哈希
+├── job/                        下载的报告、任务日志及调试文件
+└── results/                    下载的完整 dump、日志、缓存和结果数据库
+```
+
+CANN 全量安装包临时下载到 **远端** `/tmp/af-cann-<job-id>-*/`，与本地 evidence 目录不同。
 
 源码快照 snapshot/ 为普通目录树。确认远端启动后清理本地副本，远端同步校验成功后清理远端副本。状态不明确时保留现场，dry-run 保留快照。源码清单和部署引用继续用于校验，删除快照后需另行保留源码才能恢复未提交修改。
 
