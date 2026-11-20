@@ -124,7 +124,7 @@ def record_environment(c, job):
     from af_forge.environment import snapshot
 
     workflow_common.phase(job, "environment_snapshot")
-    snapshot.capture(c, job)
+    return snapshot.capture(c, job)
 
 
 def save_frozen_config(c, job, manifest):
@@ -191,7 +191,7 @@ def replay(c, job, request):
             ),
         ):
             deployment = workflow_runtime.current_deployment(c, request["deployment"])
-            record_environment(c, job)
+            environment_snapshot = record_environment(c, job)
             workflow_common.update_record(
                 job / "report.json",
                 state="running",
@@ -200,7 +200,11 @@ def replay(c, job, request):
             )
             env = workflow_runtime.environment(c)
             workflow_runtime.venv_preflight(c, env, job, "replay")
-            runtime = workflow_runtime.probe(c, env, job)
+            workflow_common.require(
+                "af" in environment_snapshot,
+                "AF environment probe failed; see environment.json",
+            )
+            runtime = environment_snapshot["af"]
             expected_runtime = deployment["runtime"]
             workflow_common.require(
                 {k: v for k, v in runtime.items() if k != "debugger"}

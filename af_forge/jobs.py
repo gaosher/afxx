@@ -118,7 +118,7 @@ def worker(job):
             ):
                 workflow_execution.record_environment(c, job)
                 workflow_runtime.venv_preflight(
-                    c, workflow_runtime.environment(c), job, "deploy"
+                    c, workflow_runtime.environment(c), job, "full"
                 )
         workflow_common.write(
             job / "status.json",

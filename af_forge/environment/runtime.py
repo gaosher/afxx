@@ -74,8 +74,10 @@ def python(c):
 
 def dependency_checks(module, scope):
     """Explicit imports supplement installed distribution metadata (pip check)."""
-    modules = ["numpy", "sympy", "torch", "torch_npu", "nnsmith", "z3", module]
-    if scope == "deploy":
+    modules = ["numpy", "sympy", "torch", "torch_npu", module]
+    if scope != "deploy":
+        modules += ["nnsmith", "z3"]
+    if scope in ("deploy", "full"):
         modules = ["pip", "build", "wheel", "setuptools", "packaging"] + modules
     checks = []
     for name in modules:
@@ -85,33 +87,34 @@ def dependency_checks(module, scope):
             '"version":str(getattr(m,"__version__","unknown"))}))'
         )
         checks.append((name, [sys.executable, "-c", script]))
-    client = 'import importlib\nprefix="autofusex.fuzz.client"\n'
-    checks.append(
-        (
-            "fuzz-cli",
-            [
-                sys.executable,
-                "-c",
-                client + "print(importlib.import_module(prefix+'.cli').__file__)",
-            ],
+    if scope != "deploy":
+        client = 'import importlib\nprefix="autofusex.fuzz.client"\n'
+        checks.append(
+            (
+                "fuzz-cli",
+                [
+                    sys.executable,
+                    "-c",
+                    client + "print(importlib.import_module(prefix+'.cli').__file__)",
+                ],
+            )
         )
-    )
-    checks.append(
-        (
-            "afx-contracts",
-            [
-                sys.executable,
-                "-c",
-                "from autofusex.fuzz.client.generation.sampling import SamplingConfig,decode; "
-                "from autofusex.fuzz.client.storage import ResultRepository; "
-                "s=SamplingConfig(dynamic_variants=8).seed(0,dynamic=True); "
-                "assert decode(s)[0].dynamic_variants==8; "
-                "assert all(callable(f) for f in (ResultRepository.list,ResultRepository.detail)); "
-                'print("AFX seed/results interfaces available")',
-            ],
+        checks.append(
+            (
+                "afx-contracts",
+                [
+                    sys.executable,
+                    "-c",
+                    "from autofusex.fuzz.client.generation.sampling import SamplingConfig,decode; "
+                    "from autofusex.fuzz.client.storage import ResultRepository; "
+                    "s=SamplingConfig(dynamic_variants=8).seed(0,dynamic=True); "
+                    "assert decode(s)[0].dynamic_variants==8; "
+                    "assert all(callable(f) for f in (ResultRepository.list,ResultRepository.detail)); "
+                    'print("AFX seed/results interfaces available")',
+                ],
+            )
         )
-    )
-    if scope == "deploy":
+    if scope in ("deploy", "full"):
         checks.append(
             (
                 "setuptools>=68",
@@ -123,24 +126,26 @@ def dependency_checks(module, scope):
                 ],
             )
         )
-    checks.append(
-        (
-            "sqlite>=3.35",
-            [
-                sys.executable,
-                "-c",
-                "import sqlite3; assert sqlite3.sqlite_version_info >= (3,35,0), sqlite3.sqlite_version; print(sqlite3.sqlite_version)",
-            ],
+    if scope != "deploy":
+        checks.append(
+            (
+                "sqlite>=3.35",
+                [
+                    sys.executable,
+                    "-c",
+                    "import sqlite3; assert sqlite3.sqlite_version_info >= (3,35,0), sqlite3.sqlite_version; print(sqlite3.sqlite_version)",
+                ],
+            )
         )
-    )
-    gate = """import importlib,importlib.util,json
+        gate = """import importlib,importlib.util,json
 prefix+='.generation.'
 name=prefix+'runtime'
 m=importlib.import_module(name)
 print(json.dumps(m.source_evidence()))
 """
-    checks.append(("nnsmith-source-and-z3", [sys.executable, "-c", client + gate]))
-    checks.append(("pip-check", [sys.executable, "-I", "-m", "pip", "check"]))
+        checks.append(("nnsmith-source-and-z3", [sys.executable, "-c", client + gate]))
+    if scope == "full":
+        checks.append(("pip-check", [sys.executable, "-I", "-m", "pip", "check"]))
     return checks
 
 

@@ -611,8 +611,7 @@ def cache_wheel(c, target, job, staging, cache):
 
 
 def verify(c, job, rollback=False, *, initial=False):
-    uv(c, ["pip", "check", "--python", workflow_runtime.python(c)], job)
-    workflow_runtime.venv_preflight(c, workflow_runtime.environment(c), job, "deploy")
+    workflow_runtime.venv_preflight(c, workflow_runtime.environment(c), job, "full")
     if initial or not workflow_runtime.registry(c).with_suffix(".json").exists():
         # deploy verifies AF libraries after installing its freshly built package.
         return

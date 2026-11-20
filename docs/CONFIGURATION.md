@@ -127,6 +127,8 @@ deploy/replay/check 在远端开始执行时保留提交的 `config.yaml`，并�
 
 日常任务不再比对配置与 init/update 清单，也不要求缓存 wheel 或旧锁文件存在。必需依赖无法加载、replay 指定的 AF 部署被替换仍会报错。环境快照用于追溯，不能单凭版本列表保证精确重建；未发布 wheel 的原始来源可能需要另外保存。
 
+日常 deploy 检查构建与安装验证所需依赖；replay 检查用例执行及 seed/results 接口。全量依赖一致性检查（pip check）在 init/update 和 env check 中执行。replay 在本次任务持锁期间复用环境快照的 AF 探测结果。
+
 安装 AF 前只检查本次包安装清单中的共享库是否被可见进程加载，不阻止仅使用其他 CANN 库的进程。init/update 共用入口在目标 venv 已存在时仍检查整个 venv 的占用。
 
 ## 从冻结配置重建环境

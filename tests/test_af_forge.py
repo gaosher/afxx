@@ -424,7 +424,7 @@ def test_replay_uses_private_results_and_existing_cli(
     cfg["replay"]["dump"] = dump
     if auto:
         cfg["replay"]["devices"] = cfg["replay"]["workers"] = "auto"
-    monkeypatch.setattr(workflow_execution, "record_environment", lambda c, job: None)
+    monkeypatch.setattr(workflow_execution, "record_environment", lambda c, job: {"af": {"debugger": {"sha256": "updated"}} if afx_changed else {}})
     job = tmp_path / "replay-job"
     job.mkdir()
     deployment = {
@@ -443,7 +443,7 @@ def test_replay_uses_private_results_and_existing_cli(
     monkeypatch.setattr(
         workflow_runtime,
         "probe",
-        lambda *a: {"debugger": {"sha256": "updated"}} if afx_changed else {},
+        lambda *a: pytest.fail("replay must reuse the captured AF probe"),
     )
 
     def capture(argv, **kwargs):
@@ -572,9 +572,12 @@ def test_dependency_scope_and_commands_compile():
     build = dict(workflow_runtime.dependency_checks("autofusex", "deploy"))
     runtime = dict(workflow_runtime.dependency_checks("autofusex", "replay"))
     assert "build" in build and "build" not in runtime
-    assert "torch_npu" in runtime and "pip-check" in runtime
+    assert "torch_npu" in runtime and "pip-check" not in runtime
+    full = dict(workflow_runtime.dependency_checks("autofusex", "full"))
+    assert "pip-check" in full and "build" in full and "afx-contracts" in full
+    assert not {"pip-check", "nnsmith", "z3", "fuzz-cli", "afx-contracts", "nnsmith-source-and-z3", "sqlite>=3.35"} & build.keys()
     assert "nnsmith-source-and-z3" in runtime
-    for command in [*build.values(), *runtime.values()]:
+    for command in [*build.values(), *runtime.values(), *full.values()]:
         if "-c" in command:
             compile(command[command.index("-c") + 1], "<dependency-check>", "exec")
 
