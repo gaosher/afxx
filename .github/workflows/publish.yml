@@ -19,7 +19,6 @@ jobs:
     env:
       # Update together with AFX contract validation.
       AFX_REVISION: 4d8eaf9fb23a108281d6525305c41397b53812a0
-      AFX_SOURCE: ${{ runner.temp }}/afx-source
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +41,8 @@ jobs:
 
       - name: Prepare AFX contract source
         run: |
+          AFX_SOURCE="$RUNNER_TEMP/afx-source"
+          echo "AFX_SOURCE=$AFX_SOURCE" >> "$GITHUB_ENV"
           git init "$AFX_SOURCE"
           git -C "$AFX_SOURCE" remote add origin https://gitcode.com/xingzhixiong/Autofuse-Debugger.git
           git -C "$AFX_SOURCE" fetch --depth=1 origin "$AFX_REVISION"
