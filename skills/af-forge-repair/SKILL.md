@@ -38,7 +38,7 @@ af-forge issue preview --issue-id <issue-id> --full
 
 原始基线优先使用 graph-autofusion 的 `upstream/master`。确认 upstream 指向目标上游仓库，获取最新 master 并记录解析后的确切 commit SHA；本轮复现和修复固定使用这个 SHA，不随上游移动而改变基线。
 
-优先复用来源恰好为该 SHA、无额外源码差异且仍可核验的成功 deploy job。否则在该 SHA 上建立干净的独立 worktree，使用任务专用配置将 local.source_dir 指向它，再部署基线复现；修复分支也从该基线继续。保留原工作区及配置，不通过 reset、清理或切分支覆盖用户已有修改。若用户指定其他修复分支，单独记录其与基线的差异，不把它冒充上游原始基线。upstream/master 不存在或获取失败时明确报告，不能静默替换为 origin/master、缓存引用或当前工作区。
+在该 SHA 上建立干净的独立 worktree，任务配置的 local.source_dir 指向它；首次复现前执行下面的“deploy 主线基线 → 等待成功 → replay 复现”。修复分支从同一基线继续；已有基线部署只有满足下述全部条件才可复用。保留原工作区及配置，不通过 reset、清理或切分支覆盖用户已有修改。若用户指定其他修复分支，单独记录其与基线的差异，不把它冒充上游原始基线。upstream/master 不存在或获取失败时明确报告，不能静默替换为 origin/master、缓存引用或当前工作区。
 
 使用 worktree 时，复制配置并仅将 `local.source_dir` 改为 worktree 绝对路径，不覆盖默认配置。从此步开始，所有后续操作（包括 status、issue 查询和 verify）必须带 `--config "$TASK_CONFIG"`，MCP 显式传同一路径；仅 cd 到 worktree 不会切换配置。deploy 前核对源码路径，无需 env update。
 
@@ -50,12 +50,45 @@ TASK_CONFIG="/absolute/path/to/task-config.yaml"
 
 基线和候选复现均使用 `replay --dump`，由 Forge 开启本次任务的定位采集，无需修改 `replay.dump`。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集和读取证据。
 
-对 nnsmith seed 使用 Forge replay：
+### 2.1 Deploy 主线基线
+
+修改源码前，先部署上述主线 worktree。deploy 会同步未提交修改，提交前必须确认 worktree 干净，不包含会被同步的额外源码文件。
+
+```bash
+af-forge deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <基线部署请求ID>
+```
+
+记录返回的 `job_id` 为基线 deploy job，并保存对应的主线 SHA。这个步骤仅部署，不提交平台 verify。
+
+仅当以下条件全部满足时，才可跳过本次 deploy，复用已有基线 job：
+
+- 该 job 已成功，源码清单对应本次固定的 upstream/master SHA，且没有额外源码差异；仅有相同 HEAD 或包版本号不足以证明一致。
+- deploy 的来源、源码清单和安装身份仍可读取核验；远端当前加载的 AF 路径及 pyautofuse.so 哈希与该 job 的 deployment.json 一致，没有被后续安装替换。
+- 该部署属于本次目标 NPU、CANN 安装目录和运行环境，能够通过 replay 的部署与环境检查。
+
+记录复用的 job ID、SHA 和核验依据；任一条件不满足或无法确认，都重新部署主线基线。不能用来源不明的远端现有包代替。
+
+### 2.2 等待基线部署成功
+
+```bash
+af-forge status --config "$TASK_CONFIG" --job-id <基线deploy-job-id>
+# 尚未结束时，用上次返回的 cursor 等待变化；超时继续查询同一 job。
+af-forge status --config "$TASK_CONFIG" --job-id <基线deploy-job-id> \
+  --wait --since <cursor> --timeout 30
+```
+
+只有 `state=success` 才进入复现。queued/running 或提交响应的 ok=true 不代表部署完成；failed/unknown 时先处理部署或状态问题，不能继续 replay，也不能宣称已复现。
+
+### 2.3 Replay 复现原问题
+
+对 nnsmith seed，明确引用刚完成或已核验复用的基线 deploy job：
 
 ```bash
 af-forge replay --config "$TASK_CONFIG" --dump --job-id <基线deploy-job-id> --seed <原始seed> --request-id <复现请求ID>
 af-forge status --config "$TASK_CONFIG" --job-id <replay-job-id>
 ```
+
+记录 replay 返回的新 job ID，后续查询使用 replay job，不能与基线 deploy job 混淆。
 
 若 replay 在准备阶段退出，先按[准备阶段失败](references/replay-evidence.md#准备阶段失败)定位出错的子命令。目标 seed 实际执行且失败阶段和关键诊断与平台记录吻合后，才能报告已复现。
 
