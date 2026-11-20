@@ -42,7 +42,7 @@ NPU 驱动可用，用户具备目标目录权限。包源提供配置要求的 
 
 ## 整体介绍
 
-入口解析 YAML 和命令，调用远端任务协议或平台适配器。任务保留独立配置、请求和状态。环境清单存于 env-state，deploy/replay 比对它与配置及实际环境；一致时将环境锁合入任务配置，不一致时记录 WARNING 并保留提交配置继续执行，不承诺精确环境复现。AFX 官方客户端在 NPU 独立常驻，Forge 在 verify 前通过远端启动器调用官方命令。
+入口解析 YAML 和命令，调用远端任务协议或平台适配器。任务保留独立配置、请求和状态。环境清单存于 env-state，供 init/update 管理安装。deploy/replay/check 保留提交配置并现场采集 environment.json，不比对历史清单或检查缓存 wheel；快照用于追溯，不承诺精确重建。AFX 官方客户端在 NPU 独立常驻，Forge 在 verify 前通过远端启动器调用官方命令。
 
 ## 功能需求
 
@@ -92,7 +92,7 @@ pytest 以临时仓库和目录验证 Git/rsync 行为，通过构建、网络�
 
 ### 可靠性
 
-原子文件替换记录阶段状态。request-id、远端启动锁和启动凭据约束任务重试。同步删除仅覆盖托管文件。环境锁保护更新、安装与复测。安装前保留环境占用检查。
+原子文件替换记录阶段状态。request-id、远端启动锁和启动凭据约束任务重试。同步删除仅覆盖托管文件。环境锁保护更新、安装与复测。AF 安装前只检查本次包共享库的占用；init/update 保留 venv 占用检查。
 
 ### 特性交叉影响
 
@@ -181,7 +181,7 @@ SHA-256 用于源码、包、加载文件和锁文件一致性校验。源码同
 | af_forge/environment/bootstrap.py | 托管解释器下载、能力预检与已有解释器复用 |
 | af_forge/environment/python.py | uv 环境创建、包来源、依赖锁、更新与回滚 |
 | af_forge/environment/cann.py | CANN 检查、选包、下载、安装和清理 |
-| af_forge/environment/consistency.py | 配置、环境清单和实际运行环境比对 |
+| af_forge/environment/snapshot.py | 现场采集 job 的 Python、CANN 与 AF 身份 |
 | af_forge/afx/replay.py | seed 契约、当前 AFX CLI 参数、公共结果查询与覆盖判定 |
 | af_forge/afx/launcher.py | 官方客户端启动、存活和环境身份校验；不执行 stop |
 | af_forge/afx/platform.py | issues HTTP 请求、租约、verify 提交和结果跟踪 |

@@ -121,13 +121,17 @@ Forge 的 token 需要 `issue` 权限。远端独立运行的 AFX 客户端使�
 
 `platform.client_token_file` 在 issue verify 时必填，为远端路径。Forge 先用官方 `client once` 检查连通和鉴权，再后台运行 `client run --retest`，设备沿用 replay.devices（auto 时查询可见卡）。启动证据和日志位于 remote.state_dir 的上一级目录下的 afx-client/。相同配置和 AF 身份复用已有进程；不自动停止旧进程。启动检查不等同于复测通过，结果仍通过 issue status/wait 查询。
 
-## 环境一致性与冻结配置
+## Job 环境快照
 
-deploy/replay 的配置、当前环境清单与实际包版本不一致时，输出含 expected/actual 的 WARNING 并继续；告警保留在 job.log 中。有差异时保留提交的 config.yaml，不写入旧清单的环境锁，因此该配置不保证精确复现实际环境。依赖无法加载及 AF 部署产物被替换仍报错。AFX 在部署后更新不会单独阻止 replay，实际加载身份写入 report.json。
+deploy/replay/check 在远端开始执行时保留提交的 `config.yaml`，并现场采集 `environment.json`：Python 版本和解释器路径、已安装 Python 包版本及安装来源（包含安装元数据已有的包哈希）、CANN 路径和版本、实际加载的 AF 库路径和哈希。采集失败的项目写入 errors，不使用旧 init/update 清单补作当前值。
+
+日常任务不再比对配置与 init/update 清单，也不要求缓存 wheel 或旧锁文件存在。必需依赖无法加载、replay 指定的 AF 部署被替换仍会报错。环境快照用于追溯，不能单凭版本列表保证精确重建；未发布 wheel 的原始来源可能需要另外保存。
+
+安装 AF 前只检查本次包安装清单中的共享库是否被可见进程加载，不阻止仅使用其他 CANN 库的进程。init/update 共用入口在目标 venv 已存在时仍检查整个 venv 的占用。
 
 ## 从冻结配置重建环境
 
-将远端 job 的 config.yaml 取回本地，执行 `init --config /absolute/path/config.yaml`。目标 venv 要求尚不存在。异地重建时调整运行、状态和源码路径，保留 environment_lock 和包来源。
+将成功 init/update 任务的 config.yaml 取回本地，执行 `init --config /absolute/path/config.yaml`。目标 venv 要求尚不存在。异地重建时调整运行、状态和源码路径，保留 environment_lock 和包来源。
 
 恢复使用内嵌 Python 依赖锁、实际 Daily 日期、CANN 发布号及包哈希。基础 Python 版本必须匹配，包源或共享 wheel 需仍可访问。外部 CANN 缺少安装收据时，只记录可探测的版本信息，恢复需准备相应安装。源码、seed 和运行结果按各自产物保存。
 

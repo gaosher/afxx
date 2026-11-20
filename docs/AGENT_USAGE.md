@@ -90,7 +90,7 @@ AFX 官方客户端在 NPU 独立常驻，通过 `afx platform client run --rete
 | TRANSFER_FAILED / REMOTE_UNAVAILABLE | 保存 job/request-id，重试同一请求或查询原任务 |
 | REMOTE_TASK_LOST / SNAPSHOT_UNAVAILABLE | 排查记录和快照缺失 |
 | JOB_NOT_FOUND | 检查目标环境、任务目录和 ID |
-| ENVIRONMENT_MISMATCH | 核对配置、current.json 和实际环境 |
+| ENVIRONMENT_SNAPSHOT_FAILED | 检查环境快照是否可写入 job 目录 |
 | PLATFORM_CREDENTIAL_MISSING | 检查相应端的凭据文件 |
 | PLATFORM_UNAVAILABLE / PLATFORM_RESPONSE_INVALID | 检查平台连接和响应，重试原请求 |
 | PLATFORM_CONFLICT / PLATFORM_UNAUTHORIZED | 核对 issue 租约、请求键、用户及客户端归属 |
@@ -105,7 +105,7 @@ issue verify 将远端已分类错误的 code 和 message 原样返回到 error.
 
 Python 更新失败时同时读取 result.json.error 和 rollback，分别确认原始错误与恢复结果。AF 安装失败会使部署注册表失效。平台提交错误通过独立 issue verify 重试，部署记录继续保留。
 
-环境一致性差异以 WARNING 写入 job.log，不作为 deploy/replay 的失败条件。发生差异时 job 配置保留提交值，不附加旧环境锁；不要将其视为实际环境的精确快照。运行依赖检查和 AF 部署产物完整性检查仍需通过。
+deploy/replay/check 保留提交配置，并将现场采集的 Python 包版本与来源、CANN 版本和 AF 加载身份写入 environment.json；缺失信息见 errors。日常任务不比对历史环境清单或检查缓存 wheel。运行依赖检查和 AF 部署产物完整性检查仍需通过。
 
 客户端启动失败返回 PLATFORM_CLIENT_START_FAILED，查看远端 afx-client/client.log。PLATFORM_CLIENT_MISMATCH 表示存活进程的启动命令或环境变量不匹配；PLATFORM_CLIENT_UNTRACKED 表示同一 HOME 存在无法确认启动环境的进程。上述错误均不提交 verify，也不停止已有进程。
 

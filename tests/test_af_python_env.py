@@ -566,17 +566,11 @@ def test_job_yaml_restores_without_previous_job_or_dependency_resolution(
     workflow_common.write(e.state_path(env_cfg), manifest)
     job = tmp_path / "replay"
     job.mkdir()
-    workflow_execution.freeze_environment(env_cfg, job)
+    workflow_execution.save_frozen_config(env_cfg, job, manifest)
     assert [path.name for path in job.glob("config.*")] == ["config.yaml"]
     frozen = workflow_config.config(job / "config.yaml")
     assert frozen["python_env"]["torch_npu"] == daily
     assert frozen["cann"]["date"] == "20261112"
-    # A platform update must warn without replacing the submitted config with stale pins.
-    drift_job = tmp_path / "drift-job"
-    workflow_common.write(drift_job / "config.yaml", env_cfg)
-    versions["autofusex"] = "0.2.1"
-    workflow_execution.freeze_environment(env_cfg, drift_job)
-    assert workflow_common.read(drift_job / "config.yaml") == env_cfg
     versions["autofusex"] = "0.1.2"
     locked.unlink()
     e.state_path(env_cfg).unlink()

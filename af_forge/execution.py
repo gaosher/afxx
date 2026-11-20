@@ -24,7 +24,7 @@ def deploy(c, job):
         workflow_common.lock(source_lock),
         workflow_common.lock(workflow_runtime.registry(c).with_suffix(".lock")),
     ):
-        freeze_environment(c, job)
+        record_environment(c, job)
         env = workflow_runtime.environment(c)
         workflow_runtime.venv_preflight(c, env, job, "deploy")
         workflow_common.phase(job, "sync")
@@ -57,7 +57,10 @@ def deploy(c, job):
         package = packages[0]
         workflow_common.run(["bash", package, "--check"], env=env, cwd=job)
         package_hash = workflow_common.sha(package)
-        workflow_runtime.check_idle(c["runtime"]["install_root"])
+        workflow_runtime.check_idle(
+            c["runtime"]["install_root"],
+            library_names=workflow_runtime.packaged_libraries(source / "build"),
+        )
         workflow_common.phase(job, "install")
         current = workflow_runtime.registry(c).with_suffix(".json")
         workflow_common.write(current, {"state": "installing", "job": job.name})
@@ -117,21 +120,11 @@ def deploy(c, job):
             raise
 
 
-def freeze_environment(c, job):
-    from af_forge.environment import consistency as environment_consistency
+def record_environment(c, job):
+    from af_forge.environment import snapshot
 
-    workflow_common.phase(job, "environment_consistency")
-    try:
-        manifest = environment_consistency.check(c)
-    except environment_consistency.EnvironmentMismatch as error:
-        print(
-            f"WARNING: {error}; continuing with submitted config; "
-            "recorded environment lock was not frozen",
-            file=sys.stderr,
-            flush=True,
-        )
-        return
-    save_frozen_config(c, job, manifest)
+    workflow_common.phase(job, "environment_snapshot")
+    snapshot.capture(c, job)
 
 
 def save_frozen_config(c, job, manifest):
@@ -198,7 +191,7 @@ def replay(c, job, request):
             ),
         ):
             deployment = workflow_runtime.current_deployment(c, request["deployment"])
-            freeze_environment(c, job)
+            record_environment(c, job)
             workflow_common.update_record(
                 job / "report.json",
                 state="running",

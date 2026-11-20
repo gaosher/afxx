@@ -1,0 +1,66 @@
+"""Capture live job environment without comparing it with installation history."""
+
+import datetime
+import json
+import subprocess
+from pathlib import Path
+
+from af_forge import common
+from af_forge.environment import runtime
+
+PACKAGE_PROBE = r"""
+import importlib.metadata as md, json, platform, sys
+from urllib.parse import urlsplit, urlunsplit
+packages = {}
+for dist in md.distributions():
+    name = dist.metadata.get('Name')
+    if not name:
+        continue
+    item = {'version': dist.version, 'location': str(dist.locate_file(''))}
+    origin = json.loads(dist.read_text('direct_url.json') or '{}')
+    if origin:
+        url = urlsplit(origin.get('url', ''))
+        host = url.netloc.rsplit('@', 1)[-1]
+        origin['url'] = urlunsplit((url.scheme, host, url.path, '', ''))
+        item['source'] = origin
+    packages[name] = item
+print(json.dumps({'version': platform.python_version(), 'executable': sys.executable,
+                  'prefix': sys.prefix, 'packages': packages}))
+"""
+
+
+def capture(c, job):
+    report = {
+        "captured_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),  # noqa: UP017 - remote worker supports Python 3.9
+        "connection": c["connection"],
+        "runtime": c["runtime"],
+        "errors": [],
+    }
+    root = Path(c["runtime"]["install_root"]) / "cann"
+    report["cann"] = {"path": str(root.resolve()), "components": {}}
+    for component, relative in [
+        ("toolkit", "compiler/version.info"),
+        ("ops", "opp/version.info"),
+    ]:
+        try:
+            report["cann"]["components"][component] = (root / relative).read_text()
+        except OSError as error:
+            report["errors"].append(
+                {"component": "cann." + component, "error": str(error)}
+            )
+    try:
+        env = runtime.environment(c)
+        report["python"] = json.loads(
+            common.capture(
+                [runtime.python(c), "-c", PACKAGE_PROBE], env=env, timeout=120
+            ).splitlines()[-1]
+        )
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        report["errors"].append({"component": "python", "error": str(error)})
+    else:
+        try:
+            report["af"] = runtime.probe(c, env, job)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            report["errors"].append({"component": "af", "error": str(error)})
+    common.write(Path(job) / "environment.json", report)
+    return report

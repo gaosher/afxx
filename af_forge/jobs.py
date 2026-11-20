@@ -116,6 +116,7 @@ def worker(job):
                     workflow_runtime.registry(c).with_suffix(".lock"), shared=True
                 ),
             ):
+                workflow_execution.record_environment(c, job)
                 workflow_runtime.venv_preflight(
                     c, workflow_runtime.environment(c), job, "deploy"
                 )
@@ -274,7 +275,7 @@ def local_preflight(command, dry_run=False):
 def phase_error(phase):
     return {
         "platform_verify": "PLATFORM_VERIFY_FAILED",
-        "environment_consistency": "ENVIRONMENT_MISMATCH",
+        "environment_snapshot": "ENVIRONMENT_SNAPSHOT_FAILED",
         "python_dependencies": "REMOTE_DEPENDENCY_FAILED",
         "python_bootstrap": "PYTHON_BOOTSTRAP_FAILED",
         "sync": "SOURCE_SYNC_FAILED",

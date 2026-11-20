@@ -27,7 +27,7 @@ af-forge/
 │   ├── execution.py        # deploy/replay
 │   ├── environment/        # 环境管理
 │   │   ├── runtime.py
-│   │   ├── consistency.py
+│   │   ├── snapshot.py
 │   │   ├── python.py
 │   │   ├── cann.py
 │   │   └── package_sources.json
@@ -99,9 +99,9 @@ af-forge deploy --request-id deploy-001
 af-forge status --job-id <job-id>
 ```
 
-提交返回 job ID。远端先核对配置、当前环境清单、实际 Python 包和 CANN，再同步源码，执行 `bash build.sh --pkg --enable-mlir -j 8`，将本轮产物写入 job 的 packages/，随后校验并升级安装 AF。安装后验证实际加载的 pyautofuse、adapter、codegen 文件与本轮构建产物一致。
+提交返回 job ID。远端先采集实际环境快照、检查运行依赖，再同步源码，执行 `bash build.sh --pkg --enable-mlir -j 8`，将本轮产物写入 job 的 packages/，随后校验并升级安装 AF。安装后验证实际加载的 pyautofuse、adapter、codegen 文件与本轮构建产物一致。
 
-环境与配置不一致时输出 WARNING；依赖无法加载或 AF 部署产物被替换仍报错。详见 [环境一致性与冻结配置](docs/CONFIGURATION.md#环境一致性与冻结配置)。
+日常任务现场采集环境快照，不比对历史安装清单或检查缓存 wheel；依赖无法加载或 AF 部署产物被替换仍报错。详见 [Job 环境快照](docs/CONFIGURATION.md#job-环境快照)。
 
 `deploy --issue-id F152` 关联领取上下文，在编包期间续租。部署完成后，通过独立的 `issue verify` 命令提交平台验证。
 
@@ -252,7 +252,8 @@ Shape 数量由 AFX 解码 seed 得到：静态为 1，动态为 2–8。结果�
 │   ├── .af-workflow            托管源码归属和哈希清单文件
 │   └── build/                  复用的编译目录
 ├── workflow-state/<job-id>/
-│   ├── config.yaml            有效配置；冻结环境后含版本、日期、哈希和依赖锁
+│   ├── config.yaml            提交配置；init/update 成功后附带环境锁
+│   ├── environment.json       deploy/replay/check 启动时的实际环境及采集错误
 │   ├── request.json           任务请求
 │   ├── launch.json            远端启动记录
 │   ├── status.json            当前阶段与终态
@@ -292,7 +293,7 @@ CANN 全量安装包临时下载到 **远端** `/tmp/af-cann-<job-id>-*/`，与�
 
 完整 CANN 下载包在安装成功后清理，失败时保留。AF run 包、共享 wheel、锁文件和任务记录持续保留，按需要归档。当前部署注册表通过路径和 SHA-256 引用 deployment.json，后者引用 source.json；后续复跑依赖这些文件。
 
-冻结配置可用于重建环境，操作与约束见 [从冻结配置重建环境](docs/CONFIGURATION.md#从冻结配置重建环境)。
+init/update 成功后的冻结配置可用于重建环境，操作与约束见 [从冻结配置重建环境](docs/CONFIGURATION.md#从冻结配置重建环境)。
 
 ## 验证工具本身
 

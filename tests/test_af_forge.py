@@ -180,7 +180,7 @@ def test_sync_refuses_remote_user_edits(cfg, tmp_path):
 
 
 def test_build_failure_does_not_install(cfg, tmp_path, monkeypatch):
-    monkeypatch.setattr(workflow_execution, "freeze_environment", lambda c, job: None)
+    monkeypatch.setattr(workflow_execution, "record_environment", lambda c, job: None)
     job = job_snapshot(cfg, tmp_path / "job")
     retry = job_snapshot(cfg, tmp_path / "retry")
     monkeypatch.setattr(workflow_runtime, "environment", lambda c: {})
@@ -252,7 +252,7 @@ def test_cli_dry_run_never_connects(cfg, tmp_path, extension):
 def test_deploy_publishes_only_verified_install(
     cfg, tmp_path, monkeypatch, failure, managed
 ):
-    monkeypatch.setattr(workflow_execution, "freeze_environment", lambda c, job: None)
+    monkeypatch.setattr(workflow_execution, "record_environment", lambda c, job: None)
     job = job_snapshot(cfg, tmp_path / "job")
     root = Path(cfg["runtime"]["install_root"])
     (root / "cann/compiler").mkdir(parents=True)
@@ -268,7 +268,8 @@ def test_deploy_publishes_only_verified_install(
     monkeypatch.setattr(workflow_runtime, "venv_preflight", lambda *a: {})
     monkeypatch.setattr(workflow_common, "capture", lambda *a, **k: "Python fixture")
     monkeypatch.setattr(workflow_runtime, "registry", lambda c: tmp_path / "registry")
-    monkeypatch.setattr(workflow_runtime, "check_idle", lambda *a: None)
+    monkeypatch.setattr(workflow_runtime, "check_idle", lambda *a, **kw: None)
+    monkeypatch.setattr(workflow_runtime, "packaged_libraries", lambda *a: {"pyautofuse.so"})
     evidence = {}
     original = workflow_common.run
 
@@ -413,7 +414,7 @@ def test_replay_uses_private_results_and_existing_cli(
     cfg["replay"]["dump"] = dump
     if auto:
         cfg["replay"]["devices"] = cfg["replay"]["workers"] = "auto"
-    monkeypatch.setattr(workflow_execution, "freeze_environment", lambda c, job: None)
+    monkeypatch.setattr(workflow_execution, "record_environment", lambda c, job: None)
     job = tmp_path / "replay-job"
     job.mkdir()
     deployment = {
@@ -586,7 +587,7 @@ def test_dependency_failure_report_saved(cfg, tmp_path, monkeypatch):
 
 
 def test_dependency_failure_blocks_sync(cfg, tmp_path, monkeypatch):
-    monkeypatch.setattr(workflow_execution, "freeze_environment", lambda c, job: None)
+    monkeypatch.setattr(workflow_execution, "record_environment", lambda c, job: None)
     monkeypatch.setattr(workflow_runtime, "registry", lambda c: tmp_path / "registry")
     monkeypatch.setattr(workflow_runtime, "environment", lambda c: {})
 
@@ -1087,41 +1088,6 @@ def test_cann_install_root_override(cfg):
     raw["runtime"] = {"install_root": "/fixture/other/Ascend"}
     with pytest.raises(ValueError, match="conflicts"):
         workflow_config.normalize_config(raw)
-
-
-@pytest.mark.parametrize("command", ["deploy", "replay"])
-def test_environment_mismatch_warns_and_continues(
-    cfg, tmp_path, monkeypatch, capsys, command
-):
-    job = tmp_path / command
-    workflow_common.write(job / "config.yaml", cfg)
-    monkeypatch.setattr(workflow_runtime, "registry", lambda c: tmp_path / "registry")
-    monkeypatch.setattr(
-        workflow_runtime, "current_deployment", lambda *args: {"job": "deployed"}
-    )
-
-    def reached_environment(c):
-        raise RuntimeError("reached runtime environment")
-
-    monkeypatch.setattr(workflow_runtime, "environment", reached_environment)
-    with pytest.raises(RuntimeError, match="reached runtime environment"):
-        if command == "deploy":
-            workflow_execution.deploy(cfg, job)
-        else:
-            workflow_execution.replay(cfg, job, {"deployment": "deployed"})
-    assert workflow_common.read(job / "config.yaml") == cfg
-    assert "WARNING: Environment mismatch" in capsys.readouterr().err
-
-
-def test_environment_probe_errors_still_fail(cfg, tmp_path, monkeypatch):
-    from af_forge.environment import consistency as environment_consistency
-
-    def broken(c):
-        raise OSError("cannot inspect environment")
-
-    monkeypatch.setattr(environment_consistency, "check", broken)
-    with pytest.raises(OSError, match="cannot inspect environment"):
-        workflow_execution.freeze_environment(cfg, tmp_path)
 
 
 @pytest.mark.parametrize("value", [None, "", "relative/source", "~/source"])

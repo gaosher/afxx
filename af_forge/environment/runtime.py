@@ -268,7 +268,16 @@ print(json.dumps({'pyautofuse':p.__file__,'adapter':m.verify_compile_adapter(),'
     return evidence
 
 
-def check_idle(install_root):
+def packaged_libraries(build):
+    """Use the package component's install manifest, not unrelated CANN libraries."""
+    manifest = Path(build) / "install_manifest_graph-autofusion.txt"
+    names = {Path(line).name for line in manifest.read_text().splitlines()
+             if re.search(r"\.so(?:\.|$)", Path(line).name)}
+    workflow_common.require(names, "AF package library manifest is empty")
+    return names
+
+
+def check_idle(install_root, *, library_names=None):
     """Reject visible processes using the installation before overwriting its libraries."""
     root = str(Path(install_root).resolve()) + "/"
     busy = []
@@ -287,11 +296,17 @@ def check_idle(install_root):
                 executable = os.readlink(process / "exe")
             except (PermissionError, FileNotFoundError, ProcessLookupError):
                 continue
-            if root in command or executable.startswith(root):
+            if library_names is None and (root in command or executable.startswith(root)):
                 busy.append(process.name)
             continue
-        if root in maps:
-            busy.append(process.name)
+        for line in maps.splitlines():
+            fields = line.split(None, 5)
+            if len(fields) < 6:
+                continue
+            path = fields[5].removesuffix(" (deleted)")
+            if path.startswith(root) and (library_names is None or Path(path).name in library_names):
+                busy.append(process.name)
+                break
     workflow_common.require(
         not busy, "installation in use by processes: " + ", ".join(busy)
     )

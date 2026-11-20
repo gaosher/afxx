@@ -22,7 +22,7 @@ FILES = (
     "af_forge/job_view.py",
     "af_forge/evidence_bundle.py",
     "af_forge/bundle.py",
-    "af_forge/environment/consistency.py",
+    "af_forge/environment/snapshot.py",
     "af_forge/afx/replay.py",
     "af_forge/afx/platform.py",
     "af_forge/afx/launcher.py",
