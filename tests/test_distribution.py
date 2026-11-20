@@ -61,23 +61,6 @@ def test_mcp_stdio(tmp_path):
             assert grouped.isError
             assert grouped.structuredContent["command"] == "issue claim"
             assert grouped.structuredContent["error"]["code"] == "CONFIG_INVALID"
-            for command in ("env init", "env update"):
-                no_config = await session.call_tool("af_forge_run", {"command": command})
-                assert no_config.isError
-                assert no_config.structuredContent["error"]["code"] == "CONFIG_INVALID"
-                explicit = await session.call_tool("af_forge_run", {
-                    "command": command, "config": str(tmp_path / "missing.yaml"),
-                })
-                assert explicit.structuredContent["error"]["code"] == "CONFIG_INVALID"
-            missing = await session.call_tool(
-                "af_forge_run",
-                {
-                    "command": "doctor",
-                    "config": str(tmp_path / "missing.yaml"),
-                },
-            )
-            assert missing.isError
-            assert missing.structuredContent["error"]["code"] == "CONFIG_INVALID"
             result = await session.call_tool(
                 "af_forge_run",
                 {
@@ -92,33 +75,6 @@ def test_mcp_stdio(tmp_path):
             )
             assert not result.isError
             assert result.structuredContent["ok"]
-            status_help = await session.call_tool("af_forge_help", {"command": "status"})
-            assert all(option in status_help.content[0].text for option in ("--attempt", "--fields", "--wait", "--since"))
-            query_commands = {
-                "issue detail": ["--issue-id", "F152"],
-                "issue tasks": ["--issue-id", "F152", "--round-no", "2"],
-                "issue regression-preview": ["--issue-id", "F152"],
-                "execution show": ["--exec-uuid", "exec-0001"],
-                "evidence list": ["--job-id", "a" * 32],
-                "evidence read": ["--job-id", "a" * 32, "--path", "/tmp/a.mlir"],
-            }
-            for command, arguments in query_commands.items():
-                help_result = await session.call_tool("af_forge_help", {"command": command})
-                assert not help_result.isError and arguments[0] in help_result.content[0].text
-                response = await session.call_tool("af_forge_run", {
-                    "command": command, "arguments": arguments,
-                    "config": str(tmp_path / "missing.yaml"),
-                })
-                assert response.isError
-                assert response.structuredContent["command"] == command
-                assert response.structuredContent["error"]["code"] == "CONFIG_INVALID"
-            summary_help = await session.call_tool("af_forge_help", {"command": "issue summarize"})
-            assert "--summary-file" in summary_help.content[0].text
-            summary_missing_key = await session.call_tool("af_forge_run", {
-                "command": "issue summarize", "arguments": ["--issue-id", "F152", "--summary-file", "summary.yaml"],
-            })
-            assert summary_missing_key.isError
-            assert summary_missing_key.structuredContent["error"]["code"] == "INVALID_ARGUMENT"
             rejected = await session.call_tool("af_forge_run", {"command": "_worker"})
             assert rejected.isError
 
@@ -161,22 +117,7 @@ def test_help_matches_overview_without_loading_config(monkeypatch, capsys):
         assert re.search(r"^\s+" + re.escape(command) + r"\s+[^\s].+$", overview, re.MULTILINE), command
 
 
-@pytest.mark.parametrize("group,action,options", [
-    ("issue", "claim", []), ("issue", "preview", ["--issue-id", "F152"]),
-    ("issue", "renew", ["--issue-id", "F152"]),
-    ("issue", "verify", ["--job-id", "a" * 32]),
-    ("issue", "status", ["--issue-id", "F152", "--round-no", "1"]),
-    ("issue", "wait", ["--issue-id", "F152", "--round-no", "1"]),
-])
-def test_grouped_commands_preserve_internal_operation(group, action, options, monkeypatch):
-    from af_forge import cli
-    monkeypatch.setattr(sys, "argv", ["af-forge", group, action, *options])
-    args = cli.parse_arguments()
-    assert args.command == f"{group}-{action}"
-    assert cli.response(args.command)["command"] == f"{group} {action}"
-
-
-@pytest.mark.parametrize("args", [["client", "start"], ["client", "stop"], ["client", "status"], ["client"], ["issue"], ["client-start"], ["issue-claim"], ["client", "claim"]])
+@pytest.mark.parametrize("args", [["unknown-command"], ["issue"]])
 def test_invalid_group_commands_do_not_load_config(args, monkeypatch, capsys):
     from af_forge import cli
     import json

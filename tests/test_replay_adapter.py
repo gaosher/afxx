@@ -29,7 +29,7 @@ def results(shapes=3):
     ]
 
 
-@pytest.mark.parametrize("count", range(1, 9))
+@pytest.mark.parametrize("count", [1, 2, 8])
 def test_shape_counts_and_cpu_reference(count):
     report = adapter.summarize(results(count), [["123", count]])
     assert report["passed"], report

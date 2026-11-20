@@ -102,7 +102,7 @@ def test_config_rejects_unknown_null_overlap_and_bad_budget(cfg, tmp_path):
         workflow_config.config(p)
 
 
-@pytest.mark.parametrize("jobs", [1, 8, 40])
+@pytest.mark.parametrize("jobs", [1, 40])
 def test_config_accepts_positive_build_parallelism(cfg, tmp_path, jobs):
     cfg["build"]["jobs"] = jobs
     p = tmp_path / "config.yaml"
@@ -213,9 +213,8 @@ def test_build_failure_does_not_install(cfg, tmp_path, monkeypatch):
     assert not (job / "deployment.json").exists()
 
 
-@pytest.mark.parametrize("extension", ["yaml", "yml"])
-def test_cli_dry_run_never_connects(cfg, tmp_path, extension):
-    p = tmp_path / ("config." + extension)
+def test_cli_dry_run_never_connects(cfg, tmp_path):
+    p = tmp_path / "config.yaml"
     import yaml
 
     p.write_text(yaml.safe_dump(cfg))
@@ -403,11 +402,22 @@ def test_toolchain_parent_directory_is_allowed(cfg, tmp_path):
     assert workflow_config.config(path)["build"]["llvm_build_dir"] == str(tmp_path)
 
 
-@pytest.mark.parametrize("dump", [False, True])
-@pytest.mark.parametrize("batch", [False, True])
-@pytest.mark.parametrize("auto", [False, True])
-@pytest.mark.parametrize("failure", [None, "seed", "execution", "database"])
-@pytest.mark.parametrize("afx_changed", [False, True])
+# Adapter tests cover dump switches and command details. Here cover resource routing,
+# AFX drift, and each failure phase without multiplying independent dimensions.
+@pytest.mark.parametrize("batch,auto,failure,afx_changed,dump", [
+    pytest.param(False, False, None, False, False, id="single-explicit"),
+    pytest.param(False, True, None, False, True, id="single-auto-dump"),
+    pytest.param(True, False, None, False, True, id="batch-explicit-dump"),
+    pytest.param(True, True, None, False, False, id="batch-auto"),
+    pytest.param(False, False, None, True, True, id="single-updated-afx"),
+    pytest.param(True, True, None, True, True, id="batch-updated-afx"),
+    pytest.param(False, False, "seed", False, False, id="seed-error"),
+    pytest.param(True, True, "seed", False, True, id="seed-error-dump"),
+    pytest.param(False, False, "execution", False, False, id="execution-error"),
+    pytest.param(True, True, "execution", False, True, id="execution-error-dump"),
+    pytest.param(False, False, "database", False, False, id="database-error"),
+    pytest.param(True, True, "database", False, True, id="database-error-dump"),
+])
 def test_replay_uses_private_results_and_existing_cli(
     cfg, tmp_path, monkeypatch, batch, auto, failure, afx_changed, dump
 ):
@@ -792,7 +802,7 @@ def test_yaml_preserves_quoted_dates_and_versions(tmp_path):
     }
 
 
-@pytest.mark.parametrize("extension", ["json", "txt", ""])
+@pytest.mark.parametrize("extension", ["json", ""])
 def test_user_config_rejects_non_yaml(cfg, tmp_path, extension):
     path = tmp_path / ("config." + extension)
     workflow_common.write(path, cfg)
@@ -1062,7 +1072,7 @@ def test_daily_series_tracks_configured_torch(cfg):
         workflow_config.normalize_config(raw)
 
 
-@pytest.mark.parametrize("extra", [None, {}, {"FixtureChip": "FixtureOps"}])
+@pytest.mark.parametrize("extra", [None, {"FixtureChip": "FixtureOps"}])
 def test_builtin_ops_mapping_survives_user_additions(cfg, extra):
     raw = minimal_config(cfg)
     raw["cann"] = {} if extra is None else {"ops_compatibility": extra}

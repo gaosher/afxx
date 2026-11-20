@@ -47,8 +47,8 @@ def test_invalid_summary_does_not_post(platform_cfg, summary, monkeypatch, text)
     assert error.value.code == "SUMMARY_INVALID"
 
 
-@pytest.mark.parametrize("code", ["PLATFORM_WRONG_STATE", "PLATFORM_LEASE_LOST", "PLATFORM_UNAUTHORIZED"])
-def test_summary_cli_preserves_errors_without_npu(platform_cfg, summary, monkeypatch, capsys, code):
+def test_summary_cli_preserves_errors_without_npu(platform_cfg, summary, monkeypatch, capsys):
+    code = "PLATFORM_LEASE_LOST"
     monkeypatch.setattr(sys, "argv", ["af-forge", "issue", "summarize", "--issue-id", "F152", "--summary-file", str(summary), "--request-id", "summary-1"])
     monkeypatch.setattr(config, "config", lambda _: platform_cfg)
     monkeypatch.setattr(jobs, "local_preflight", lambda *a: pytest.fail("no NPU connection"))

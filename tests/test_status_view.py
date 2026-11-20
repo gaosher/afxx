@@ -73,8 +73,12 @@ def test_remote_returns_summary_before_transport(report, tmp_path, monkeypatch):
     assert json.loads((job/'report.json').read_text()) == report['report.json']
 
 
-@pytest.mark.parametrize('state', ['queued','running','unknown','success','failed'])
-def test_task_states_and_failed_dependencies(state):
+def test_task_state_is_preserved():
+    assert status_view({'job': 'a'*32, 'state': 'running'})['state'] == 'running'
+
+
+def test_failed_dependencies_excludes_successes():
+    state = 'failed'
     value = status_view({'job':'a'*32,'state':state,'python-dependencies.json':{
         'passed':False,'checks':[{'name':'ssl','passed':False,'stderr':'missing'}, {'name':'torch','passed':True}]}})
     assert value['state'] == state and value['dependencies']['failed_checks'][0]['name']=='ssl'

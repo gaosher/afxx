@@ -14,9 +14,11 @@ from af_forge.afx import platform as p
 
 
 @pytest.fixture
-def afx(monkeypatch):
+def afx(monkeypatch, request):
     source = os.environ.get("AFX_SOURCE")
     if not source:
+        if request.config.getoption("--require-afx-contracts"):
+            pytest.fail("release validation requires AFX_SOURCE pointing to an AFX checkout")
         pytest.skip("set AFX_SOURCE to test against the current AFX implementation")
     source = str(Path(source).resolve())
     assert Path(source, "autofusex").is_dir()

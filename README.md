@@ -204,6 +204,15 @@ afx platform client run --endpoint https://autofuse.online \
 
 SQLite 数据库由 AFX 创建，不必手工建立空文件。`--retest` 启用平台复测任务领取；客户端需报告与 verify 提交相符的后端版本、哈希和芯片信息。包更新、注册和调度遵循 AFX 自身行为。Forge 的环境锁仅协调 Forge 任务，不代表独立客户端也持有这些锁。
 
+### 遗留问题：手动 replay 临时占用单卡
+
+状态：待实现（2026-11-20）。当前平台复测与手动 replay 通过设备锁竞争，没有手动 replay 优先级保证。
+
+预期平时所有卡都可执行平台任务。手动 replay 到来时，优先使用空闲卡；否则选定一张卡，暂停向该卡启动新任务，等待当前任务结束后执行 replay，其他卡继续工作。replay 完成、失败或取消后自动恢复该卡的平台任务。
+
+AFX 需要提供按卡独立执行和本机让卡协调，Forge 调用该能力并展示等待状态。让卡本身在本机完成；已领取但未执行的平台任务需要明确续租或归还策略，优先评估按空闲卡领取、避免预取积压任务的方式。平台接口是否需要扩展待实现时核实。共享 AF 安装目录的 deploy 仍需协调所有正在使用该包的任务。
+
+
 ## 独立 seed 复跑
 
 ```bash
@@ -303,13 +312,17 @@ python3 -m pytest tests -q
 
 测试使用临时目录、Git/rsync 和构建、平台、设备接口夹具，覆盖同步、幂等、更新回滚、环境冻结、结果判定和平台验证轮次。真实编包、NPU 执行及平台联调需在配置的目标环境验证。
 
-指定 AFX 源码运行契约测试：
+测试分层：业务规则和边界在所属模块测试；deploy/replay 编排覆盖成功路由与各阶段失败，不对无关开关做全组合；CLI 验证公开路由和响应；MCP 只验证 stdio 握手、帮助、命令执行及错误封装。各命令共用的远端 bundle 只做一次独立导入验证。幂等、并发、回滚、源码保护和结果判定仍保留故障场景覆盖。
+
+发布前必须指定 AFX 源码运行完整测试及真实契约测试：
 
 ```bash
-AFX_SOURCE=/absolute/path/Autofuse-Debugger python3 -m pytest tests/test_afx_contract.py -q
+AFX_SOURCE=/absolute/path/Autofuse-Debugger python3 -m pytest tests -q --require-afx-contracts
 ```
 
-契约测试需要 pytest、PyYAML、jsonschema；调用真实的 AFX seed、结果 CLI 和修复服务逻辑，使用临时数据库，不连接生产平台。
+日常测试未设置 AFX_SOURCE 时跳过真实契约；发布验证的 `--require-afx-contracts` 在缺少源码路径时直接失败，不能将跳过当成兼容通过。
+
+契约测试需要 pytest、PyYAML、jsonschema 及对应 AFX 接口的运行依赖；调用真实的 AFX seed、结果 CLI 和修复服务逻辑，使用临时数据库，不连接生产平台。
 
 ## MCP 接入
 

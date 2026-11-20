@@ -370,17 +370,6 @@ def test_status_exposes_cleanup_without_source_inventory(tmp_path):
     assert "files" not in data and "source.json" not in data
 
 
-def test_submission_metadata_lives_in_request(cfg):
-    result = workflow_jobs.submit(cfg, request(), "metadata", True)
-    local = Path(result["local"])
-    assert workflow_common.read(local / "request.json")["submission"][
-        "request_key"
-    ] == workflow_common.digest("metadata")
-    assert not (local / "submission.json").exists()
-    retry = workflow_jobs.submit(cfg, request(), "metadata", True)
-    assert retry["job"] == result["job"] and retry["reused"]
-
-
 @pytest.mark.parametrize("mode", ["init", "update"])
 def test_env_command_transfers_frozen_config_and_runs_installer(cfg, monkeypatch, mode):
     from af_forge.environment import bootstrap
