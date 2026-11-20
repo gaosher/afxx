@@ -73,9 +73,9 @@ def ensure_started(c, package):
         active = record and process_identity(record["pid"]) == record["start_time"]
         if active:
             w.require_code(
-                record["expected"] == expected,
+                all(record["expected"].get(key) == expected[key] for key in ("argv", "environment")),
                 "PLATFORM_CLIENT_MISMATCH",
-                f"running AFX client uses another environment or AF package; see {record_path}",
+                f"running AFX client uses another environment or command; see {record_path}",
             )
             w.require_code(
                 marker_path.exists()

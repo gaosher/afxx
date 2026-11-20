@@ -28,7 +28,7 @@
 Forge 的 verify 使用配置 venv/CANN 调用 AFX 官方 CLI，启动记录与日志位于 remote.state_dir 上一级目录的 afx-client/。
 
 - PLATFORM_CLIENT_START_FAILED：查看 client.log，核对 endpoint、client token 权限、NPU 可见性和官方命令版本；未提交 verify。
-- PLATFORM_CLIENT_MISMATCH：存活客户端的启动环境或 AF 身份与新候选不同。当前 Forge 不会停止/刷新这个进程；第二轮修复可能因此阻塞。不要手改 launch.json、删除记录或跳过校验来强行提交。
+- PLATFORM_CLIENT_MISMATCH：存活客户端的启动命令或环境变量与当前配置不同。AF 包哈希变化允许复用已有进程，领取新包任务依赖 AFX 刷新包身份。当前 Forge 不会停止/刷新这个进程；第二轮修复可能因此阻塞。不要手改 launch.json、删除记录或跳过校验来强行提交。
 - PLATFORM_CLIENT_UNTRACKED：同一 HOME 的现有进程缺少匹配启动证据，不能假定属于本任务。
 
 没有在本次任务中授权客户端协调时，报告进程/日志、候选身份及所需处理，等待用户处理或明确授权；不自行 kill 常驻进程。已有明确授权时在其范围内处理，不重复请求。AFX 环境信息可能缓存，不能只看到 PID 存活就认为它识别了新包。

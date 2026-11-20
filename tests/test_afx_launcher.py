@@ -45,8 +45,10 @@ def test_official_cli_uses_selected_environment_and_is_reused(launch_env):
     assert opts["start_new_session"] is True
     assert opts["env"]["VIRTUAL_ENV"] == c["runtime"]["venv_dir"]
     assert opts["env"]["ASCEND_HOME_PATH"] == c["runtime"]["install_root"]
+    assert l.ensure_started(c, dict(package, sha256="b" * 64))["reused"] is True
+    c["replay"]["devices"] = ["npu:0"]
     with pytest.raises(w.WorkflowError, match="another environment"):
-        l.ensure_started(c, dict(package, sha256="b" * 64))
+        l.ensure_started(c, package)
     assert len(calls) == 2
 
 

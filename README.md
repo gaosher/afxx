@@ -188,7 +188,7 @@ af-forge issue summarize --issue-id F152 \
 
 ## AFX 常驻客户端
 
-Forge 在本地控制远端任务；AFX 官方客户端在 NPU 上独立运行，负责心跳、上传、复测领取和平台更新。`issue verify` 提交前调用官方命令启动客户端，使用配置中的 venv/CANN 和 replay.devices。相同环境的已有进程直接复用；环境或 AF 包变化时报错，不自动停止或重启。Forge 不实现上传、心跳或复测循环。
+Forge 在本地控制远端任务；AFX 官方客户端在 NPU 上独立运行，负责心跳、上传、复测领取和平台更新。`issue verify` 提交前调用官方命令启动客户端，使用配置中的 venv/CANN 和 replay.devices。相同环境的已有进程直接复用；启动命令或环境变量变化时报错。AF 包哈希变化时复用已有客户端，其缓存刷新能力取决于 AFX 实现。Forge 不实现上传、心跳或复测循环。
 
 配置 `platform.client_token_file` 后无需手工启动。客户端文件位于远端 state_dir 的上一级目录下的 `afx-client/`，日志为 `client.log`。也可在独立 HOME 中手工启动官方客户端，例如：
 
