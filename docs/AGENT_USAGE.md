@@ -9,6 +9,8 @@
 | doctor | 本地校验配置、工具和 npussh 登录 | 检查通过 |
 | init / update | 提交远端任务，默认跟随日志；支持 --detach | 远端任务 success，环境清单 ready |
 | deploy | 提交远端任务，返回 job ID | status 为 success，result.json 有效 |
+| fuzz run | 远端 job 调用官方 AFX，返回 job ID | status 为 success 仅代表进程正常结束；用 fuzz status 查询用例结果 |
+| fuzz status / fuzz stop | 调用该 job 的 AFX 官方命令 | status 返回队列信息；stop 仅确认停止请求，随后轮询任务终态 |
 | evidence list / evidence read | 本地通过 npussh 只读远端证据 | ok=true；按 next_offset 续读，检查 sha256 和未关联标记 |
 | replay | 提交远端任务，返回 job ID | data.state=success 且 data.replay.passed=true |
 | check | 提交远端依赖检查 | 任务 success、依赖检查通过 |
@@ -19,6 +21,8 @@
 | issue verify | 通过 npussh 在远端提交平台请求 | 返回 state=submitted，保存 round_no |
 | issue status | 本地查询平台指定验证轮次 | 检查 terminal 和 outcome |
 | issue wait | 本地持续查询平台并续租 | terminal=true 且 outcome=passed |
+
+fuzz 使用固定的 `<workflow_root>/fuzz/`，一次只允许一个运行。重复启动的任务报 `FUZZ_ALREADY_RUNNING`；`FUZZ_JOB_REPLACED` 表示该目录已由新 job 接管，应使用新 job ID 控制。历史记录仍用普通 status 查询。
 
 命令之间使用 data.job_id、data.issue_id、data.round_no，分别传给 --job-id、--issue-id、--round-no。replay 使用成功 deploy 的 --job-id。各命令的 --help 列出接受的参数。
 
@@ -41,7 +45,7 @@ afxx deploy --request-id deploy-001
 afxx status --job-id <job-id>
 ```
 
-提交前生成并保存 request-id，允许 1–128 位字母、数字、下划线、点或连字符。init/update/deploy/replay/check支持此参数。省略时自动生成，但若整个响应丢失，将无法从响应取回该值。
+提交前生成并保存 request-id，允许 1–128 位字母、数字、下划线、点或连字符。init/update/deploy/replay/check/fuzz run 支持此参数。省略时自动生成，但若整个响应丢失，将无法从响应取回该值。
 
 任务状态包括 prepared、queued、running、success、failed、unknown。prepared 为 dry-run 本地产物。非 replay 终态的 status 返回概要；replay 终态自动下载全量证据，单个执行使用 status --attempt --fields。等待任务使用 status --wait --since，避免重复概要进入上下文；阶段变化或到达终态时汇报。unknown 时检查进程和日志。
 

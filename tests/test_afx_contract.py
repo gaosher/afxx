@@ -215,3 +215,21 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     assert published["status"] == "resolved" and published["knowledge_id"].startswith("K")
     assert cli("issue summarize", "--summary-file", str(summary), "--request-id", "summary-1") == published
     assert summary_keys == ["summary-1", "summary-1"]
+
+
+def test_official_fuzz_command_contract(afx, cfg, tmp_path):
+    import argparse
+    from afxx.afx import fuzz
+    from autofusex.fuzz.client.scheduling.cli import register
+
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    maintenance = sub.add_parser("maintenance").add_subparsers()
+    register(sub, maintenance)
+    argv = fuzz.command(cfg, tmp_path, {"count": 5, "device": ["npu:0", "npu:1"], "workers": 2, "compile_threads": 4, "ops": "add,sum", "backend": ["eager-npu"]})
+    args = parser.parse_args(argv[4:])
+    assert args.foreground and args.save and args.count == 5
+    assert args.device == ["npu:0", "npu:1"]
+    assert args.database == str(tmp_path / "results/results.sqlite")
+    for action in ("status", "stop"):
+        assert parser.parse_args([action, "--data-dir", str(tmp_path)]).command == action

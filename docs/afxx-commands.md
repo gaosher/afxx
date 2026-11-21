@@ -41,6 +41,16 @@ afxx env init --config /path/config.yaml
 | `replay` | 用已部署的 AF 复跑 seed | 异步，返回新的 replay job ID |
 | `status` | 查询任务状态 / 单次执行 / 等待变化 | 查询 |
 
+### `fuzz`
+
+| 二级命令 | 作用 | 参数 |
+|---|---|---|
+| `run` | 远端调用官方 AFX 随机 fuzz，异步返回 job ID | `--count` 可选（省略持续运行）；`--device`、`--backend` 可重复；`--workers`、`--compile-threads`、`--ops`、`--config`、`--request-id`、`--dry-run` |
+| `status` | 查询官方 AFX 队列和 campaign | 必填 `--job-id`，可选 `--config` |
+| `stop` | 请求官方 AFX 停止该 job | 必填 `--job-id`，可选 `--config` |
+
+所有 fuzz job 共用 `<workflow_root>/fuzz/`，自动保存结果。无需指定或创建 SQLite。AFXX 任务状态使用 `afxx status --job-id ...`；进程正常结束不等于全部 fuzz 用例通过。MCP 同步支持 `fuzz run/status/stop`。
+
 ### `config`
 
 | 二级命令 | 作用 | 执行方式 |

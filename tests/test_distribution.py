@@ -53,6 +53,8 @@ def test_mcp_stdio(tmp_path):
             assert "--request-id" in help_result.content[0].text
             group_help = await session.call_tool("afxx_help", {"command": "issue"})
             assert "verify" in group_help.content[0].text
+            fuzz_help = await session.call_tool("afxx_help", {"command": "fuzz run"})
+            assert not fuzz_help.isError and "--count" in fuzz_help.content[0].text
             leaf_help = await session.call_tool("afxx_help", {"command": "issue verify"})
             assert "--job-id" in leaf_help.content[0].text
             grouped = await session.call_tool("afxx_run", {

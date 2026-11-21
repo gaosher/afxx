@@ -64,7 +64,7 @@ def worker(job):
         c = workflow_config.validate_config(workflow_common.read(job / "config.yaml"))
         request = workflow_common.read(job / "request.json")
         workflow_common.require_code(
-            request.get("command") in ("deploy", "init", "update", "replay", "check"),
+            request.get("command") in ("deploy", "init", "update", "replay", "check", "fuzz-run"),
             "INVALID_ARGUMENT", "unsupported worker command",
         )
         source = Path(c["remote"]["source_dir"]).resolve()
@@ -107,6 +107,8 @@ def worker(job):
                 ],
                 cwd=job,
             )
+        elif request["command"] == "fuzz-run":
+            workflow_execution.fuzz(c, job, request)
         elif request["command"] == "replay":
             workflow_execution.replay(c, job, request)
         else:
@@ -134,6 +136,7 @@ def worker(job):
                             "update": "result.json",
                             "deploy": "result.json",
                             "replay": "result.json",
+                            "fuzz-run": "result.json",
                             "check": "environment.json",
                         }[request["command"]]
                     )
@@ -155,7 +158,7 @@ def worker(job):
                 "state": "failed",
                 "phase": previous.get("phase"),
                 "error": str(exc),
-                "error_code": phase_error(previous.get("phase")),
+                "error_code": exc.code if isinstance(exc, workflow_common.WorkflowError) else phase_error(previous.get("phase")),
                 "exit_code": getattr(exc, "returncode", 1),
                 "pid": os.getpid(),
             },
@@ -283,6 +286,7 @@ def phase_error(phase):
         "install": "INSTALL_FAILED",
         "verify_install": "INSTALL_VERIFY_FAILED",
         "replay": "REPLAY_FAILED",
+        "fuzz": "FUZZ_FAILED",
         "replay_prepare": "REPLAY_PREPARE_FAILED",
         "cann_preflight": "CANN_PREPARE_FAILED",
         "cann_install": "CANN_INSTALL_FAILED",

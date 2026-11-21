@@ -320,3 +320,29 @@ def replay(c, job, request):
         except OSError as error:
             evidence = {"errors": [{"error": str(error)}], "files": []}
         workflow_common.update_record(job / "result.json", evidence=evidence)
+
+
+def fuzz(c, job, request):
+    """Keep the official foreground supervisor inside an asynchronous workflow job."""
+    from afxx.afx import fuzz as adapter
+
+    directory = adapter.home(c)
+    workflow_common.phase(job, "fuzz")
+    with (
+        adapter.running(directory, job) as run_fd,
+        workflow_common.lock(workflow_runtime.venv_lock(c), shared=True),
+        workflow_common.lock(workflow_runtime.registry(c).with_suffix(".lock"), shared=True),
+    ):
+        record_environment(c, job)
+        env = dict(workflow_runtime.environment(c), AUTOFUSEX_HOME=str(directory))
+        workflow_runtime.venv_preflight(c, env, job, "replay")
+        command = adapter.command(c, directory, request["fuzz"])
+        workflow_common.write(job / "result.json", {
+            "command": command, "results_dir": str(directory),
+            "database": str(directory / "results/results.sqlite"),
+        })
+        workflow_common.phase(job, "fuzz")
+        completed = workflow_common.run(command, env=env, cwd=directory, check=False, pass_fds=(run_fd,))
+        workflow_common.update_record(job / "result.json", exit_code=completed.returncode)
+        workflow_common.require_code(completed.returncode == 0, "FUZZ_FAILED",
+                                     f"AFX fuzz exited with code {completed.returncode}; see job.log")

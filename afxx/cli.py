@@ -66,7 +66,7 @@ def response(command, data=None, error=None):
     return {
         "schema_version": 1,
         "ok": error is None,
-        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-")) else command,
+        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-")) else command,
         "data": data,
         "error": None if error is None else {"code": error.code, "message": str(error)},
     }
@@ -87,6 +87,7 @@ def parse_arguments():
     jobs = (
         "deploy",
         "replay",
+        "fuzz-run",
     )
     issues = (
         "issue-claim",
@@ -106,6 +107,9 @@ def parse_arguments():
         "check": "远端环境：检查运行环境及 Python 依赖",
         "deploy": "远端工作流：同步本地源码，编包并安装 AF",
         "replay": "远端工作流：使用已部署的 AF 复跑指定 seed",
+        "fuzz-run": "随机测试：调用远端 AFX fuzz run 并保存结果",
+        "fuzz-status": "随机测试：查询 AFX 队列与运行进度",
+        "fuzz-stop": "随机测试：请求 AFX 停止本次随机测试",
         "status": "远端工作流：查询 workflow 任务状态",
         "issue-claim": "问题验证：从 AFX 平台领取待修复问题",
         "issue-preview": "问题验证：查看复现用例和失败摘要",
@@ -122,14 +126,15 @@ def parse_arguments():
         "evidence-read": "定位证据：按字节分页读取日志、IR 和代码",
         "doctor": "本地检查：检查配置、连接工具及登录状态",
     }
-    for name in (*env_jobs, *jobs, *issues, "execution-show", "evidence-list", "evidence-read", "status", "doctor"):
+    for name in (*env_jobs, *jobs, *issues, "fuzz-status", "fuzz-stop", "execution-show", "evidence-list", "evidence-read", "status", "doctor"):
         parent = commands
         leaf = name
-        if name in env_jobs or name.startswith(("issue-", "execution-", "config-", "evidence-")):
+        if name in env_jobs or name.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-")):
             group = "env" if name in env_jobs else name.split("-", 1)[0]
             leaf = name if group == "env" else name.split("-", 1)[1]
             if group not in groups:
                 summary = {
+                    "fuzz": "运行、查询和停止远端 AFX 随机测试",
                     "env": "管理远端 Python、CANN 和依赖环境",
                     "issue": "领取问题、提交验证及查询回归结果",
                     "execution": "查询平台执行详情和日志",
@@ -173,7 +178,7 @@ def parse_arguments():
             cmd.add_argument("--exec-uuid", required=True, help="AFX execution UUID, not numeric exec_id")
         if name == "issue-wait":
             cmd.add_argument("--timeout", type=float, default=3600)
-        if name in ("status", "issue-verify", "evidence-list", "evidence-read"):
+        if name in ("status", "issue-verify", "evidence-list", "evidence-read", "fuzz-status", "fuzz-stop"):
             cmd.add_argument("--job-id", "--job", dest="job", required=True)
         if name in ("evidence-list", "evidence-read"):
             cmd.add_argument("--offset", type=int, default=0)
@@ -188,6 +193,13 @@ def parse_arguments():
             cmd.add_argument("--fields", help="comma-separated attempt fields; supports dotted paths")
             cmd.add_argument("--since", help="cursor from previous status; requires --wait")
             cmd.add_argument("--timeout", type=float, help="wait timeout in seconds, default 30, maximum 50")
+        if name == "fuzz-run":
+            cmd.add_argument("--count", type=int, help="生成用例数；省略则持续运行，使用 fuzz stop 停止")
+            cmd.add_argument("--device", action="append", help="逻辑 NPU，如 npu:0；可重复，默认由 AFX 使用可见多卡")
+            cmd.add_argument("--workers", type=int, help="AFX 并发 worker 上限；默认由 AFX 决定")
+            cmd.add_argument("--compile-threads", type=int, help="AFX 编译线程数；默认由 AFX 决定")
+            cmd.add_argument("--ops", help="AFX 算子过滤，如 add,sum,reshape")
+            cmd.add_argument("--backend", action="append", help="增加 AFX 测试后端；可重复，默认 CPU 和 AF-MLIR")
         if name == "replay":
             cmd.add_argument("--dump", action="store_true", help="为本次 replay 开启定位 dump，不修改配置文件")
             reference = cmd.add_mutually_exclusive_group(required=True)
@@ -319,8 +331,12 @@ def main():
         )
         return result["verification"]
     workflow_jobs.local_preflight(
-        "deploy" if args.command == "doctor" else "status" if args.command.startswith("evidence-") else args.command, args.dry_run
+        "deploy" if args.command == "doctor" else "status" if args.command.startswith("evidence-") or args.command in ("fuzz-status", "fuzz-stop") else args.command, args.dry_run
     )
+    if args.command in ("fuzz-status", "fuzz-stop"):
+        directory = str(Path(c["remote"]["state_dir"]) / args.job)
+        code = "import sys,json; sys.path.insert(0,sys.argv[1]); from afxx.afx.fuzz import control; print(json.dumps(control(sys.argv[1],sys.argv[2])))"
+        return workflow_jobs.remote(c, ["python3", "-c", code, directory, args.command.split("-", 1)[1]])
     if args.command == "doctor":
         return {
             "config": "valid",
@@ -381,6 +397,12 @@ def main():
         "deployment": args.deployment,
         "upload": args.upload,
     }
+    if args.command == "fuzz-run":
+        for name in ("count", "workers", "compile_threads"):
+            value = getattr(args, name)
+            workflow_common.require_code(value is None or value > 0, "INVALID_ARGUMENT", f"--{name.replace('_', '-')} must be positive")
+        request["fuzz"] = {key: getattr(args, key) for key in
+                           ("count", "workers", "compile_threads", "device", "backend", "ops")}
     if args.command == "deploy" and args.issue_id:
         lease = platform.claimed(c, args.issue_id)
         request["issue"] = {key: lease[key] for key in ("id", "lease_id")}
@@ -454,7 +476,7 @@ def cli():
         mcp_main(sys.argv[2:])
         return 0
     command = sys.argv[1] if len(sys.argv) > 1 else None
-    if command in ("issue", "execution", "config", "evidence") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
+    if command in ("issue", "execution", "config", "evidence", "fuzz") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()

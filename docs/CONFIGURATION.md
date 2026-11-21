@@ -172,3 +172,7 @@ init 提交前复用本地 token；文件不存在时仅在交互终端隐藏输
 普通 env init 在返回前完成同步。`--detach`、MCP 或中途停止查看日志的任务，需要后续 `status` / `status --wait` 确认成功并同步；仅提交任务不表示 token 已就绪。MCP/非交互调用不会弹出输入，缺少本地文件返回 PLATFORM_CREDENTIAL_MISSING。dry-run 不读取、不输入、不同步 token；update 不触发凭据同步。
 
 成功结果的 auth.state 为 ready。凭据同步失败时返回 PLATFORM_CREDENTIAL_SYNC_FAILED 或 PLATFORM_CREDENTIAL_CONFLICT，并保留 job_id、environment_state=success；修正文件/权限后查询同一 init job 重试，不重新初始化 venv。续查使用本地 job 的冻结配置定位凭据文件，重复同步不会重写相同内容。不要把另一环境的配置用于恢复本任务。
+
+### Fuzz 目录与资源
+
+`afxx fuzz run` 复用 connection、runtime.venv_dir 和 runtime.install_root，不需要新增配置节。AFX home 固定为 `<workflow_root>/fuzz/`，结果为其下 `results/results.sqlite`，队列为 `tasks/tasks.sqlite`。`replay.results_dir` 和 `replay` 的资源参数仅影响 replay；fuzz 默认由 AFX 自动发现可见 NPU 并选择资源预算，单次覆盖通过 fuzz run 的命令行参数指定。控制现有 fuzz job 时使用该 job 冻结的环境配置，并核对共享目录的归属。已有运行时新任务失败；旧 job ID 不能控制接管后的新运行。

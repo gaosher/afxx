@@ -117,6 +117,25 @@ npussh <environment> 'tail -n 100 /remote/workflow-state/<job-id>/job.log'
 
 同一源码目录的同步/编译串行，安装与受管理的复测通过锁协调。部署直接在专用 build 目录增量编译和覆盖产物，旧版 build 指纹会在下次部署时移除。AF 覆盖安装失败会使当前部署失效；Python 更新支持锁文件回滚，AF/CANN 安装失败需检查现场并恢复安装。
 
+## 随机 fuzz 测试
+
+```bash
+# 使用已初始化的远端 venv/CANN 和当前已安装的 AF，运行 100 个随机用例
+afxx fuzz run --count 100
+# 省略 --count 持续运行；两种方式均异步返回 job_id
+afxx fuzz run --device npu:0 --device npu:1 --workers 4
+
+afxx status --job-id <job-id>        # AFXX 任务状态、日志和结果路径
+afxx fuzz status --job-id <job-id>   # AFX 官方队列、supervisor 和 campaign 状态
+afxx fuzz stop --job-id <job-id>     # 请求 AFX 停止；随后查询状态确认结束
+```
+
+AFXX 直接调用所选 venv 中的 `python -m afx fuzz run --fg --save`，加载配置指定的 CANN，在远端 job 中等待官方 supervisor。默认设备和资源预算由 AFX 自动选择；可传 `--count`、重复的 `--device` / `--backend`、`--workers`、`--compile-threads` 和 `--ops`。省略 `--count` 表示持续运行。关闭本地终端不会停止远端任务。
+
+所有 fuzz 任务复用 `<workflow_root>/fuzz/`，作为 AFX home 和工作目录。其中 `results/results.sqlite` 累积各轮所有设备与后端结果，`tasks/tasks.sqlite` 由 AFX 管理调度；无需手动创建空数据库。fuzz 与 replay、平台复测目录保持独立，不按 job 或卡额外建结果目录。配置、实际环境快照和进程日志仍保存在 `workflow-state/<job-id>/`。fuzz 不自动上传结果或下载全量现场。
+
+`status` 的 success 表示 AFX 进程正常结束，不代表每个随机用例通过；用 `fuzz status` 查看 AFX 队列结果。停止也是官方的请求式停止，并非强制杀进程。持续 fuzz 持有环境共享锁，deploy/update 会等待；更换 AF 或 Python 依赖前应先停止对应 fuzz 任务。同一 fuzz 目录一次只允许一个运行，重复启动的远端任务以 `FUZZ_ALREADY_RUNNING` 失败，不排队。前一轮结束后复用同一数据库；旧 job 不能查询或停止已由新 job 接管的 AFX 运行（`FUZZ_JOB_REPLACED`），历史任务记录仍可通过普通 `status` 查询。
+
 ## AFX 平台修复流程
 
 先完成 [平台连接配置](docs/CONFIGURATION.md#平台连接)。
@@ -273,6 +292,7 @@ Shape 数量由 AFX 解码 seed 得到：静态为 1，动态为 2–8。结果�
 │   ├── platform.json          verify 固定请求及平台回执
 │   ├── job.log                任务日志
 │   └── uv.log                 Python 包安装日志
+├── fuzz/               # 随机 fuzz 的 AFX home、调度库和结果库
 ├── workflow-results/<job-id>/
 │   ├── results.sqlite         AFX replay 结果数据库
 │   ├── dump/                  AF/GE 图、MLIR 等定位产物

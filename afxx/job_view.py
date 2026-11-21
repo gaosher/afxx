@@ -66,6 +66,8 @@ def status_view(data, full=False, attempt_id=None, fields=None):
                          "truncated": evidence.get("truncated", False),
                          "collection_error_count": len(evidence.get("errors", []))},
         }
+    if data.get("task_type") == "fuzz-run":
+        out["fuzz"] = {key: report[key] for key in ("results_dir", "database", "exit_code") if key in report}
     checks = data.get("environment.json", {}).get("dependencies")
     if checks is not None:
         out["dependencies"] = {"passed": checks.get("passed"),

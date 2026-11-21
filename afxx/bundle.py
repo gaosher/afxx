@@ -24,6 +24,7 @@ FILES = (
     "afxx/bundle.py",
     "afxx/environment/snapshot.py",
     "afxx/afx/replay.py",
+    "afxx/afx/fuzz.py",
     "afxx/afx/platform.py",
     "afxx/afx/launcher.py",
     "afxx/environment/package_sources.json",

@@ -17,6 +17,9 @@ Command = Literal[
     "env check",
     "deploy",
     "replay",
+    "fuzz run",
+    "fuzz status",
+    "fuzz stop",
     "doctor",
     "status",
     "issue claim",
@@ -73,7 +76,7 @@ def create_server(default_config=None):
     )
 
     @server.tool()
-    async def afxx_help(command: Command | Literal["issue", "execution", "config", "evidence"] | None = None) -> str:
+    async def afxx_help(command: Command | Literal["issue", "execution", "config", "evidence", "fuzz"] | None = None) -> str:
         """Read CLI command options without loading config or contacting the NPU."""
         _, output = await invoke((command.split() if command else []) + ["--help"])
         return output
