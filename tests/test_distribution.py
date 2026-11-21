@@ -162,3 +162,22 @@ def test_missing_default_config_guidance(tmp_path, monkeypatch, capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["error"]["code"] == "CONFIG_INVALID"
     assert "afxx config init" in result["error"]["message"]
+
+
+def test_mcp_missing_dependency_guidance(monkeypatch, capsys):
+    import builtins
+    from afxx import cli
+
+    original = builtins.__import__
+
+    def without_mcp(name, *args, **kwargs):
+        if name == "afxx.mcp_server":
+            raise ModuleNotFoundError("No module named 'mcp'", name="mcp")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_mcp)
+    monkeypatch.setattr(sys, "argv", ["afxx", "mcp"])
+    assert cli.cli() == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "pip install 'afxx[mcp]'" in output.err

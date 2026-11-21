@@ -45,7 +45,7 @@ CANN 在 init 中检查或安装，AF run 包在 deploy 中构建和安装。远
 
 ## 测试依赖
 
-运行脚本测试需 pytest、PyYAML、Git 和 rsync。Python 3.11 使用标准库 tomllib。MCP 协议测试需要 wheel 声明的 MCP SDK。
+运行脚本测试需 pytest、PyYAML、Git 和 rsync。Python 3.11 使用标准库 tomllib。MCP 协议测试需要可选 MCP SDK；开发测试安装使用 `python3 -m pip install -e '.[dev,mcp]'`。
 
 ```bash
 python3 -m pytest tests -q

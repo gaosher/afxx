@@ -44,7 +44,7 @@ afxx/
 
 ## 安装与配置
 
-本地需准备 **Python 3.11+（含 pip）、Git、Node.js 20+、npussh/npursync、OpenSSH 客户端和 rsync**，并确保命令在 PATH 中可用。npursync 随 npussh 提供；PyYAML 和 MCP SDK 随 AFXX wheel 自动安装。版本要求、安装方式及检查范围见 [本地依赖说明](docs/LOCAL_DEPENDENCIES.md#本地启动环境)。
+本地需准备 **Python 3.11+（含 pip）、Git、Node.js 20+、npussh/npursync、OpenSSH 客户端和 rsync**，并确保命令在 PATH 中可用。npursync 随 npussh 提供；默认安装仅依赖 PyYAML；MCP SDK 通过 `afxx[mcp]` 按需安装。版本要求、安装方式及检查范围见 [本地依赖说明](docs/LOCAL_DEPENDENCIES.md#本地启动环境)。
 
 安装 AFXX 并登录 NPU 服务：
 
@@ -322,6 +322,12 @@ AFX_SOURCE=/absolute/path/Autofuse-Debugger python3 -m pytest tests -q --require
 
 ## MCP 接入
 
+先在运行 AFXX 的 Python 环境安装 MCP 可选依赖：
+
+```bash
+python3 -m pip install 'afxx[mcp]'
+```
+
 MCP 是可选接入方式：agent 可直接执行 `afxx` CLI，也可通过 MCP 调用同一套功能。`afxx mcp` 在本地由 agent 客户端启动，通过标准输入/输出（stdio）通信；不需要在 NPU 上启动 MCP 服务，也不需要配置 HTTP 地址。
 
 ### 接入 Codex
@@ -372,7 +378,7 @@ codex mcp add afxx -- /absolute/path/to/afxx mcp --config /absolute/path/config.
 
 ```bash
 uv venv --python 3.11
-uv pip install -e '.[dev]'
+uv pip install -e '.[dev,mcp]'
 .venv/bin/python -m pytest tests -q
 .venv/bin/python -m build
 ```

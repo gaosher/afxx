@@ -443,7 +443,13 @@ def main():
 
 def cli():
     if len(sys.argv) > 1 and sys.argv[1] == "mcp":
-        from afxx.mcp_server import main as mcp_main
+        try:
+            from afxx.mcp_server import main as mcp_main
+        except ModuleNotFoundError as error:
+            if error.name != "mcp":
+                raise
+            print("MCP 依赖未安装，请在当前 Python 环境执行：python -m pip install 'afxx[mcp]'", file=sys.stderr)
+            return 2
 
         mcp_main(sys.argv[2:])
         return 0
