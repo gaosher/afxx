@@ -426,3 +426,9 @@ def test_replay_and_status_reject_conflicting_group(monkeypatch, command):
     monkeypatch.setattr(m, 'invoke', forbidden)
     result = call(m.create_server(), 'afxx_run', dict(command=command, request_id='one', arguments=['--request-id', 'two']))
     assert result.structuredContent['error']['code'] == 'REQUEST_CONFLICT'
+
+
+@pytest.mark.parametrize('arguments', [[], ['--detach']])
+def test_mcp_deploy_always_detaches(arguments):
+    args, _ = m.prepare('deploy', arguments, None, '/config')
+    assert args.count('--detach') == 1

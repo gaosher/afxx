@@ -39,7 +39,7 @@ afxx env init --config /path/config.yaml
 |---|---|---|
 | `help` | 查看顶层命令 | 本地 |
 | `doctor` | 检查配置、本地工具、npussh 登录 | 本地检查 |
-| `deploy` | 同步源码，构建并安装 AF | 异步，返回 job ID |
+| `deploy` | 同步源码，构建并安装 AF | 默认跟随日志，可 `--detach` |
 | `replay` | 通过现有 AFX managed client 复跑 seed | 异步，每次返回 request_id/run |
 | `status` | 查询任务状态 / 单次执行 / 等待变化 | 查询 |
 
@@ -115,7 +115,7 @@ afxx env init --config /path/config.yaml
 | `--config PATH` | 除 `help`、`config init` 外的业务命令 | 默认 `~/.config/afxx/config.yaml`。仅使用显式指定或默认路径，**不会**查找工作目录或配置环境变量 |
 | `--request-id ID` | `env init/update/check`、`deploy`、`replay`、`status`、`issue claim`、`issue submit-summary` | 见下方规则 |
 | `--dry-run` | `env init/update/check`、`deploy`、`replay`、`doctor` | 默认关闭；跳过远端连接，见 [第 10 节](#10-dry-run-说明) |
-| `--detach` | `env init`、`env update` | 默认关闭（CLI 跟随日志直到结束）。开启后提交即返回，用 `status` 查询。MCP 下自动开启 |
+| `--detach` | `env init`、`env update`、`deploy` | 默认关闭（CLI 跟随日志直到结束）。开启后提交即返回，用 `status` 查询。MCP 下自动开启 |
 | `--job-id ID`（别名 `--job`） | `issue verify`、`evidence list/read` | AFXX 的 任务 ID（新任务直接复用 request_id）。各命令引用的 job 类型见各节 |
 
 **`--request-id` 规则**
@@ -181,6 +181,8 @@ afxx env init --config /path/config.yaml
 ## 7. 部署与复跑
 
 ### `deploy`
+
+默认跟随远端日志直到终态，日志写入 stderr，stdout 返回 JSON 结果；部署失败返回对应错误码。`--detach` 提交即返回，MCP 自动启用。`Ctrl+C` 只停止查看，不停止远端任务；连接中断后可通过 `status` 继续查询。
 
 同步源码、构建并安装 AF。异步提交，返回 job ID。
 

@@ -135,7 +135,7 @@ def prepare(command, arguments, config, default_config):
             raise ValueError("config init uses --output, not config/--config")
         return clean, None
     path = paths[0] if paths else str(Path(default_config or default_config_path()).expanduser().resolve())
-    if command in ("env init", "env update") and "--detach" not in clean:
+    if command in ("env init", "env update", "deploy") and "--detach" not in clean:
         clean.append("--detach")
     return ["--config", path, *clean], path
 

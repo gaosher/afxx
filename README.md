@@ -66,6 +66,8 @@ afxx deploy --request-id deploy-001
 afxx status --request-id deploy-001
 ```
 
+默认实时跟随远端日志，完成后返回最终结果；日志输出到 stderr，stdout 保留 JSON 回执。`Ctrl+C` 只停止查看，不终止远端部署，可继续用 `status` 查询。后台提交使用 `afxx deploy --detach`；MCP 自动使用后台提交。
+
 这一条 deploy 完成以下步骤：
 
 1. 采集远端环境，检查构建和安装依赖。

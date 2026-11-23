@@ -190,8 +190,8 @@ def parse_arguments():
             cmd.add_argument("--request-id", required=name in ("issue-submit-summary", "issue-release"))
         if name in clients:
             cmd.add_argument("--timeout", type=float, default=300, help="等待生命周期完成的秒数，默认 300；超时不强杀")
-        if name in ("init", "update"):
-            cmd.add_argument("--detach", action="store_true")
+        if name in ("init", "update", "deploy"):
+            cmd.add_argument("--detach", action="store_true", help="提交后立即返回，不跟随远端日志")
         if name == "update":
             cmd.add_argument("--save-config", action="store_true", help="成功后将实际版本回写本次配置，保留其他字段及注释")
             cmd.add_argument("--torch", help="目标 torch 版本；变更版本时必须同时指定 --torch-npu")
@@ -526,7 +526,7 @@ def main():
     )
     if (
         args.command
-        in ("init", "update")
+        in ("init", "update", "deploy")
         and not args.dry_run
         and not args.detach
     ):

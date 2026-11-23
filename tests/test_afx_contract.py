@@ -174,7 +174,7 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     assert cli("issue renew")["issue_id"] == number
     monkeypatch.setattr(jobs, "local_preflight", lambda *args: None)
     monkeypatch.setattr(jobs, "submit", lambda c, request, *args: request)
-    request = cli("deploy")
+    request = cli("deploy", "--detach")
     assert request["issue"] == {"id": number, "lease_id": first["lease_id"]}
     workflow_common.write(candidate / "request.json", request)
 
