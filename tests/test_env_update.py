@@ -121,6 +121,7 @@ def test_cli_freezes_updates_and_rejects_ops_without_submission(env_cfg, monkeyp
     from afxx import jobs
     monkeypatch.setattr(cli.workflow_config, 'config', lambda path: env_cfg)
     seen=[]
+    monkeypatch.setattr(jobs, 'local_preflight', lambda *args: None)
     monkeypatch.setattr(jobs, 'submit', lambda c,r,k,d: seen.append(r) or {'job': 'test', 'dry_run': True})
     monkeypatch.setattr(sys, 'argv', ['afxx', 'env', 'update', '--dry-run', '--afx', 'latest', '--cann', '20261123', '--ops'])
     cli.main()

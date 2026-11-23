@@ -4,9 +4,45 @@
 
 AFXX 是面向本地 agent 的 AFX 开发与问题修复工具包：准备 NPU 环境，同步本地 graph-autofusion 源码，编包安装，再通过 AFX managed client 复跑 seed 和提交平台验证。CLI 与 MCP 共用实现。
 
-下面从环境初始化开始。假定已安装 AFXX、完成 `npussh login` 并填写 `~/.config/afxx/config.yaml`；首次使用先看[安装与配置](#安装与配置)。所有命令默认读取该配置，其他配置通过 `--config /absolute/path/config.yaml` 指定。
+命令在本机执行，AFXX 通过 npussh/npursync 操作远端 NPU。无需在远端额外安装 AFXX；AFX 和编译运行环境由 env init 准备。CLI 与 MCP 使用同一套实现。
 
-## 1. 初始化环境：env init
+问题修复的主线是：
+
+```text
+config init → env init → deploy 基线
+                              ↓
+issue claim → preview → replay 定位
+                              ↓
+               修改源码 → deploy → replay 对比
+                              ↖ 未修复则继续 ↙
+                        issue verify → verify-check
+                              ↓
+                      总结、检视与提交代码
+```
+
+所有命令默认读取 `~/.config/afxx/config.yaml`，需要隔离配置时使用 `--config /absolute/path/config.yaml`。示例中的 seed、issue 和请求 ID 按实际任务替换。
+
+## 1. 安装并生成配置：config init
+
+本地需要 Python 3.11+、Git、Node.js 20+、npussh/npursync、OpenSSH 和 rsync。npursync 随 npussh 提供；完整安装说明见[本地依赖](docs/LOCAL_DEPENDENCIES.md#本地启动环境)。
+
+```bash
+python3 -m pip install --upgrade afxx
+afxx --version
+npussh login
+npussh list
+afxx config init --source /absolute/path/graph-autofusion
+```
+
+编辑生成的 `~/.config/afxx/config.yaml`，填写 NPU 环境、workflow_root、远端 LLVM/LLD 路径，以及所需 Python/CANN 版本。`config init` 不覆盖已有文件，私人配置不应提交到仓库。
+
+```bash
+afxx doctor
+```
+
+doctor 检查配置、本地依赖和登录状态。通过后执行下一步 env init。远端目录由 workflow_root 推导，CANN 路径可覆盖；字段和默认值见[配置说明](docs/CONFIGURATION.md)及[YAML 模板](afxx/resources/config.example.yaml)。
+
+## 2. 初始化环境：env init
 
 ```bash
 afxx env init
@@ -15,7 +51,7 @@ afxx env check
 
 `env init` 自动上传配置和执行工具，在远端准备 Python 3.11、uv、专用 venv、torch、匹配的 torch_npu、AF 所需依赖和 AFX。不需要手动同步配置。
 
-CANN 按配置检查：空的安装目录触发下载安装；非空但不完整的目录报错，不直接覆盖。已有完整 CANN 时复用。LLVM 和 LLD 需要提前在远端准备并填写路径。AFXX 不在这一步编译本地 graph-autofusion，源码修改通过后面的 deploy 安装。
+CANN 按配置检查：空的安装目录自动安装 Toolkit 和按芯片型号选择的 OPS；驱动库路径自动探测，不安装驱动；非空但不完整的目录报错，不直接覆盖。已有完整 CANN 时复用。LLVM 和 LLD 需要提前在远端准备并填写路径。AFXX 不在这一步编译本地 graph-autofusion，源码修改通过后面的 deploy 安装。
 
 init 默认实时输出远端日志，结束后返回 JSON 摘要。停止本地日志查看不会停止远端任务。需要异步执行时：
 
@@ -27,37 +63,6 @@ afxx status --request-id env-init-001
 检查外层 `ok` 和任务 `state`：提交成功不代表环境已初始化成功，应等到 `state=success`。失败时按返回的日志和报告定位，不直接删除现场后重试。
 
 配置平台连接后，init 还会处理平台凭据准备；非交互运行需提前提供本地 token 文件。凭据路径、Python/CANN 版本和失败恢复规则见[配置说明](docs/CONFIGURATION.md#初始化和更新环境)。
-
-## 2. 查询和更新环境：env update
-
-```bash
-# 只查询当前版本，不更新包
-afxx env update
-
-# 只更新 AFX
-afxx env update --afx latest
-
-# 更新 torch_npu 和 AFX
-afxx env update --torch-npu latest --afx latest
-
-# 更新成功后，将实际版本回写本次配置
-afxx env update --afx latest --save-config
-```
-
-`env update` 以当前环境清单为基础，只更新命令明确指定的组件。配置中的初始化版本不会把其他包重新装回去；默认不更新 CANN，也不修改本地配置文件。
-
-需要更新 torch 或 CANN 时显式指定：
-
-```bash
-# torch 变更必须同时选择 torch_npu，Daily 匹配目标 torch 版本
-afxx env update --torch 2.10.0+cpu --torch-npu latest
-
-# 只更新 Toolkit；或同时更新同批次 OPS
-afxx env update --cann latest
-afxx env update --cann latest --ops
-```
-
-更新不会自动停止或重启 client。若环境正在被使用，先协调在途任务，通过 `client stop` 停止 client，再更新；完成后按需要启动。Python 更新失败会尝试回滚，CANN 安装失败不保证自动回滚，需保留报告检查。具体限制见[环境更新说明](docs/CONFIGURATION.md#初始化和更新环境)。
 
 ## 3. 同步源码、编包并安装：deploy
 
@@ -98,7 +103,7 @@ afxx client stop --timeout 300
 afxx client restart --timeout 300
 ```
 
-AFXX 复用 AFX 当前解析出的 client 目录，包括 `AUTOFUSEX_HOME`、active-home 指针或默认目录；不会为每次 replay 创建第二个 client。首次初始化需要配置平台连接和远端 `platform.client_token_file`，已有 client 可复用保存的凭据。
+AFXX 的 client 命令优先管理远端当前用户唯一存活的 client，采用其实际 home，不要求平台地址、token、设备与 workflow 配置一致。发现多个存活 client 时所有 client 命令均报错。没有存活 client 时，status/stop 返回 stopped，restart 报错；start 才使用 AFX 当前 home（AUTOFUSEX_HOME、active-home 或默认目录）启动。首次创建 client 需要平台配置和凭据，已有目录沿用 AFX 保存的配置。
 
 AFX 负责执行会话、任务队列、心跳、上传和平台复测领取。`start` 可能同时开启随机 fuzz，并非仅监听复测。`stop` 等待在途任务结束，超时不强杀；检测到其他 client 时报告冲突。
 
@@ -147,6 +152,18 @@ AFXX 保存 AFX 的回执，按本次 task/attempt ID 跟踪结果，不混入�
 
 先配置[平台连接](docs/CONFIGURATION.md#平台连接)，本地 agent token 需要相应 issue 权限。
 
+| 阶段 | 常用命令 | 用途 |
+|---|---|---|
+| 查找问题 | `issue list`、`issue detail`、`issue cases` | 查看问题、生命周期和关联用例 |
+| 领取与理解 | `issue claim`、`issue preview` | 保存领取上下文，获取失败摘要和 seed |
+| 保持租约 | `issue renew` | 修复期间续租 |
+| 本机定位 | `replay`、`replay show/compare` | 在当前 NPU 安装环境中复现和对比 |
+| 平台验证 | `issue verify`、`issue verify-check` | 提交候选包，检查验证和关联回归 |
+| 查询失败 | `issue tasks`、`execution show` | 查看具体执行日志与失败任务 |
+| 收尾 | `issue submit-summary`、`issue release` | 显式发布已检视总结，或退出并释放租约 |
+
+`replay` 是本机发起的复现；`issue verify` 是平台验证。二者分别留存结果，replay 通过不自动完成 issue。
+
 ### 领取并查看问题
 
 ```bash
@@ -166,7 +183,8 @@ claim 必须指定 issue_id。preview 默认显示失败摘要和全部去重 se
 ```bash
 afxx deploy --issue-id F152 --request-id deploy-F152-1
 afxx status --request-id deploy-F152-1
-# 确认部署成功，再刷新 client
+# 确认部署成功；有存活 client 用 restart，无存活 client 用 start
+afxx client status
 afxx client restart
 afxx replay --request-id repair-F152 --seed <seed>
 afxx replay show --request-id repair-F152
@@ -177,7 +195,8 @@ afxx replay show --request-id repair-F152
 ### 提交 verify 并检查回归
 
 ```bash
-# 确认最终部署成功；verify 前刷新 client
+# 确认最终部署成功；有存活 client 用 restart，无存活 client 用 start
+afxx client status
 afxx client restart
 afxx issue verify --issue-id F152 --job-id deploy-F152-2
 
@@ -209,7 +228,38 @@ afxx issue submit-summary --issue-id F152 \
 
 发布需要平台状态、租约和权限满足要求；不会由 verify 自动触发。总结格式见[模板](skills/afx-issue-summary/assets/summary.yaml)，其他平台查询见[命令参考](docs/afxx-commands.md)和[API 实现对照](docs/PLATFORM_API_MAPPING.md)。
 
-## 7. 接入 agent：Skill 与 MCP
+## 7. 按需更新环境：env update
+
+```bash
+# 只查询当前版本，不更新包
+afxx env update
+
+# 只更新 AFX
+afxx env update --afx latest
+
+# 更新 torch_npu 和 AFX
+afxx env update --torch-npu latest --afx latest
+
+# 更新成功后，将实际版本回写本次配置
+afxx env update --afx latest --save-config
+```
+
+`env update` 以当前环境清单为基础，只更新命令明确指定的组件。配置中的初始化版本不会把其他包重新装回去；默认不更新 CANN，也不修改本地配置文件。
+
+需要更新 torch 或 CANN 时显式指定：
+
+```bash
+# torch 变更必须同时选择 torch_npu，Daily 匹配目标 torch 版本
+afxx env update --torch 2.10.0+cpu --torch-npu latest
+
+# 只更新 Toolkit；或同时更新同批次 OPS
+afxx env update --cann latest
+afxx env update --cann latest --ops
+```
+
+更新不会自动停止或重启 client。若环境正在被使用，先协调在途任务，通过 `client stop` 停止 client，再更新；完成后按需要启动。Python 更新失败会尝试回滚，CANN 安装失败不保证自动回滚，需保留报告检查。具体限制见[环境更新说明](docs/CONFIGURATION.md#初始化和更新环境)。
+
+## 8. 接入 agent：Skill 与 MCP
 
 安装随 AFXX 发布的修复和总结 skill：
 
@@ -246,25 +296,6 @@ afxx mcp
 常用结构化工具包括 `afxx_deploy`、`afxx_replay`、`afxx_job_status`、`afxx_client`、`afxx_issue` 和 `afxx_issue_status`，其他命令可通过 `afxx_run` 调用。
 
 replay 直接返回 request_id/run，用 `replay show` 查询。其他需要本机长操作回执的命令先查 `afxx_operation_status`；调用完成后仍要继续检查远端任务或平台轮次。参数和恢复规则见[MCP 调用说明](docs/afxx-commands.md#11-mcp-调用)。
-
-## 安装与配置
-
-本地需要 Python 3.11+、Git、Node.js 20+、npussh/npursync、OpenSSH 和 rsync。npursync 随 npussh 提供；完整安装说明见[本地依赖](docs/LOCAL_DEPENDENCIES.md#本地启动环境)。
-
-```bash
-python3 -m pip install /absolute/path/afxx-1.0-py3-none-any.whl
-npussh login
-npussh list
-afxx config init --source /absolute/path/graph-autofusion
-```
-
-编辑生成的 `~/.config/afxx/config.yaml`，填写 NPU 环境、workflow_root、远端 LLVM/LLD 路径，以及所需 Python/CANN 版本。`config init` 不覆盖已有文件，私人配置不应提交到仓库。
-
-```bash
-afxx doctor
-```
-
-doctor 检查配置、本地依赖和登录状态。通过后回到 [env init](#1-初始化环境env-init)。远端目录由 workflow_root 推导，CANN 路径可覆盖；字段和默认值见[配置说明](docs/CONFIGURATION.md)及[YAML 模板](afxx/resources/config.example.yaml)。
 
 ## 任务记录与清理
 
