@@ -120,6 +120,16 @@ afxx status --config "$TASK_CONFIG" --job-id <deploy-job-id>
 
 ## 5. 提交并等待 verify
 
+每轮候选 deploy 成功后，首次提交该候选的 verify 前，先重启同一配置对应的唯一 client，让驻留执行进程重新加载当前安装的 AF 包：
+
+```bash
+afxx client restart --config "$TASK_CONFIG" --timeout 300
+```
+
+只有 restart 返回 `ok=true` 且 `data.state=running` 才提交下面的 verify。失败或超时时先用 `client status` 检查并处理，不继续提交，不手工 kill 或新建 client。此重启是本修复流程的必要步骤，包含等待在途任务结束；已有完整修复流程授权时无需重复确认。重启可能按平台配置恢复 fuzz，但不代表复测领取或平台派发已经正常。
+
+同一候选的 verify 已提交或响应丢失时，先查询已有轮次或按原请求幂等重试，不为等待、轮询或提交重试再次重启，避免打断在途复测。
+
 ```bash
 afxx issue verify --config "$TASK_CONFIG" --issue-id <issue-id> --job-id <deploy-job-id>
 ```
