@@ -7,6 +7,7 @@ import shutil
 FILES = (
     "afxx/cli.py",
     "afxx/credentials.py",
+    "afxx/config_save.py",
     "afxx/__init__.py",
     "afxx/environment/__init__.py",
     "afxx/afx/__init__.py",

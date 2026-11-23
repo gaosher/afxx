@@ -68,6 +68,14 @@ def status_view(data, full=False, attempt_id=None, fields=None):
         }
     if data.get("task_type") == "fuzz-run":
         out["fuzz"] = {key: report[key] for key in ("results_dir", "database", "exit_code") if key in report}
+    if data.get("task_type") == "update":
+        installed = report.get("installed", {})
+        cann = installed.get("cann", {})
+        out["update"] = {"packages": installed.get("packages", {}),
+                         "cann": {k: cann[k] for k in ("version", "date", "release") if k in cann},
+                         "components": report.get("components", [])}
+        if "rollback" in report:
+            out["update"]["rollback"] = report["rollback"]
     checks = data.get("environment.json", {}).get("dependencies")
     if checks is not None:
         out["dependencies"] = {"passed": checks.get("passed"),

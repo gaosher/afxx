@@ -64,7 +64,7 @@ afxx env init --config /path/config.yaml
 | 二级命令 | 作用 | 执行方式 |
 |---|---|---|
 | `init` | 准备 Python、CANN、venv 和平台凭据 | 跟随日志，可 `--detach` |
-| `update` | 更新 torch_npu / AFX | 跟随日志，可 `--detach` |
+| `update` | 显式更新环境组件或查询版本 | 跟随日志，可 `--detach` |
 | `check` | 检查远端环境及 Python 依赖 | 异步，返回 job ID |
 
 ### `evidence`
@@ -173,10 +173,10 @@ afxx env init --config /path/config.yaml
 | 命令 | 作用 | 约束 |
 |---|---|---|
 | `env init` | 准备 Python、CANN、venv 和平台凭据 | 目标 venv 必须不存在。已配置 platform 时，非交互调用需提前准备好本地 token |
-| `env update` | 按配置更新 torch_npu / AFX | 要求已有受管理环境。不升级 CANN，修改 `cann.date` 不会触发安装 |
+| `env update` | 更新显式指定的组件；无参数查询版本 | `--afx VERSION/latest`、`--torch-npu YYYYMMDD/latest`、`--torch VERSION`、`--cann YYYYMMDD/latest`、`--ops`、`--save-config`；torch 变更必须配 torch-npu，ops 必须配 cann |
 | `env check` | 检查远端环境及 Python 依赖 | 无专用参数；异步提交，返回 job ID |
 
-`env init` / `env update` 默认跟随日志，可用 `--detach` 提交即返回。
+`env init` / `env update` 默认跟随日志，可用 `--detach` 提交即返回。update 读取已有环境清单，未指定组件不更新，默认不改写配置。`--save-config` 在成功后回写实际版本，保留注释；异步任务在后续 status 查询终态时回写，配置被编辑则拒绝覆盖。CANN 默认仅 Toolkit，带 --ops 时使用同批次 OPS。Python 失败尝试回滚；CANN 安装开始后失败需检查现场恢复。详见 [更新规则](CONFIGURATION.md#初始化和更新环境)。
 
 ## 7. 部署与复跑
 

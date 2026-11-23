@@ -192,13 +192,13 @@ def test_update_only_selected_component_and_rollback(
     monkeypatch.setattr(e, "verify", verify)
     if failure:
         with pytest.raises(ValueError, match="fails verification"):
-            e.update(env_cfg, job, target)
+            e.update(env_cfg, job, {target: "latest"})
         assert inventory == before["packages"]
         assert (
             workflow_common.read(job / "result.json")["rollback"]["state"] == "restored"
         )
     else:
-        e.update(env_cfg, job, target)
+        e.update(env_cfg, job, {target: "latest"})
         assert inventory[name] == "new"
         assert len(calls) == 1
     assert inventory["torch"] == "2.10.0"
@@ -208,7 +208,7 @@ def test_update_only_selected_component_and_rollback(
 def test_dependency_mismatch_does_not_mutate(env_cfg, tmp_path, monkeypatch):
     before, job = managed(env_cfg, tmp_path)
     monkeypatch.setattr(e, "packages", lambda c: before["packages"])
-    monkeypatch.setattr(e, "artifact", lambda *a: {})
+    monkeypatch.setattr(e, "artifact", lambda *a: {"sha256": "new"})
 
     def fail(*a):
         raise ValueError("dependency mismatch")
@@ -216,7 +216,7 @@ def test_dependency_mismatch_does_not_mutate(env_cfg, tmp_path, monkeypatch):
     monkeypatch.setattr(e, "resolve", lambda *a, **k: fail())
     monkeypatch.setattr(e, "sync", lambda *a: pytest.fail("sync must not run"))
     with pytest.raises(ValueError, match="dependency mismatch"):
-        e.update(env_cfg, job, "afx")
+        e.update(env_cfg, job, {"afx": "latest"})
     assert workflow_common.read(e.state_path(env_cfg)) == before
 
 
@@ -387,7 +387,7 @@ def test_verify_keeps_primary_and_rollback_runtime(env_cfg, tmp_path, monkeypatc
 def test_failed_rollback_preserves_original_error(env_cfg, tmp_path, monkeypatch):
     before, job = managed(env_cfg, tmp_path)
     monkeypatch.setattr(e, "packages", lambda c: before["packages"])
-    monkeypatch.setattr(e, "artifact", lambda *a: {"path": "/new.whl"})
+    monkeypatch.setattr(e, "artifact", lambda *a: {"path": "/new.whl", "sha256": "new"})
     new_lock = job / "pylock.toml"
     monkeypatch.setattr(e, "resolve", lambda *a, **kw: new_lock)
 
@@ -398,7 +398,7 @@ def test_failed_rollback_preserves_original_error(env_cfg, tmp_path, monkeypatch
 
     monkeypatch.setattr(e, "sync", sync)
     with pytest.raises(ValueError, match="original install failure"):
-        e.update(env_cfg, job, "afx")
+        e.update(env_cfg, job, {"afx": "latest"})
     result = workflow_common.read(job / "result.json")
     assert result["error"] == "original install failure"
     assert (
@@ -473,31 +473,21 @@ def test_managed_uv_bootstraps_before_first_uv_command(env_cfg, tmp_path, monkey
     assert workflow_common.read(e.state_path(env_cfg))["state"] == "invalid"
 
 
-@pytest.mark.parametrize(
-    "targets", [(), ("afx",), ("torch_npu",), ("torch_npu", "afx")]
-)
-def test_config_update_selects_changed_components(
-    env_cfg, tmp_path, monkeypatch, targets
-):
+@pytest.mark.parametrize("targets", [(), ("afx",), ("torch_npu",), ("torch_npu", "afx")])
+def test_explicit_update_selects_only_requested_components(env_cfg, tmp_path, monkeypatch, targets):
     before, job = managed(env_cfg, tmp_path)
-    p = env_cfg["python_env"]
-    p["torch_npu"]["date"] = "latest"
-    before["artifacts"]["afx"]["sha256"] = workflow_common.sha(tmp_path / "autofusex-0.1.2-py3-none-any.whl")
-    if "afx" in targets:
-        p["afx"]["version"] = "0.2.0"
-    monkeypatch.setattr(
-        e,
-        "selected_daily",
-        lambda *args: "20261113" if "torch_npu" in targets else "20261112",
-    )
-    monkeypatch.setattr(
-        e, "artifact", lambda cfg, name, job: {"source": cfg["python_env"][name]}
-    )
-    plan = e.planned_components(env_cfg, before, job)
-    assert tuple(name for name, _ in plan) == targets
-    if "torch_npu" in targets:
-        assert dict(plan)["torch_npu"]["source"]["date"] == "20261113"
-    assert p["torch_npu"]["date"] == "latest"
+    # Stale init config must not reset torch or an unselected AFX/NPU pin.
+    env_cfg["python_env"]["afx"]["version"] = "99.0.0"
+    env_cfg["python_env"]["stable_requirements"] = ["torch==9.0.0"]
+    selection = {name: "latest" for name in targets}
+    effective = e.update_config(env_cfg, before, selection)
+    assert "torch==2.10.0" in effective["python_env"]["stable_requirements"]
+    for name in ("torch_npu", "afx"):
+        if name not in targets:
+            assert effective["python_env"][name] == before["artifacts"][name]["source"]
+    monkeypatch.setattr(e, "artifact", lambda c, name, job: {"sha256": "new-" + name})
+    plan = e.planned_components(effective, before, job, selection)
+    assert {name for name, _ in plan} == set(targets)
 
 
 def test_job_yaml_restores_without_previous_job_or_dependency_resolution(
@@ -535,6 +525,7 @@ def test_job_yaml_restores_without_previous_job_or_dependency_resolution(
         "packages": [],
         "artifacts": [],
         "hardware": [],
+        "components": [],
     }
     root = Path(env_cfg["runtime"]["install_root"]) / "cann"
     (root / "compiler").mkdir(parents=True)
@@ -623,14 +614,14 @@ def test_afx_version_download_freeze_and_update(
 
     monkeypatch.setattr(workflow_common, "run", download)
     monkeypatch.setattr(e, "compatible_wheels", lambda c, names: names)
-    plan = e.planned_components(env_cfg, before, job)
+    plan = e.planned_components(env_cfg, before, job, {"afx": requested})
     assert [name for name, _ in plan] == ["afx"]
     record = dict(plan)["afx"]
     assert record["metadata"]["version"] == "0.2.0"
     assert record["source"]["version"] == "0.2.0"
     assert record["sha256"] == workflow_common.sha(record["path"])
     before["artifacts"]["afx"] = record
-    assert e.planned_components(env_cfg, before, job) == []
+    assert e.planned_components(env_cfg, before, job, {"afx": requested}) == []
     p["afx"]["wheel"] = record["path"]
     with pytest.raises(ValueError, match="invalid AFX configuration"):
         e.validate(env_cfg, "update", "afx")

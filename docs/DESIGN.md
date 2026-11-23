@@ -24,7 +24,7 @@
 
 ## 软件功能
 
-- init 准备 CANN 和专用 venv，update 更新 torch_npu/AFX。
+- init 准备 CANN 和专用 venv，update 依据当前清单显式更新 torch、torch_npu、AFX 或 CANN（OPS 仅随 CANN 更新）。
 - deploy 冻结并同步源码，构建安装 AF，验证加载来源。
 - replay 在指定有效部署上执行固定 seed，汇总完整性与正确性。
 - issue 命令领取、冻结目标查询、续租、提交复测和结果轮询。

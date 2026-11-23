@@ -574,6 +574,7 @@ def wait_status(c, job_id, *, since=None, timeout=30):
         if data["state"] in {"success", "failed", "unknown"}:
             from afxx import credentials
             data = credentials.complete_init(c, job_id, data)
+            data = complete_config_save(c, job_id, data)
             result = localize_replay(c, job_id, data)
             if "evidence_path" in result:
                 return result
@@ -633,3 +634,19 @@ with tempfile.TemporaryDirectory(prefix='afxx-client-control-') as directory:
     if result.get("error"):
         raise workflow_common.WorkflowError(result["error"]["code"], result["error"]["message"])
     return result["data"]
+
+
+def complete_config_save(c, job_id, data):
+    if data.get("state") != "success" or "local" not in c:
+        return data
+    request_path = Path(c["local"]["state_dir"]) / job_id / "request.json"
+    if not request_path.is_file():
+        return data
+    request = workflow_common.read(request_path)
+    if request.get("command") != "update" or not request.get("save_config"):
+        return data
+    from afxx.config_save import complete
+    report = (data.get("status") or data).get("result.json")
+    if report is None and not request.get("config_save_result"):
+        report = query_job(c, job_id).get("result.json", {})
+    return complete(c, job_id, data, report or {})

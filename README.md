@@ -83,11 +83,13 @@ doctor 校验配置、本地连接工具和 npussh 登录。远端依赖由 init
 ```bash
 afxx env init
 afxx env check
-# 修改配置后更新 torch_npu / AFX
-afxx env update
+# 显式更新选定组件，其他组件保持不变
+afxx env update --torch-npu latest --afx latest
+# 可选：成功后将实际版本回写当前配置
+afxx env update --afx latest --save-config
 ```
 
-init 自动上传配置并准备 Python 3.11、CANN 和专用 venv。update 更新 torch_npu/AFX，保留现有 CANN。init/update 默认跟随远端日志；`--detach` 仅提交任务，后续用 status 查询。
+init 自动上传配置并准备 Python 3.11、CANN 和专用 venv。update 以当前环境清单为基础，仅更新命令指定的组件，不采用配置中的初始化版本。无参数只查询当前版本；`--cann latest` 只更新 Toolkit，`--cann latest --ops` 同时更新同批次 OPS，禁止单独 `--ops`。init/update 默认跟随远端日志；`--detach` 仅提交任务，后续用 status 查询。
 
 配置 platform 后，init 优先复用本地 token 文件，缺失时在交互终端隐藏输入；环境成功后自动同步到 NPU。路径留空时使用 `~/.config/afxx/auth/afx.token` 和 `<workflow_root>/auth/afx.token`。非交互调用需预先准备本地文件；detach/MCP 提交后通过 status/wait 完成成功后的同步。
 

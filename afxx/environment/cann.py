@@ -1,4 +1,4 @@
-"""Bootstrap a missing CANN from a configured release catalog; never upgrade an existing installation."""
+"""Bootstrap a missing CANN from a configured release catalog; upgrade only explicitly selected components."""
 
 from html.parser import HTMLParser
 from afxx import common as workflow_common
@@ -235,11 +235,55 @@ def ensure(c, job):
     workflow_common.phase(job, "cann_preflight")
     family, hardware = select_ops(cfg)
     pins = c.get("environment_lock", {}).get("cann")
-    release = (
-        select_release(cfg, family, platform.machine(), pins["release"])
-        if pins
-        else select_release(cfg, family, platform.machine())
-    )
+    if pins and pins.get("components"):
+        release = select_release(dict(cfg, nnal=False), None, platform.machine(), pins["release"])
+        release["packages"] = [(item["component"], item["name"]) for item in pins["components"]]
+    else:
+        release = (
+            select_release(cfg, family, platform.machine(), pins["release"])
+            if pins else select_release(cfg, family, platform.machine()))
+    report = download_release(c, job, release, hardware, pins)
+    install_release(c, job, report)
+
+
+def prepare_update(c, job, date, with_ops, previous):
+    root = Path(c["runtime"]["install_root"])
+    workflow_common.require(ready(root), "CANN update requires an existing complete Toolkit")
+    cfg = dict(c["cann"], date=date, nnal=False)
+    family, hardware = select_ops(cfg) if with_ops else (None, [])
+    workflow_common.require(not with_ops or family, "--ops requires an OPS family; cann.ops cannot be none")
+    # Pick Toolkit first: never silently fall back to an older batch to find OPS.
+    release = select_release(cfg, None, platform.machine())
+    if family:
+        name = f"Ascend-cann-{family}-ops_{release['version']}_linux-{platform.machine()}.run"
+        workflow_common.require(name in listing(release["base_url"]), "matching OPS package missing from selected CANN release")
+        release["packages"].append(("ops", name))
+    workflow_common.require(not previous.get("release") or int(release["release"]) >= int(previous["release"]),
+                            "CANN downgrade is not supported by env update")
+    # Toolkit-only upgrades retain the old OPS receipt; check supported major compatibility.
+    components = previous.get("components") or [
+        {"component": kind, "name": name, "version": previous["version"], "release": previous["release"],
+         "sha256": next((v["sha256"] for v in previous.get("artifacts", []) if v["name"] == name), None)}
+        for kind, name in previous.get("packages", [])]
+    retained = [v for v in components if v["component"] != "toolkit" and not (with_ops and v["component"] == "ops")]
+    if release["release"] == previous.get("release") and (not with_ops or any(
+            v["component"] == "ops" and v["release"] == release["release"] and v["name"] == name for v in components)):
+        return None
+    if not with_ops:
+        ops = next((v for v in retained if v["component"] == "ops"), None)
+        if ops:
+            old_major = int(ops["version"].split(".")[0])
+            new_major = int(release["version"].split(".")[0])
+            workflow_common.require(abs(new_major - old_major) <= 1,
+                                    "retained OPS is incompatible with target Toolkit; use --cann DATE --ops")
+    report = download_release(c, job, release, hardware)
+    report["retained_components"] = retained
+    report["ops_upgrade"] = any(v["component"] == "ops" for v in components)
+    return report
+
+
+def download_release(c, job, release, hardware, pins=None):
+    root = Path(c["runtime"]["install_root"])
     directory = Path(tempfile.mkdtemp(prefix="af-cann-" + job.name + "-", dir="/tmp"))
     artifacts = []
     report = dict(
@@ -254,7 +298,11 @@ def ensure(c, job):
     try:
         for component, name in release["packages"]:
             path = directory / name
-            address = urllib.parse.urljoin(release["base_url"], name)
+            pinned = next((v for v in (pins or {}).get("components", []) if v["name"] == name), None)
+            base = release["base_url"]
+            if pinned:
+                base = https(c["cann"]["repository_url"]).rstrip("/") + "/" + pinned["release"] + "/"
+            address = urllib.parse.urljoin(base, name)
             with (
                 urllib.request.urlopen(https(address), timeout=60) as response,
                 path.with_suffix(".part").open("xb") as output,
@@ -274,6 +322,8 @@ def ensure(c, job):
                     "component": component,
                     "path": str(path),
                     "sha256": workflow_common.sha(path),
+                    "release": pinned["release"] if pinned else release["release"],
+                    "version": pinned["version"] if pinned else release["version"],
                 }
             )
             workflow_common.update_record(job / "result.json", cann=report)
@@ -281,6 +331,14 @@ def ensure(c, job):
         report.update(state="download_failed", error=str(error))
         workflow_common.update_record(job / "result.json", cann=report)
         raise
+    return report
+
+
+def install_release(c, job, report, upgrade=False):
+    root = Path(c["runtime"]["install_root"])
+    state = root / ".af-cann-bootstrap.json"
+    artifacts = report["artifacts"]
+    directory = Path(report["download_dir"])
     report["state"] = "installing"
     workflow_common.update_record(job / "result.json", cann=report)
     workflow_common.write(state, report)
@@ -294,9 +352,9 @@ def ensure(c, job):
         for item in artifacts:
             command = ["bash", item["path"], "--install-path=" + str(root), "--quiet"]
             if item["component"] == "toolkit":
-                command.append("--full")
+                command.append("--upgrade" if upgrade else "--full")
             elif item["component"] == "ops":
-                command += ["--install", "--type=toolkit"]
+                command += ["--upgrade" if upgrade and report.get("ops_upgrade") else "--install", "--type=toolkit"]
             else:
                 command += ["--install", "--whitelist=all"]
             workflow_common.run(command, env=env, cwd=directory)
@@ -304,6 +362,10 @@ def ensure(c, job):
                 workflow_common.require(
                     ready(root), "Toolkit did not create a complete CANN environment"
                 )
+                if upgrade:
+                    info = dict(line.split("=", 1) for line in (root / "cann/compiler/version.info").read_text().splitlines() if "=" in line)
+                    workflow_common.require(info.get("Version") == report["version"].split("~")[0],
+                                            "Toolkit version after upgrade differs from selected package")
                 script = 'source "$1" && "$2" -c "import os,json; print(json.dumps(dict(os.environ)))"'
                 env = json.loads(
                     workflow_common.capture(
@@ -318,6 +380,10 @@ def ensure(c, job):
                         env=env,
                     ).splitlines()[-1]
                 )
+        report["components"] = [*report.get("retained_components", []), *[
+            {"component": item["component"], "version": item.get("version", report["version"]), "release": item.get("release", report["release"]),
+             "name": Path(item["path"]).name, "sha256": item["sha256"]} for item in artifacts]]
+        report["components"].sort(key=lambda v: {"toolkit": 0, "ops": 1, "nnal": 2}[v["component"]])
         report["state"] = "ready"
         workflow_common.write(state, report)
         workflow_common.update_record(job / "result.json", cann=report)

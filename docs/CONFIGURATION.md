@@ -74,17 +74,29 @@ Python 环境锁包含 `nnsmith-autofusex==0.1.2.post1`，venv 内使用 uv 0.11
 | `torch_npu.sha256` | 可选预期哈希，校验 Daily 压缩包 |
 | `stable_requirements` | 完整稳定依赖覆盖，与 torch_version 二选一 |
 
-修改 Daily 日期或 AFX 版本后执行 update。AFX 配置为 `latest` 时，每次 update 查询并下载当前最新兼容正式版，包哈希未变化则跳过更新；环境清单记录实际版本和哈希，冻结配置使用实际版本。它比较配置和当前环境清单，更新发生变化的 torch_npu/AFX，校验其余依赖的版本和来源。更新失败时尝试用原锁恢复，恢复失败则标记 invalid。torch 和稳定依赖变化需要在新目录 init。
-
-更新环境：
+`env init` 使用上述版本配置创建环境。`env update` 只使用配置定位目标环境和包源，以已安装环境清单为基础应用显式更新参数，不把配置中的旧版本重新装回去，默认不改写用户配置。
 
 ```bash
-afxx env update --config ~/.config/afxx/config.yaml
+# 只查询当前版本，不更新任何包
+afxx env update
+# 更新一个或多个选定组件
+afxx env update --afx latest
+# 更新成功后，将实际版本写回本次使用的配置文件
+afxx env update --afx latest --save-config
+afxx env update --torch-npu 20261123
+afxx env update --torch 2.10.0+cpu --torch-npu latest
+# Toolkit；或 Toolkit + 同批次 OPS
+afxx env update --cann latest
+afxx env update --cann 20261123 --ops
 ```
 
-AFX 客户端由官方命令独立运行；AFXX 在 verify 前负责启动检查，update 不停止或重启它。更新与安装保留环境占用检查，发现正在使用的库时会报错。
+`--torch` 使用精确版本；变更 torch 必须同时指定 `--torch-npu`，Daily 按目标 torch 版本匹配。只更新 torch_npu 时匹配实际已安装 torch。torch 联动更新允许解析所需依赖；其他 Python 更新保留非目标包的版本和来源，依赖冲突在安装前报错。选定包哈希未变化时跳过。无参数查询仍返回 job，可从日志和结果中的 installed 查看当前包版本及 CANN 清单。
 
-update 保留现有 CANN。包下载要求来源仍可访问；指定版本的包必须支持当前 Python 和平台。包源默认值及 OPS 映射集中在 [package_sources.json](../afxx/environment/package_sources.json)。
+CANN 更新只接受日期或 latest，不允许降级；`--ops` 必须同时提供 `--cann`。OPS 型号使用配置覆盖或自动探测，先确定 Toolkit 发布目录再查对应 OPS，缺包在安装前失败，不回退到其他批次。未指定 OPS 时保留现有 OPS 并记录其原批次，已知跨越不兼容主版本则要求一起更新。NNAL 不在本次更新范围内。Toolkit/OPS 使用官方升级接口，所有目标 run 包先下载并校验，成功后清理安装包，失败保留现场。跨版本组件兼容性仍需实际环境验证。
+
+Python 更新失败时尝试旧锁回滚；一旦开始 CANN 安装，不承诺自动回滚，失败标记环境 invalid 并保留报告与安装日志。成功后保存实际版本、来源和哈希。更新要求 ready 的受管理环境，已有包清单、锁和缓存仍需有效；平台自动升级或手工修改造成清单漂移时，需先核对处理。不会同步 token，也不会自动停止或重启客户端，仍检查 venv 占用，更新 CANN 时额外检查其安装目录占用。
+
+包源默认值及 OPS 映射集中在 [package_sources.json](../afxx/environment/package_sources.json)。
 
 ## CANN 准备
 
@@ -183,3 +195,7 @@ init 提交前复用本地 token；文件不存在时仅在交互终端隐藏输
 移除配置中旧的 `upload.sync_config_path`，不再使用 sync.json。此操作不启动常驻进程、不执行复测或自动更新。上传命令失败会使 replay job 失败，完整复现证据仍保留。`upload=completed` 仅表示官方命令及回执检查完成，回执 uploaded 计数不保证所有记录被平台接收。
 
 AFX 仅接受 `python_env.afx.version`（默认 `latest`），不再接受 wheel 路径、URL 或用户配置的 sha256。下载包的实际哈希仍自动记录在环境清单与 environment_lock 中，用于缓存校验和冻结恢复；冻结配置将 latest 展开为实际版本。
+
+`env update --save-config` 仅在更新成功后回写选中组件的实际版本/日期（`latest` 展开为具体值），保留注释和其他字段。更新 torch_npu 时也记录匹配的 torch 版本。dry-run 不写文件；`--detach` 或 MCP 提交后，由后续 `status` / 等待终态完成本地回写。回写目标是提交时使用的配置文件；等待期间文件被编辑则报冲突，不覆盖编辑，远端成功的更新不因此回滚。重复查询复用回写结果。
+
+单个 `cann.date` 无法表达不同批次的 Toolkit 和 OPS。若选用 `--save-config` 会产生这种组合，则安装前拒绝；使用 `--cann DATE --ops --save-config` 同批更新，或省略回写参数。

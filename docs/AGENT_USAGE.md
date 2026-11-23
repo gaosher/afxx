@@ -202,3 +202,9 @@ wait 默认 30 秒、允许 (0,50] 秒，CLI/MCP 均返回一次 JSON。携带 s
 定位时优先使用结构化 MCP `afxx_issue_status(issue_id, round_no, include_tasks=True)` 找到失败执行，再用 `afxx_execution_show(exec_uuid)` 读取平台详情。远端 dump 使用 `afxx_evidence_list(job_id, offset)` 和 `afxx_evidence_read(job_id, path, offset, limit, sha256)`；list offset 为文件游标，read offset/limit 为字节。工具直接返回 CLI 结果及错误，无须查询 operation_status。所有工具支持可选 config，且保留 afxx_run 通用调用方式。
 
 验证闭环优先使用 issue verify-check，MCP 为 afxx_issue(action="verify-check", issue_id=..., round_no=..., wait=true, timeout=30)。直接返回聚合结果，无 operation 回执；timed_out 不代表任务失败，继续查询原轮次。该命令不续租、不重启、不提交，不将 skip/invalid 算通过。claim 现在 CLI/MCP 均必须指定 issue_id。
+
+## 显式环境更新
+
+使用 `afxx_run` 的 `command="env update"`，在 arguments 传 `--afx VERSION|latest`、`--torch-npu YYYYMMDD|latest`、`--torch VERSION` 或 `--cann YYYYMMDD|latest [--ops]`。必须提供 request_id，MCP 返回操作记录后查询其结果。无组件参数只查询版本，不读取配置版本作为更新目标。torch 版本变化需配套 torch_npu，ops 不允许单独更新。配置只定位环境及包源，未指定组件沿用当前清单；CANN 安装失败不保证自动回滚，不能把 Python 回滚能力扩展到 CANN。
+
+环境更新需要回写本地配置时，显式传 `--save-config`。MCP 异步任务成功后查询 status 完成回写；若返回 CONFIG_SAVE_CONFLICT，环境已更新但配置未覆盖，先检查用户编辑。不要为重试回写而重新更新环境。

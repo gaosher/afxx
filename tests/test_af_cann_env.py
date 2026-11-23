@@ -109,6 +109,7 @@ def test_cann_install_cleans_only_successful_downloads(tmp_path, monkeypatch, fa
             "base_url": "https://fixture.invalid/",
             "packages": [("toolkit", "toolkit.run"), ("ops", "ops.run")],
             "version": "test",
+            "release": "2026111201",
         },
     )
     temporary = tmp_path / "downloads"

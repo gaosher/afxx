@@ -139,7 +139,7 @@ def prepare(command, arguments, config, default_config):
 
 def create_server(default_config=None):
     server = FastMCP("AFXX", instructions=(
-        "Prefer typed tools; afxx_run is for commands without a typed tool. Read afxx_help before constructing unfamiliar CLI arguments. Long commands return a local "
+        "Prefer typed tools; afxx_run is for commands without a typed tool. env update accepts explicit --afx VERSION|latest, --torch-npu DATE|latest, --torch VERSION and --cann DATE|latest [--ops]; no selectors only reports installed versions. --ops requires --cann. Optional --save-config writes resolved versions to the submitted config on successful status completion. Read afxx_help before constructing unfamiliar CLI arguments. Long commands return a local "
         "invocation receipt: query afxx_operation_status with the same request_id for the CLI result. "
         "A completed invocation is not necessarily a completed remote job. Use afxx_job_status or "
         "afxx_issue_status next. Disconnecting does not cancel a submitted invocation. "

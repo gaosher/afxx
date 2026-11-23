@@ -7,6 +7,7 @@ from afxx import execution as workflow_execution
 from afxx.environment import runtime as workflow_runtime
 
 import argparse
+import copy
 import datetime
 import email
 import json
@@ -639,16 +640,18 @@ def installed_cann(c, job):
         isinstance(release, str) and re.fullmatch(r"\d{8,}", release),
         "missing CANN release timestamp",
     )
+    components = source.get("components", [])
     return {
         "version": report.get("installed_version") or source["version"].split("~")[0],
         "release": release,
         "date": release[:8],
-        "packages": source.get("packages", []),
-        "artifacts": [
+        "packages": [[item["component"], item["name"]] for item in components] if components else source.get("packages", []),
+        "artifacts": [{"name": item["name"], "sha256": item["sha256"]} for item in components] if components else [
             {"name": Path(item["path"]).name, "sha256": item["sha256"]}
             for item in source.get("artifacts", [])
         ],
         "hardware": source.get("hardware", []),
+        "components": source.get("components", []),
     }
 
 
@@ -733,129 +736,159 @@ def install(c, job):
         raise
 
 
-def planned_components(c, before, job):
-    p = c["python_env"]
+def validate_selection(selection):
+    selection = {k: v for k, v in selection.items() if v is not None and v is not False}
+    workflow_common.require_code(not set(selection) - {"torch", "torch_npu", "afx", "cann", "ops"},
+                                 "INVALID_ARGUMENT", "unknown update component")
+    workflow_common.require_code(not selection.get("ops") or "cann" in selection,
+                                 "INVALID_ARGUMENT", "--ops requires --cann")
+    for name in ("torch_npu", "cann"):
+        value = selection.get(name)
+        if value is not None:
+            valid = isinstance(value, str) and (value == "latest" or bool(re.fullmatch(r"[0-9]{8}", value)))
+            if valid and value != "latest":
+                try:
+                    datetime.datetime.strptime(value, "%Y%m%d")
+                except ValueError:
+                    valid = False
+            workflow_common.require_code(valid, "INVALID_ARGUMENT", name + " must be YYYYMMDD or latest")
+    if "torch" in selection:
+        workflow_common.require_code(bool(re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:\+[A-Za-z0-9.]+)?", selection["torch"])),
+                                     "INVALID_ARGUMENT", "--torch requires an exact version")
+    if "afx" in selection:
+        workflow_common.require_code(bool(re.fullmatch(r"latest|[0-9][A-Za-z0-9.+_-]*", selection["afx"])),
+                                     "INVALID_ARGUMENT", "--afx requires a version or latest")
+    return selection
+
+
+def update_config(c, before, selection):
+    """Use the recorded installed environment, never init's desired package versions."""
+    result = copy.deepcopy(c)
+    result.pop("environment_lock", None)
+    p = result["python_env"]
+    p["stable_requirements"] = list(before["stable_requirements"])
+    for name in ("torch_npu", "afx"):
+        p[name] = dict(before["artifacts"][name]["source"])
+    actual_torch = before["packages"]["torch"]
+    target_torch = selection.get("torch", actual_torch)
+    workflow_common.require_code(target_torch == actual_torch or "torch_npu" in selection,
+                                 "INVALID_ARGUMENT", "changing torch requires --torch-npu DATE|latest")
+    p["stable_requirements"] = ["torch==" + target_torch if v.startswith("torch==") else v
+                                for v in p["stable_requirements"]]
+    # The normalized config may have selected a CPU index for an unrelated init pin.
+    p["torch_index_url"] = (workflow_config.package_source("torch_cpu_index")
+                            if target_torch.endswith("+cpu") else None)
+    if "torch_npu" in selection:
+        p["torch_npu"].update(version=target_torch.split("+")[0], date=selection["torch_npu"], sha256=None)
+    if "afx" in selection:
+        p["afx"] = {"version": selection["afx"]}
+    return result
+
+
+def planned_components(c, before, job, selection):
     plan = []
-    for component in ("torch_npu", "afx"):
-        previous = before["artifacts"][component]
-        installed = previous["source"]
-        desired = p[component]
-        if component == "torch_npu":
-            selected = selected_daily(desired, "py311")
-            if (
-                selected == installed["date"]
-                and desired["sha256"] in (None, installed["sha256"])
-                and all(desired[k] == installed[k] for k in ("version", "url_template"))
-            ):
-                continue
-            # Resolve latest only once, including across UTC midnight.
-            selected_config = dict(
-                c, python_env=dict(p, torch_npu=dict(desired, date=selected))
-            )
-            plan.append((component, artifact(selected_config, component, job)))
+    for name in ("torch_npu", "afx"):
+        if name not in selection:
             continue
-        elif desired.get("version") == "latest":
-            candidate = artifact(c, component, job)
-            if candidate["sha256"] != previous["sha256"]:
-                plan.append((component, candidate))
-            continue
-        elif desired["version"] == installed.get("version"):
-            continue
-        plan.append((component, artifact(c, component, job)))
+        candidate = artifact(c, name, job)
+        if candidate["sha256"] != before["artifacts"][name]["sha256"]:
+            plan.append((name, candidate))
     return plan
 
 
-def update(c, job, target):
+def config_updates(selection, inventory, artifacts, cann):
+    """Resolved scalar pins only; never return an init-time latest selector."""
+    values = {}
+    if "torch" in selection or "torch_npu" in selection:
+        values["torch_version"] = inventory["torch"]
+    if "torch_npu" in selection:
+        source = artifacts["torch_npu"]["source"]
+        values["torch_npu"] = {k: source[k] for k in ("date", "version", "sha256")}
+    if "afx" in selection:
+        values["afx"] = {"version": inventory["autofusex"]}
+    return {**({"python_env": values} if values else {}),
+            **({"cann": {"date": cann["date"]}} if "cann" in selection else {})}
+
+
+def update(c, job, selection):
+    selection = validate_selection(selection)
     marker = state_path(c)
-    require(
-        marker.is_file(), "update only accepts environments created by this installer"
-    )
+    require(marker.is_file(), "update only accepts environments created by this installer")
     before = workflow_common.read(marker)
-    require(
-        before["state"] == "ready" and before.get("manager") == "uv",
-        "requires a ready uv-managed environment",
-    )
-    require(
-        c["runtime"] == before["runtime"] and c["connection"] == before["connection"],
-        "environment paths or connection differ from manifest",
-    )
-    require(
-        c["python_env"]["stable_requirements"] == before["stable_requirements"],
-        "stable requirements changed; initialize a new environment",
-    )
-    require(
-        packages(c) == before["packages"],
-        "environment changed outside installer; recreate or reconcile before update",
-    )
-    previous_lock = Path(before["lock"]["path"])
-    require(
-        workflow_common.sha(previous_lock) == before["lock"]["sha256"],
-        "previous lock missing or changed",
-    )
-    for item in before["artifacts"].values():
-        require(
-            workflow_common.sha(item["path"]) == item["sha256"],
-            "cached wheel missing or changed",
-        )
-    artifacts = dict(before["artifacts"])
-    plan = (
-        [(target, artifact(c, target, job))]
-        if target
-        else planned_components(c, before, job)
-    )
-    workflow_common.update_record(
-        job / "result.json", components=[name for name, _ in plan]
-    )
-    if not plan:
-        print("torch_npu and AFX already match configuration", flush=True)
+    require(before["state"] == "ready" and before.get("manager") == "uv", "requires a ready uv-managed environment")
+    require(c["runtime"] == before["runtime"] and c["connection"] == before["connection"],
+            "environment paths or connection differ from manifest")
+    actual = packages(c)
+    workflow_common.update_record(job / "result.json", installed={
+        "packages": {k: actual.get(k) for k in ("torch", "torch-npu", "autofusex")}, "cann": before["cann"]})
+    if not selection:
+        print("No components selected. Use --torch-npu DATE|latest, --afx VERSION|latest, --torch VERSION, --cann DATE|latest [--ops].", flush=True)
         return
-    artifacts.update(plan)
+    require(actual == before["packages"], "environment changed outside installer; reconcile before update")
+    c.update(update_config(c, before, selection))
+    validate(c, "update", None)
+    previous_lock = Path(before["lock"]["path"])
+    require(workflow_common.sha(previous_lock) == before["lock"]["sha256"], "previous lock missing or changed")
+    for item in before["artifacts"].values():
+        require(workflow_common.sha(item["path"]) == item["sha256"], "cached wheel missing or changed")
+    plan = planned_components(c, before, job, selection)
     changed = ["torch-npu" if name == "torch_npu" else "autofusex" for name, _ in plan]
-    locked = resolve(c, artifacts, job, previous=previous_lock, changed=changed)
+    torch_changed = selection.get("torch", actual["torch"]) != actual["torch"]
+    if torch_changed:
+        changed.append("torch")
+    artifacts = dict(before["artifacts"])
+    artifacts.update(plan)
+    locked = (resolve(c, artifacts, job, previous=None if torch_changed else previous_lock, changed=changed)
+              if changed else previous_lock)
+    # Download/check every CANN component before changing Python or CANN.
+    cann_plan = af_cann_env.prepare_update(c, job, selection["cann"], bool(selection.get("ops")), before["cann"]) if "cann" in selection else None
+    save_requested = (job / "request.json").is_file() and bool(workflow_common.read(job / "request.json").get("save_config"))
+    if save_requested and "cann" in selection:
+        components = cann_plan.get("retained_components", []) if cann_plan else before["cann"].get("components", [])
+        release = cann_plan["release"] if cann_plan else before["cann"]["release"]
+        require(all(item["release"] == release for item in components),
+                "--save-config cannot represent mixed CANN component releases; include --ops or omit --save-config")
+    workflow_common.update_record(job / "result.json", components=[*changed, *(["cann", "ops"] if selection.get("ops") else ["cann"] if cann_plan else [])])
+    if not changed and not cann_plan:
+        if save_requested:
+            workflow_common.update_record(job / "result.json", config_updates=config_updates(selection, actual, artifacts, before["cann"]))
+        print("Selected components already match the installed environment", flush=True)
+        return
     workflow_common.write(marker, dict(before, state="updating"))
+    cann_started = False
     try:
-        sync(c, locked, job, changed)
-        actual = packages(c)
-        require(
-            {k: v for k, v in actual.items() if k not in changed}
-            == {k: v for k, v in before["packages"].items() if k not in changed},
-            "update changed other packages",
-        )
+        if changed:
+            sync(c, locked, job, changed)
+        if cann_plan:
+            cann_started = True
+            af_cann_env.install_release(c, job, cann_plan, upgrade=True)
         verify(c, job)
-        workflow_common.write(
-            marker, ready(c, artifacts, locked, before["cann"], before["cann_config"])
-        )
+        after = packages(c)
+        if not torch_changed:
+            require({k: v for k, v in after.items() if k not in changed} ==
+                    {k: v for k, v in before["packages"].items() if k not in changed}, "update changed other packages")
+        workflow_common.update_record(job / "result.json", installed={
+            "packages": {k: after.get(k) for k in ("torch", "torch-npu", "autofusex")},
+            "cann": installed_cann(c, job) if cann_plan else before["cann"]})
+        cann = installed_cann(c, job) if cann_plan else before["cann"]
+        if save_requested:
+            workflow_common.update_record(job / "result.json", config_updates=config_updates(selection, after, artifacts, cann))
+        workflow_common.write(marker, ready(c, artifacts, locked, cann,
+                                            dict(c["cann"], date=cann["date"]) if cann_plan else before["cann_config"]))
     except BaseException as failure:
-        workflow_common.update_record(
-            job / "result.json",
-            state="failed",
-            error=str(failure),
-            rollback={"state": "running"},
-        )
         workflow_common.write(marker, dict(before, state="invalid"))
-        try:
-            sync(c, previous_lock, job, changed)
-            verify(c, job, True)
-            require(
-                packages(c) == before["packages"], "rollback package inventory differs"
-            )
-            workflow_common.write(marker, before)
-            workflow_common.update_record(
-                job / "result.json",
-                rollback=dict(
-                    workflow_common.read(job / "result.json")["rollback"],
-                    state="restored",
-                ),
-            )
-        except BaseException as error:
-            workflow_common.update_record(
-                job / "result.json",
-                rollback=dict(
-                    workflow_common.read(job / "result.json")["rollback"],
-                    state="failed",
-                    error=str(error),
-                ),
-            )
+        workflow_common.update_record(job / "result.json", state="failed", error=str(failure), rollback={"state": "running"})
+        if cann_started:
+            workflow_common.update_record(job / "result.json", rollback={"state": "unavailable", "reason": "CANN upgrade started; inspect installation before recovery"})
+        else:
+            try:
+                sync(c, previous_lock, job, changed)
+                verify(c, job, True)
+                require(packages(c) == before["packages"], "rollback package inventory differs")
+                workflow_common.write(marker, before)
+                workflow_common.update_record(job / "result.json", rollback=dict(workflow_common.read(job / "result.json").get("rollback", {}), state="restored"))
+            except BaseException as error:
+                workflow_common.update_record(job / "result.json", rollback={"state": "failed", "error": str(error)})
         raise
 
 
@@ -865,24 +898,27 @@ def main():
         c = workflow_config.validate_config(workflow_common.read(job / "config.yaml"))
         mode = {"_init_job": "init", "_update_job": "update"}[sys.argv[1]]
         validate(c, mode, None)
-        return execute(c, job, mode, None)
+        return execute(c, job, mode, workflow_common.read(job / "request.json").get("updates", {}) if mode == "update" else None)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=["init", "update"])
     parser.add_argument("--config", required=True)
-    parser.add_argument("--component", choices=["torch_npu", "afx"])
+    for name in ("torch", "torch-npu", "afx", "cann"):
+        parser.add_argument("--" + name)
+    parser.add_argument("--ops", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     require(
-        args.mode == "update" or not args.component, "init does not accept --component"
+        args.mode == "update" or not any(getattr(args, k) for k in ("torch", "torch_npu", "afx", "cann", "ops")), "init does not accept update options"
     )
     c = workflow_config.config(args.config)
-    validate(c, args.mode, args.component)
+    selection = validate_selection({k: getattr(args, k) for k in ("torch", "torch_npu", "afx", "cann", "ops")})
+    validate(c, args.mode, None)
     if args.dry_run:
         print(
             json.dumps(
                 {
                     "mode": args.mode,
-                    "component": args.component,
+                    "updates": selection,
                     "venv": c["runtime"]["venv_dir"],
                     "dry_run": True,
                 }
@@ -900,7 +936,7 @@ def main():
     job = Path(c["remote"]["state_dir"]) / uuid.uuid4().hex
     job.mkdir(parents=True, mode=0o700)
     workflow_common.write(job / "config.yaml", c)
-    return execute(c, job, args.mode, args.component)
+    return execute(c, job, args.mode, selection)
 
 
 def execute(c, job, mode, component):
@@ -908,6 +944,16 @@ def execute(c, job, mode, component):
         job / "result.json", state="running", mode=mode, component=component
     )
     print("Environment task: " + str(job), flush=True)
+    if mode == "update" and not component:
+        # A version query does not need the execution locks held by long-running fuzz.
+        with workflow_common.lock(state_path(c).with_suffix(".lock")):
+            try:
+                update(c, job, {})
+                workflow_common.update_record(job / "result.json", state="success")
+            except BaseException as error:
+                workflow_common.update_record(job / "result.json", state="failed", error=str(error))
+                raise
+        return 0
     # Same CANN lock as deployment/replay, plus a canonical venv lock independent of config.
     env_lock = workflow_runtime.venv_lock(c)
     with (
@@ -916,12 +962,14 @@ def execute(c, job, mode, component):
         workflow_common.lock(workflow_runtime.registry(c).with_suffix(".lock")),
     ):
         try:
-            if Path(c["runtime"]["venv_dir"]).exists():
+            if (mode != "update" or component) and Path(c["runtime"]["venv_dir"]).exists():
                 workflow_runtime.check_idle(c["runtime"]["venv_dir"])
             if mode == "init":
                 install(c, job)
             else:
-                update(c, job, component)
+                if component and component.get("cann"):
+                    workflow_runtime.check_idle(c["runtime"]["install_root"])
+                update(c, job, component or {})
             workflow_execution.save_frozen_config(
                 c, job, workflow_common.read(state_path(c))
             )

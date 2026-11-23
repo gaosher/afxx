@@ -30,7 +30,7 @@ def response(command, data=None, error=None):
     if command in ("init", "update") and data and "job" in data:
         status = data.get("status") or {}
         summary = {
-            key: data[key] for key in ("job", "request_id", "state", "auth") if key in data
+            key: data[key] for key in ("job", "request_id", "state", "auth", "config_save") if key in data
         }
         if data.get("dry_run"):
             summary.update(dry_run=True, local=data["local"])
@@ -39,6 +39,11 @@ def response(command, data=None, error=None):
         for key in ("phase", "artifact", "log", "error_code", "error"):
             if key in status:
                 summary[key] = status[key]
+        if command == "update":
+            report = status.get("result.json", {})
+            for key in ("installed", "components", "rollback"):
+                if key in report:
+                    summary[key] = report[key]
         data = summary
     if (
         command == "issue-claim"
@@ -119,7 +124,7 @@ def parse_arguments():
         "retest-list": "查询当前用户的手动复测批次",
         **{name: "管理远端唯一 AFX client：" + name.split("-", 1)[1] for name in clients},
         "init": "远端环境：初始化 Python 和 CANN 环境",
-        "update": "远端环境：按配置更新 Python 依赖，默认不更新 CANN",
+        "update": "远端环境：显式更新指定组件；无组件时查询当前版本",
         "check": "远端环境：检查运行环境及 Python 依赖",
         "deploy": "远端工作流：同步本地源码，编包并安装 AF",
         "replay": "远端工作流：使用已部署的 AF 复跑指定 seed",
@@ -184,6 +189,13 @@ def parse_arguments():
             cmd.add_argument("--timeout", type=float, default=300, help="等待生命周期完成的秒数，默认 300；超时不强杀")
         if name in ("init", "update"):
             cmd.add_argument("--detach", action="store_true")
+        if name == "update":
+            cmd.add_argument("--save-config", action="store_true", help="成功后将实际版本回写本次配置，保留其他字段及注释")
+            cmd.add_argument("--torch", help="目标 torch 版本；变更版本时必须同时指定 --torch-npu")
+            cmd.add_argument("--torch-npu", help="Daily 日期 YYYYMMDD 或 latest，匹配当前/目标 torch")
+            cmd.add_argument("--afx", help="AFX 版本或 latest")
+            cmd.add_argument("--cann", help="Toolkit 发布日期 YYYYMMDD 或 latest")
+            cmd.add_argument("--ops", action="store_true", help="同时更新同批次 OPS，必须与 --cann 一起使用")
         if name == "issue-preview":
             cmd.add_argument(
                 "--full", action="store_true", help="show full preview details"
@@ -453,6 +465,7 @@ def main():
             data["local_snapshot_cleanup"] = cleanup
         if args.attempt is None:
             data = credentials.complete_init(c, args.job, data)
+            data = workflow_jobs.complete_config_save(c, args.job, data)
         return workflow_jobs.localize_replay(c, args.job, data) if args.attempt is None else data
     values = []
     if args.command == "replay":
@@ -483,6 +496,13 @@ def main():
     if args.command == "deploy" and args.issue_id:
         lease = platform.claimed(c, args.issue_id)
         request["issue"] = {key: lease[key] for key in ("id", "lease_id")}
+    if args.command == "update":
+        from afxx.environment.python import validate_selection
+        request["updates"] = validate_selection({key: getattr(args, key) for key in
+                                                 ("torch", "torch_npu", "afx", "cann", "ops")})
+        if args.save_config:
+            from afxx.config_save import prepare
+            request["save_config"] = prepare(args.config, request["updates"])
     if args.command == "init" and not args.dry_run:
         credentials.prepare(c)
     data = workflow_jobs.submit(
@@ -537,6 +557,8 @@ def main():
         data = credentials.complete_init(c, data["job"], dict(data, task_type="init"))
     if args.command == "replay" and data.get("state") in {"success", "failed"}:
         return workflow_jobs.localize_replay(c, data["job"], workflow_jobs.query_status(c, data["job"]))
+    if args.command == "update" and not args.dry_run:
+        data = workflow_jobs.complete_config_save(c, data["job"], data)
     return data
 
 
