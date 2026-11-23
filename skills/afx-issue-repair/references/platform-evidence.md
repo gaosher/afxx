@@ -25,17 +25,20 @@
 
 ## 常驻客户端边界
 
-AFXX 的 verify 使用配置 venv/CANN 调用 AFX 官方 CLI，启动记录与日志位于 remote.state_dir 上一级目录的 afx-client/。
+AFXX 的 verify 使用配置 venv/CANN 调用 AFX managed 接口，client 目录位于 remote.state_dir 上一级目录的 afx-client/。目标是每个 NPU 环境只有一个 client，所有修复任务复用同一目录和身份；daemon、执行会话和 worker 是这个 client 的组成部分，不是额外 client。
 
 - PLATFORM_CLIENT_START_FAILED：查看 client.log，核对 endpoint、client token 权限、NPU 可见性和官方命令版本；未提交 verify。
-- PLATFORM_CLIENT_MISMATCH：存活客户端的启动命令或环境变量与当前配置不同。AF 包哈希变化允许复用已有进程，领取新包任务依赖 AFX 刷新包身份。当前 AFXX 不会停止/刷新这个进程；第二轮修复可能因此阻塞。不要手改 launch.json、删除记录或跳过校验来强行提交。
-- PLATFORM_CLIENT_UNTRACKED：同一 HOME 的现有进程缺少匹配启动证据，不能假定属于本任务。
+- PLATFORM_CLIENT_MISMATCH：managed 配置中的 endpoint、token 或设备与当前配置不同。AF 包哈希变化允许复用已有进程，领取新包任务依赖 AFX 刷新包身份。当前 AFXX 不会停止/刷新这个进程；第二轮修复可能因此阻塞。不要手改 launch.json、删除记录或跳过校验来强行提交。
+- PLATFORM_CLIENT_UNTRACKED：迁移目录中仍有旧版 client 存活，不能再启动一个 managed client 与其并行领取。
 
 没有在本次任务中授权客户端协调时，报告进程/日志、候选身份及所需处理，等待用户处理或明确授权；不自行 kill 常驻进程。已有明确授权时在其范围内处理，不重复请求。AFX 环境信息可能缓存，不能只看到 PID 存活就认为它识别了新包。
 
 
+平台复测派发问题待平台侧定位。已观察到 runner 环境中 AF 哈希缺失、installed 为空，但这不等同于已确认平台派发问题的完整根因；保留轮次、pending/领取记录、执行身份与日志作为证据。仅看到心跳在线或 fuzz 运行不能宣称复测已接收。本阶段不改领取协议、不引入复测专用的第二个 client，也不将“只待命复测”写成现有能力。
+
+
 ## 检视后的独立总结提交
 
-仅在总结经过人工检视且用户明确要求提交时，使用 `afxx issue summarize --issue-id <issue-id> --summary-file <本地summary.yaml> --request-id <本次总结请求ID>`；不是修复循环的自动步骤。直接使用修复流程生成并检视过的 summary.yaml，无需再转换格式。YAML 是 AFXX 的本地输入约定，平台实际接收 JSON。YAML 直接包含 kind、title、symptom、root_cause、solution，可用 fix_ref 记录真实修复 commit，用 body_md 保存多行正文。
+仅在总结经过人工检视且用户明确要求提交时，使用 `afxx issue summarize --issue-id <issue-id> --summary-file <本地summary.yaml> --request-id <本次总结请求ID>`；不是修复循环的自动步骤。直接使用修复流程生成并检视过的 summary.yaml，无需再转换格式。YAML 是 AFXX 的本地输入约定，平台实际接收 JSON。YAML 直接包含 kind、title、symptom、root_cause、solution，可用 fix_ref 记录真实修复 commit，用 body_md 保存多行正文。 使用 [总结模板](../../afxxsummary/assets/summary.yaml) 保留本次 verify 和关联回归的结论与精确轮次引用；平台自动关联 issue 不替代对当前修复证据的核对。正文摘录最小实际错误片段，展开根因与修复分析、人工检视重点及同类定位方法；不以 job 引用代替技术解释，不复制整份报告或部署流水账。
 
 需要本地领取记录、有效租约、knowledge 权限及平台 summarizing 状态。网络重试复用原文件和 request-id；内容或租约改变不能复用旧键。只有返回 status=resolved 和 knowledge_id 才报告平台归档完成。此命令会发布知识，而非保存待审草稿。

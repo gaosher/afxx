@@ -77,7 +77,7 @@ verify 与 deploy 分离，在远端采集实际 AF 身份，核对部署后提�
 
 status/wait 以 verify 返回的 round_no 定位验证，跟踪同一候选包的下一轮 regress。只有相关轮次全部通过才返回 outcome=passed。wait 遇到失败和 invalid 均返回 PLATFORM_VERIFICATION_FAILED；等待超时可继续查同一轮次。查询保留历史轮次身份，不使用其他修复的结果。
 
-AFX 官方客户端在 NPU 独立常驻，通过 `afx platform client run --retest` 启动。verify 提交前通过官方 CLI 检查并启动客户端；不屏蔽平台更新行为，不自动停止或重启。需配置 platform.client_token_file。部署、更新仍执行环境占用检查。不要将 AFXX 的锁视为独立客户端的并发保护。
+AFX >= 0.2.3 managed client 在 NPU 常驻。verify 前由官方 init/start/status 初始化、启动并确认执行会话运行，需配置 platform.client_token_file。start 会读取平台配置，可能开始 fuzz。AFXX 不自动 stop/restart；环境变化需要刷新进程时使用同一环境、同一 data-dir 的 afx restart。replay 保留独立入口，不享有 managed 队列调度或抢占优先级。部署、更新仍执行环境占用检查。
 
 ## 错误处理
 
@@ -111,7 +111,7 @@ Python 更新失败时同时读取 result.json.error 和 rollback，分别确认
 
 deploy/replay/check 保留提交配置，并将现场采集的 Python 包版本与来源、CANN 版本和 AF 加载身份写入 environment.json；缺失信息见 errors。日常任务不比对历史环境清单或检查缓存 wheel。运行依赖检查和 AF 部署产物完整性检查仍需通过。
 
-客户端启动失败返回 PLATFORM_CLIENT_START_FAILED，查看远端 afx-client/client.log。PLATFORM_CLIENT_MISMATCH 表示存活进程的启动命令或环境变量不匹配；PLATFORM_CLIENT_UNTRACKED 表示同一 HOME 存在无法确认启动环境的进程。上述错误均不提交 verify，也不停止已有进程。
+客户端启动失败返回 PLATFORM_CLIENT_START_FAILED，检查远端 afx-client/client.log 和 runs/<run-id>/execution.log。PLATFORM_CLIENT_MISMATCH 表示 managed 配置的 endpoint、token 或设备不匹配；PLATFORM_CLIENT_UNTRACKED 表示旧客户端仍存活，需要先停止旧进程再迁移。上述错误均不提交 verify，也不自动停止已有进程。
 
 ## 平台只读证据查询
 
@@ -130,7 +130,13 @@ deploy/replay/check 保留提交配置，并将现场采集的 Python 包版本�
 
 `issue summarize --issue-id F152 --summary-file /absolute/path/summary.yaml --request-id summary-F152-001` 读取 YAML 知识字段，使用本地平台 token 和领取记录中的租约提交。MCP 命令路径为 `issue summarize`，参数与 CLI 一致。仅在用户明确要求提交已检视总结时调用，不从修复循环自动发布。
 
-本地必需 kind、title、symptom、root_cause、solution 五个非空字符串；未知字段拒绝，平台继续校验字段类型、长度、状态及权限。文件必须是 YAML，不能仅传自由文本 Markdown。body_md 可作为 YAML 多行字段携带完整正文。
+本地必需 kind、title、symptom、root_cause、solution 五个非空字符串；未知字段拒绝，平台继续校验字段类型、长度、状态及权限。文件必须是 YAML，不能仅传自由文本 Markdown。body_md 可作为 YAML 多行字段携带完整正文。 `afx-issue-repair` 完成修复后交给独立的 [afxxsummary](../skills/afxxsummary/SKILL.md)，后者使用 [summary.yaml 模板](../skills/afxxsummary/assets/summary.yaml)，在 body_md 中保留完整证据链，供人工检视及后续知识检索；这是修复交付约定，不改变平台字段必填规则。
+
+总结正文以技术分析为主：按独立根因展示最小实际错误 IR（无 IR 时使用实际日志、代码或输入输出），结合源码符号解释错误机制、修复行为和验证依据。错误机制应追溯关键类型、属性或操作的上游来源、转换过程与违反约束的位置。修复分析说明语义为何保持；替换操作、放宽判断或新增分支时，解释选择依据、适用边界、后续处理支持及直接替代方案的取舍。验证证据应区分编译通过、输出正确和边界行为保持，并对应修复依赖的语义假设；未证明的部分留作人工检视问题。片段附一行具体来源；修复后 IR 必须来自实际产物，没有时说明转换规则，不能伪造现场。顶层 symptom/root_cause/solution 保持简短，正文不重复概述。
+
+复现条件只保留必要输入与基线 SHA。部署/request/attempt ID、环境目录、包哈希和构建过程留在任务记录，除非直接解释根因。提交前仍需核对已验证源码与 fix_ref 一致，但无需把核对流水账写进总结。每条根因的“验证依据”记录测试覆盖的语义与实际结果，必要时对照同输入修复前后行为，影响结论的限制在该处说明。不单列验证汇总章节；正文末尾保留一行平台地址、issue ID、verify/关联 regression 轮次与结果。无回归候选、skip 和未运行不计通过。
+
+人工检视部分列具体代码语义及受影响分支；同类问题定位部分写识别信号、排查方法、预期观察和适用边界。总结应独立可读，正文包含理解结论所需的实际片段与分析，不包含本地或远端机器的绝对路径。源码与测试使用仓库相对路径和符号名，由 fix_ref 固定版本；外部引用仅保留可共享的平台记录或归档附件。没有可共享引用时说明产物类型（如“基线 AFIR dump”），原始路径留在任务记录；缺失证据明确说明，不自动上传附件。
 
 记录存于 local.state_dir/issues/<issue-id>/summaries/<request-id摘要>.json，保存固定请求及成功回执，不保存 token。响应不确定时重试原命令；即使平台已变为 resolved，也会复用相同请求，避免重复发布。成功的本地重试直接返回回执。修改总结、租约或平台后重用同一 request-id 返回 REQUEST_CONFLICT；不要通过更换键盲目重试已发布总结。
 
@@ -173,7 +179,7 @@ afxx status --config "$CONFIG" --job-id <job-id> --wait --since <cursor> --timeo
 
 replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。
 
-非 replay 终态仍返回概要和 cursor；`--attempt` 与 `--wait` 互斥。完整本地文件布局、缓存和失败重试规则见 [复现证据清单](../skills/afxxrepair/references/replay-evidence.md#replay-自动返回的证据)。按需提取文件内容，不要整体读取到上下文。
+非 replay 终态仍返回概要和 cursor；`--attempt` 与 `--wait` 互斥。完整本地文件布局、缓存和失败重试规则见 [复现证据清单](../skills/afx-issue-repair/references/replay-evidence.md#replay-自动返回的证据)。按需提取文件内容，不要整体读取到上下文。
 
 attempt 默认字段为 id、seed_short、backend、status、error_stage、error_summary（缺失的可选字段省略），字符串最多 512 字符，裁剪字段列于 attempt_truncated_fields。`--fields` 使用逗号分隔的字段或字典点路径，例如 metadata.graph、contexts.environment、diagnostic_view.summary、shape_results；选择结果以完整字段路径为键。显式选择的大字段会完整返回，按定位需要逐次读取。未知执行返回 ATTEMPT_NOT_FOUND，未知字段返回 ATTEMPT_FIELD_NOT_FOUND，不默默忽略拼写错误。
 

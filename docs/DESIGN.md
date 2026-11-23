@@ -183,7 +183,7 @@ SHA-256 用于源码、包、加载文件和锁文件一致性校验。源码同
 | afxx/environment/cann.py | CANN 检查、选包、下载、安装和清理 |
 | afxx/environment/snapshot.py | 现场采集 job 的 Python、CANN 与 AF 身份 |
 | afxx/afx/replay.py | seed 契约、当前 AFX CLI 参数、公共结果查询与覆盖判定 |
-| afxx/afx/launcher.py | 官方客户端启动、存活和环境身份校验；不执行 stop |
+| afxx/afx/launcher.py | AFX managed init/start/status 适配与旧客户端迁移检查；不自行管理进程或执行 stop |
 | afxx/afx/platform.py | issues HTTP 请求、租约、verify 提交和结果跟踪 |
 
 ### 错误处理

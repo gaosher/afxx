@@ -66,7 +66,7 @@ def response(command, data=None, error=None):
     return {
         "schema_version": 1,
         "ok": error is None,
-        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-")) else command,
+        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-")) else command,
         "data": data,
         "error": None if error is None else {"code": error.code, "message": str(error)},
     }
@@ -129,7 +129,7 @@ def parse_arguments():
     for name in (*env_jobs, *jobs, *issues, "fuzz-status", "fuzz-stop", "execution-show", "evidence-list", "evidence-read", "status", "doctor"):
         parent = commands
         leaf = name
-        if name in env_jobs or name.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-")):
+        if name in env_jobs or name.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-")):
             group = "env" if name in env_jobs else name.split("-", 1)[0]
             leaf = name if group == "env" else name.split("-", 1)[1]
             if group not in groups:
@@ -227,6 +227,11 @@ def parse_arguments():
     template.add_argument("--source", required=True, help="local graph-autofusion repository")
     template.add_argument("--output", default=workflow_config.default_config_path(),
                           help="输出路径（默认 ~/.config/afxx/config.yaml；不覆盖已有文件）")
+    skills_parser = commands.add_parser("skills", help="安装本地 agent skills", allow_abbrev=False)
+    skills_commands = skills_parser.add_subparsers(dest="action", required=True)
+    skill_install = skills_commands.add_parser("install", help="安装随 AFXX 发布的 skills", allow_abbrev=False)
+    skill_install.set_defaults(command="skills-install")
+    skill_install.add_argument("--agent", choices=["codex"], required=True)
     mcp_parser = commands.add_parser("mcp", help="启动 stdio MCP 服务", allow_abbrev=False)
     mcp_parser.add_argument("--config", help="默认配置文件覆盖路径")
     commands.add_parser("help", help="显示全部命令及功能说明", allow_abbrev=False)
@@ -254,6 +259,9 @@ def main():
     if len(sys.argv) == 3 and sys.argv[1] == "_worker":
         return workflow_jobs.worker(sys.argv[2])
     args = parse_arguments()
+    if args.command == "skills-install":
+        from afxx.skills import install
+        return install()
     if args.command == "config-init":
         return workflow_config.write_template(args.source, args.output)
     if args.issue_id is not None:
@@ -476,7 +484,7 @@ def cli():
         mcp_main(sys.argv[2:])
         return 0
     command = sys.argv[1] if len(sys.argv) > 1 else None
-    if command in ("issue", "execution", "config", "evidence", "fuzz") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
+    if command in ("issue", "execution", "config", "evidence", "fuzz", "skills") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()

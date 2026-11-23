@@ -197,7 +197,7 @@ afxx env init --config /path/config.yaml
 | `--seed SEED` | 与 `--seeds-file` 二选一 | 单个 nnsmith seed |
 | `--seeds-file PATH` | 与 `--seed` 二选一 | 本地 seed 文件，每行一个；启用批量复跑 |
 | `--dump` | 否 | 开启本次任务的定位 dump，写入冻结配置，不修改用户配置文件。省略时沿用 `replay.dump`（默认 false） |
-| `--upload` / `--no-upload` | 否 | 互斥；覆盖本次结果上传设置。省略时沿用 `upload.enabled`；上传配置来自 `upload.sync_config_path` |
+| `--upload` / `--no-upload` | 否 | 互斥；覆盖本次结果上传设置。省略时沿用 `upload.enabled`；上传使用 `platform.url` 与远端 `platform.client_token_file`（默认复用 `platform.remote_token_file`），调用官方 `platform client once` |
 
 ## 8. 状态与证据
 
@@ -285,7 +285,7 @@ afxx env init --config /path/config.yaml
 
 | 命令 | 必填参数 | 说明 |
 |---|---|---|
-| `issue summarize` | `--issue-id ID`、`--summary-file PATH`、`--request-id ID` | `--summary-file` 为本地 YAML。这是**平台写操作**，不是生成本地总结；修复流程不会自动提交，需人工检视后执行 |
+| `issue summarize` | `--issue-id ID`、`--summary-file PATH`、`--request-id ID` | `--summary-file` 为本地 YAML，建议按 [证据链模板](../skills/afxxsummary/assets/summary.yaml) 填写。这是**平台写操作**，不是生成本地总结；修复流程不会自动提交，需人工检视后执行 |
 
 权限、租约及总结格式见 [Agent 调用约定](AGENT_USAGE.md)。
 
@@ -325,3 +325,11 @@ afxx_run({
 ## MCP 服务
 
 `afxx mcp [--config PATH]` 启动 stdio MCP 服务，由 MCP 客户端管理进程。该命令不输出普通 CLI 的 JSON 响应，不触发 NPU 操作；`afxx mcp --help` 查看参数。
+
+## 安装本地 skills
+
+```bash
+afxx skills install --agent codex
+```
+
+随 wheel 提供 afx-issue-repair 和 afxxsummary，安装到 ~/.agents/skills/。命令独立于工作流配置和远端连接，返回统一 JSON，包含每个 skill 的路径和 reused 状态。相同内容重复安装会跳过；已有内容不同或目标为符号链接时返回 SKILL_CONFLICT，并保留已有文件。更新前先保留并移走存在差异的目录，再执行安装命令。

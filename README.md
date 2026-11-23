@@ -6,7 +6,7 @@ AFXX 是适配 AFX 的开发与问题修复工具包，从本地工作区同步�
 
 - [命令参考与参数矩阵](docs/afxx-commands.md)
 - [配置说明与默认值](docs/CONFIGURATION.md) · [YAML 模板](afxx/resources/config.example.yaml)
-- [Agent 调用约定](docs/AGENT_USAGE.md) · [问题修复 Skill](skills/afxxrepair/SKILL.md)
+- [Agent 调用约定](docs/AGENT_USAGE.md) · [问题修复 Skill](skills/afx-issue-repair/SKILL.md) · [修复总结 Skill](skills/afxxsummary/SKILL.md)
 - [设计与模块边界](docs/DESIGN.md)
 
 ## 工具目录
@@ -205,23 +205,29 @@ afxx issue summarize --issue-id F152 \
 
 必填字段为 kind/title/symptom/root_cause/solution。kind 使用 AFX 类型，如 bugfix_function、bugfix_accuracy 或 perf_tuning；可选字段包括 keywords、ops、dtypes、backends、graph_pattern、applicability、version_range、fix_ref、body_md。具体类型和长度由平台校验。提交后知识会发布，不只是保存草稿。
 
+修复交付使用 [总结模板](skills/afxxsummary/assets/summary.yaml)：正文按独立根因展示实际错误 IR、错误机制、修复行为和验证依据，补充人工检视重点与同类问题定位指引。验证依据随根因说明，末尾保留一行平台索引；部署追踪信息留在任务记录。填写规则见 [Agent 调用约定](docs/AGENT_USAGE.md)。
+
 ## AFX 常驻客户端
 
-AFXX 在本地控制远端任务；AFX 官方客户端在 NPU 上独立运行，负责心跳、上传、复测领取和平台更新。`issue verify` 提交前调用官方命令启动客户端，使用配置中的 venv/CANN 和 replay.devices。相同环境的已有进程直接复用；启动命令或环境变量变化时报错。AF 包哈希变化时复用已有客户端，其缓存刷新能力取决于 AFX 实现。AFXX 不实现上传、心跳或复测循环。
+AFXX 使用 AFX >= 0.2.3 的 managed client 生命周期。`issue verify` 提交前，在配置的 venv/CANN 环境下首次调用 `afx init`，随后调用 `afx start`，等待 `afx status` 中的执行会话进入 running；失败则不提交 verify。AFX 负责进程、任务队列、心跳、上传和复测领取。启动会读取平台配置，也可能开始 fuzz，并非仅启动复测监听。
 
-配置 `platform.client_token_file` 后无需手工启动。客户端文件位于远端 state_dir 的上一级目录下的 `afx-client/`，日志为 `client.log`。也可在独立 HOME 中手工启动官方客户端，例如：
+配置 `platform.client_token_file` 为已有远端 token 文件。AFXX 在远端进程内读取 token，避免将秘密放进系统命令参数；AFX 将其保存到自己管理的 client 配置中。设备沿用 replay.devices（auto 时查询可见卡）。客户端目录为 remote.state_dir 上一级的 `afx-client/`；AFXX 调用日志为 `client.log`，执行日志由 AFX 保存在 `runs/<run-id>/execution.log`。
+
+可在远端使用同一 Python/CANN 环境操作已有 managed client，例如（路径按实际配置调整）：
 
 ```bash
 source /mnt/workspace/af-workflow/Ascend/cann/set_env.sh
 source /mnt/workspace/af-workflow/venv/bin/activate
-export AUTOFUSEX_HOME=/mnt/workspace/af-workflow/afx
-mkdir -p "$AUTOFUSEX_HOME/results"
-afx platform client run --endpoint https://autofuse.online \
-  --token-file /absolute/path/client.token \
-  --results "$AUTOFUSEX_HOME/results/results.sqlite" --retest --device npu:0
+afx status --data-dir /mnt/workspace/af-workflow/afx-client
+afx stop --data-dir /mnt/workspace/af-workflow/afx-client
+afx start --data-dir /mnt/workspace/af-workflow/afx-client
+# 更新包后，需要刷新驻留执行进程时：
+afx restart --data-dir /mnt/workspace/af-workflow/afx-client
 ```
 
-SQLite 数据库由 AFX 创建，不必手工建立空文件。`--retest` 启用平台复测任务领取；客户端需报告与 verify 提交相符的后端版本、哈希和芯片信息。包更新、注册和调度遵循 AFX 自身行为。AFXX 的环境锁仅协调 AFXX 任务，不代表独立客户端也持有这些锁。
+stop/restart 的排空和退出行为由 AFX 决定；AFXX 不自行 kill、重启或刷新驻留库。已有 client 的 endpoint、token 或设备与配置不符时直接报错，不覆盖已有设置。迁移时如有旧 `platform client run` 存活，须先停止旧进程，防止重复领取任务。
+
+本次只接入 client 生命周期。AFXX replay（包括任意 seed 和 `--dump`）仍使用原入口，不进入 managed 队列；deploy 仍执行已有环境占用检查。`start` 复用会话不意味着更新了已加载的 AF 库，启动成功也不代表平台回归通过，仍需通过 issue status/wait 查询结果。
 
 ### 遗留问题：手动 replay 临时占用单卡
 
@@ -248,7 +254,9 @@ Shape 数量由 AFX 解码 seed 得到：静态为 1，动态为 2–8。结果�
 
 通过要求为执行命令成功、CPU/AF-MLIR attempt 均为 ok、seed/backend/shape 完整且无重复。AF-MLIR correctness 必须为 pass，CPU 参考后端允许 not_checked 或 pass。unsupported、缺失结果和目标后端未比较均判失败。
 
-独立 replay 默认只保存结果。启用 upload 或传 --upload 时使用 upload.sync_config_path 请求 AFX 同步，--no-upload 可覆盖。result.json 中 upload=pending 表示同步已请求，服务端接收情况需另查。平台客户端会上传自己领取的验证任务结果。
+独立 replay 默认只保存结果。设置 `upload.enabled: true` 或传 `--upload` 后，调用官方 `afx platform client once` 一次性上传本次结果并发送心跳；`--no-upload` 可覆盖。使用 `platform.url` 和远端 `platform.client_token_file`（未指定时复用 `platform.remote_token_file`），不启动常驻 client、不领取复测、不执行平台更新。上传游标由 AFX 保存在本次结果目录的 `platform-sync.sqlite`。
+
+`result.json` 中 `upload=completed` 表示一次性命令及回执检查完成，`upload=failed` 表示上传调用失败；另存 `upload_exit_code` 和 `upload_receipt`。AFX 回执的 `uploaded` 是本轮处理数，可能包含拒绝或跳过项，不能当作全部接收成功的证明；服务端接收情况需查平台或 AFX 上传状态。旧 `upload.sync_config_path` 已移除，配置中应删除该字段，不再复制凭据到结果目录。平台客户端仍会上传自己领取的验证任务结果。
 
 ## 环境清单、产物与清理
 
@@ -426,14 +434,17 @@ git push origin v1.0
 
 ## 问题修复 Skill
 
-`afxxrepair` 编排领取、复现定位、修改、deploy、verify、回归和修复提交，最终生成带修复及验证证据的可提交 summary.yaml，供人工检视后使用 issue summarize 发布。使用现有 AFXX CLI/MCP，不另实现客户端。安装到 Codex 的 skills 目录（目标已存在时先检查本地修改）：
+`afx-issue-repair` 编排领取、复现定位、修改、deploy、verify、回归和修复提交，完成后交给 `afxxsummary` 生成待人工检视的 summary.yaml。`afxxsummary` 也可独立重写已有总结，不修改代码、不触发部署/复测、不发布平台。使用现有 AFXX CLI/MCP，不另实现客户端。通过 CLI 将随 wheel 发布的两个 skill 安装到 Codex 用户目录：
 
 ```bash
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-cp -R skills/afxxrepair "${CODEX_HOME:-$HOME/.codex}/skills/"
+afxx skills install --agent codex
 ```
 
-调用示例：`使用 $afxxrepair 修复 AFX issue F152，验证和回归通过后 commit，等待检视。`
+目标为 ~/.agents/skills/ 下的 afx-issue-repair 和 afxxsummary，无需工作流配置或远端连接。重复安装相同内容会跳过；已有目录内容不同时返回 SKILL_CONFLICT，先保留并移走旧目录，再重新安装。pip 升级后重新执行此命令即可检查 skill 是否需要更新。Codex 发现后可调用 $afx-issue-repair 或 $afxxsummary；未出现时重启 Codex。
+
+调用示例：`使用 $afx-issue-repair 修复 AFX issue F152，验证和回归通过后 commit，等待检视。`
+
+独立总结：`使用 $afxxsummary 根据 F152 的修复提交和现有证据重新生成 summary.yaml，不提交平台。`
 
 replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 单个执行可用 `status --attempt <id> --fields ...` 按字段查询。详见 [证据读取说明](docs/AGENT_USAGE.md#status-概要字段查询与等待)。
 

@@ -1,9 +1,9 @@
 ---
-name: afxxrepair
+name: afx-issue-repair
 description: 使用 AFXX 领取 AFX 平台 issue，复现并定位 graph-autofusion 问题，实施修复、部署、提交验证与等待回归，通过后整理总结并 commit 等待检视。用于用户要求执行这套修复闭环或继续已有修复任务时。
 ---
 
-# AFXX 问题修复
+# AFX Issue 修复
 
 目标：claim → 复现与定位 → 修改 → deploy → verify → 回归 → 总结、commit、待检视。失败时依据证据返回定位；环境或权限阻塞单独报告。创建/讨论 workflow 本身不代表要立即领取问题。
 
@@ -15,6 +15,7 @@ description: 使用 AFXX 领取 AFX 平台 issue，复现并定位 graph-autofus
 - 从配置定位 `local.source_dir`，在目标源码仓库读取 AGENTS.md，遵循其开发、测试、构建和提交要求。先记录原有修改，不覆盖或提交用户无关改动。
 - 用户要求执行完整修复流程时，按授权范围领取、部署、verify 和本地 commit；已有授权不重复询问。只做诊断或讨论时不发起这些写操作。不自动 push、合并或关闭 issue。
 - 远端 verify/续租使用 `platform.remote_token_file`，AFX client 使用 `platform.client_token_file`。配置 platform 后，env init 会复用或隐藏输入本地 token，并在环境成功后同步；异步 init 用 status/wait 完成同步。修复时复用已有凭据，遇到缺失或鉴权错误报告具体字段；不要为领取问题重建环境或重新签发 token。
+- 每个目标 NPU 环境只维护一个 AFX client，跨 issue、worktree 和部署轮次复用同一 client home 与身份。不要为单个问题初始化新 client、生成新 source_id 或另起旧版客户端；发现重复身份时先核对已有进程和平台记录，不自动删除平台记录。
 - 一个问题的工作记录保留 issue_id、租约到期时间、基线/候选 deploy job_id、request-id、verify round_no、AF 包身份及证据路径。复用任务已有笔记或修复总结，不另造状态数据库、不复制 wheel/源码快照。
 - 网络重试复用同一请求与 request-id；源码/配置改变后使用新的 deploy request-id。一个候选 job 的 verify 重试取回原回执，不能用它开始新的修复轮次。
 
@@ -119,7 +120,7 @@ afxx status --config "$TASK_CONFIG" --job-id <deploy-job-id>
 afxx issue verify --config "$TASK_CONFIG" --issue-id <issue-id> --job-id <deploy-job-id>
 ```
 
-verify 在远端核对候选 AF 身份，确保官方 AFX client 启动，再向平台提交；客户端 token 由配置的 `platform.client_token_file` 提供。保存返回的 verify round_no，`submitted` 只表示提交成功。
+verify 在远端核对候选 AF 身份，确保环境中唯一的 AFX client 启动，再向平台提交；客户端 token 由配置的 `platform.client_token_file` 提供。保存返回的 verify round_no，`submitted` 只表示提交成功，client/session running 也不证明平台已派发或本机已领取。平台复测派发问题当前待平台侧定位；排队、领取和执行结果分别取证，不通过启动额外 client、重复提交 verify 或修改 AFX 领取逻辑绕过。
 
 ```bash
 afxx issue status --config "$TASK_CONFIG" --issue-id <issue-id> --round-no <verify-round-no>
@@ -146,20 +147,11 @@ agent 使用 `issue wait --config "$TASK_CONFIG" --timeout 30` 等待原轮次�
 
 只使用本次候选的轮次证据，不拿后续其他修复的通过结果替代当前结果。
 
-## 7. 总结、commit、等待检视
+## 7. commit、总结交接、等待检视
 
-完成本轮相关测试、verify 和关联回归后，必须生成可直接提交的 `summary.yaml`，不另生成一份需要手工转换格式的总结。使用 [总结模板](assets/summary.yaml)，直接填写平台知识字段，不加 knowledge 外层，不自建 evidence、issue_id 等顶层字段；修复和验证证据写入 `body_md`。
+1. 核对将提交的源码与已验证部署一致；影响产物的代码若再次变化，重新部署验证。
+2. 遵循目标仓库规范，只提交本次修复和必要测试/文档，记录完整 SHA。用户要求仅出补丁或不提交时遵循该要求。
+3. 读取并使用 [afxxsummary](../afxxsummary/SKILL.md) 生成可提交的 summary.yaml。交接 issue、源码仓库、基线与修复 commit、已有 IR/日志/测试证据位置、平台 verify/回归轮次、任务配置及输出路径 `<local.state_dir>/issues/<issue-id>/summary.yaml`。直接沿用已有任务上下文，不另建交接文件；本地路径用于取证，不进入总结正文。
+4. 向用户交付修复 commit、summary.yaml 绝对路径和验证结论，等待人工检视。总结规则与模板由 afxxsummary 维护，不在这里重复。
 
-1. 先核对当前将提交的源码与已验证部署一致。若验证期间又修改了影响产物的代码，重新部署验证，不能用旧包结果证明新代码。
-2. 遵循目标仓库规范，只暂存本次修复及必要测试/文档，创建本地 commit 并记录完整 SHA。用户要求仅出补丁或不提交时遵循该要求，不编造 fix_ref。
-3. 将总结保存到本机 `<local.state_dir>/issues/<issue-id>/summary.yaml`，放在源码 worktree 外，不随源码同步或纳入本次修复 commit。这样可以在 commit 完成后填入真实 `fix_ref`，避免总结记录自身 commit SHA 的循环。
-4. 填写 kind、title、symptom、root_cause、solution；有修复 commit 时必须填 fix_ref。body_md 包含 issue、基线 SHA、触发条件/seed/Shape、修改范围、测试命令和结果、基线与候选 deploy job_id、AF 版本及 pyautofuse.so SHA-256、verify/regress 轮次与结果、日志/报告位置、限制和检视重点。没有回归候选时明确记录平台未选择候选，不能写成回归用例全部通过。
-5. 生成后检查 YAML 可解析、必填项非空、证据与实际记录一致、模板占位符已全部替换或删除。尚未获取的信息明确写“未获取”并说明原因，不伪造 SHA、用例数或通过结果。不要包含 token、凭据、无关敏感日志。
-6. 向用户交付修复 commit、summary.yaml 的绝对路径、验证结论和以下提交命令，报告“修复已验证并提交，summary.yaml 待人工检视”。
-
-```bash
-afxx issue summarize --config "$TASK_CONFIG" --issue-id <issue-id> \
-  --summary-file <summary.yaml的绝对路径> --request-id <本次总结请求ID>
-```
-
-此处完成的是本地修复交付，不自动等同于平台 resolved。总结经人工检视且用户明确要求提交后，才执行独立的 issue summarize；不用重新转换文件，也不自行拼 HTTP 请求。若检视导致代码变化，重新验证受影响内容并更新总结；发布重试与请求键规则见 [平台定位参考](references/platform-evidence.md)。不得将测试通过推断为已经合入或平台归档完成。
+不自动发布总结。人工检视且用户明确要求提交后，再按 [平台提交说明](references/platform-evidence.md) 执行独立的 issue summarize；若检视导致代码变化，重新验证受影响内容并更新总结。不得将测试通过推断为已经合入或平台归档完成。

@@ -10,6 +10,7 @@ import subprocess
 import sys
 from afxx.afx import replay as replay_adapter
 from afxx import common as workflow_common
+from afxx import config as workflow_config
 from afxx.environment import runtime as workflow_runtime
 from afxx import source as workflow_source
 
@@ -259,9 +260,9 @@ def replay(c, job, request):
                 if request["upload"] is not None
                 else c["upload"]["enabled"]
             )
-            if upload:
-                shutil.copyfile(c["upload"]["sync_config_path"], results / "sync.json")
-                (results / "sync.json").chmod(0o600)
+            upload_command = replay_adapter.upload_command(
+                workflow_runtime.python(c), results, workflow_config.platform_settings(c)
+            ) if upload else None
             command = replay_adapter.replay_command(
                 workflow_runtime.python(c),
                 options,
@@ -270,7 +271,7 @@ def replay(c, job, request):
                 request["batch"],
             )
             workflow_common.phase(job, "replay", results_dir=str(results))
-            # --save persists evidence locally. Without sync.json no upload is configured.
+            # --save persists evidence locally; uploading is a separate explicit command.
             completed = workflow_common.run(command, env={**env, **replay_env}, cwd=job, check=False)
             workflow_common.update_record(
                 job / "result.json", exit_code=completed.returncode
@@ -290,21 +291,40 @@ def replay(c, job, request):
             )
             report = workflow_common.update_record(job / "result.json", **report)
             if upload:
-                sync = replay_adapter.sync_command(workflow_runtime.python(c), results)
-                report["sync_start_exit_code"] = workflow_common.run(
-                    sync, env=env, cwd=job, check=False
-                ).returncode
-                report["upload"] = (
-                    "pending" if report["sync_start_exit_code"] == 0 else "start_failed"
-                )
+                workflow_common.update_record(job / "result.json", upload="failed")
+                try:
+                    sent = workflow_common.run(
+                        upload_command, env=env, cwd=job, check=False,
+                        stdout=subprocess.PIPE, text=True,
+                    )
+                except (OSError, subprocess.SubprocessError) as error:
+                    raise workflow_common.WorkflowError(
+                        "UPLOAD_FAILED", "AFX one-shot upload could not complete; see job.log"
+                    ) from error
+                report["upload_exit_code"] = sent.returncode
+                report["upload"] = "failed"
+                if sent.returncode == 0:
+                    try:
+                        receipt = json.loads(sent.stdout)
+                        workflow_common.require(
+                            isinstance(receipt, dict)
+                            and type(receipt.get("uploaded")) is int
+                            and receipt["uploaded"] >= 0
+                            and isinstance(receipt.get("client_id"), str),
+                            "invalid AFX upload receipt",
+                        )
+                        report["upload_receipt"] = receipt
+                        report["upload"] = "completed"
+                    except (ValueError, TypeError):
+                        report["upload_error"] = "invalid AFX upload receipt; see job.log"
             workflow_common.update_record(job / "result.json", **report)
             workflow_common.require(
                 completed.returncode == 0 and report["passed"],
                 "retest failed; see result.json",
             )
-            workflow_common.require(
-                report["upload"] != "start_failed",
-                "tests passed but sync failed to start",
+            workflow_common.require_code(
+                report["upload"] != "failed", "UPLOAD_FAILED",
+                "AFX one-shot upload failed; see result.json and job.log",
             )
             workflow_common.update_record(job / "result.json", state="success")
     except BaseException as error:

@@ -1,4 +1,0 @@
-interface:
-  display_name: "AFXX 问题修复"
-  short_description: "领取 AFX 问题、定位修复、部署验证和回归，提交代码等待检视"
-  default_prompt: "使用 $afxxrepair 领取一个 AFX issue，完成复现、修复、部署验证与回归，通过后整理总结并 commit，等待检视。"

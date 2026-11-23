@@ -52,7 +52,7 @@ def cfg(tmp_path):
             "batch_timeout_seconds": 300,
             "dump": False,
         },
-        "upload": {"enabled": False, "sync_config_path": str(tmp_path / "sync.json")},
+        "upload": {"enabled": False},
     }
     source = Path(c["local"]["source_dir"])
     source.mkdir()
@@ -1009,7 +1009,6 @@ def test_workflow_root_derives_all_managed_paths(cfg):
         *c["runtime"].values(),
         c["replay"]["results_dir"],
         c["python_env"]["state_dir"],
-        c["upload"]["sync_config_path"],
     ]:
         assert Path(path).is_relative_to(raw["workflow_root"])
     assert workflow_config.normalize_config(c) == c

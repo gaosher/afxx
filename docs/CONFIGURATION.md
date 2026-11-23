@@ -44,7 +44,7 @@ afxx config init --source /absolute/path/graph-autofusion --output ~/.config/afx
 | `replay.devices` / `workers` | auto，查询可见逻辑 NPU，每卡一个 worker |
 | `replay.compile_threads` / `batch_timeout_seconds` / `dump` | 4 / 300 / false |
 | `sync.include_ignored_paths` / `exclude_paths` | 空列表，相对于源码根目录的精确路径 |
-| `upload.enabled` / `sync_config_path` | false / `<workflow_root>/sync.json` |
+| `upload.enabled` | false；replay 上传使用 `platform.url` 和远端 client token |
 
 Python 3.11 由工具自动准备；LLVM 和 LLD 仍由远端提供。修改 workflow_root 只影响路径推导；创建新环境应使用新目录，已有 venv 和编译缓存包含绝对路径。
 
@@ -119,7 +119,7 @@ platform:
 
 AFXX 的 token 需要 `issue` 权限。远端独立运行的 AFX 客户端使用自己的 client token，需要 `upload/retest` 权限；不要将默认只具备客户端权限的 token 用于 AFXX 领取和提交问题。
 
-`platform.client_token_file` 在 issue verify 时必填，为远端路径。AFXX 先用官方 `client once` 检查连通和鉴权，再后台运行 `client run --retest`，设备沿用 replay.devices（auto 时查询可见卡）。启动证据和日志位于 remote.state_dir 的上一级目录下的 afx-client/。相同配置和 AF 身份复用已有进程；不自动停止旧进程。启动检查不等同于复测通过，结果仍通过 issue status/wait 查询。
+`platform.client_token_file` 在 issue verify 时必填，为远端已有 token 文件路径。AFX >= 0.2.3 managed init/start/status 管理客户端，设备沿用 replay.devices。客户端目录为 remote.state_dir 上一级的 afx-client/。启动读取平台配置，可能同时执行 fuzz；已有 endpoint、token 或设备不匹配时报错。AFXX 不自动停止或重启驻留进程。详见 README 的 AFX 常驻客户端章节。
 
 ## Job 环境快照
 
@@ -152,7 +152,7 @@ replay:
 
 AF 图、逐 pass MLIR 和生成代码位于结果目录 dump/；GE 图位于 dump/ge/；PyTorch 调试产物默认位于 job 目录 torch_compile_debug/，Inductor cache 位于结果目录 cache/。日志保留在 job.log 和 AFX worker 日志中。只有执行到对应阶段才产生文件，具体产物取决于后端及安装版本。
 
-`--save` 始终保存 AFX 结果到 results.sqlite，与 dump 独立。dump 不自动保存所有输入/输出张量，也不强制同步运行或禁用缓存。性能验收应关闭 dump，避免调试开销影响结论。完整收集标准见 [复现证据清单](../skills/afxxrepair/references/replay-evidence.md)。
+`--save` 始终保存 AFX 结果到 results.sqlite，与 dump 独立。dump 不自动保存所有输入/输出张量，也不强制同步运行或禁用缓存。性能验收应关闭 dump，避免调试开销影响结论。完整收集标准见 [复现证据清单](../skills/afx-issue-repair/references/replay-evidence.md)。
 
 replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 下载覆盖结果目录和 job 的诊断目录，不受报告摘录的 128 文件/文本长度限制；不跟随符号链接，不下载含凭据的 sync.json，跳过原因记在 evidence.json。开启 dump 不保证每个阶段都生成文件。
 
@@ -176,3 +176,9 @@ init 提交前复用本地 token；文件不存在时仅在交互终端隐藏输
 ### Fuzz 目录与资源
 
 `afxx fuzz run` 复用 connection、runtime.venv_dir 和 runtime.install_root，不需要新增配置节。AFX home 固定为 `<workflow_root>/fuzz/`，结果为其下 `results/results.sqlite`，队列为 `tasks/tasks.sqlite`。`replay.results_dir` 和 `replay` 的资源参数仅影响 replay；fuzz 默认由 AFX 自动发现可见 NPU 并选择资源预算，单次覆盖通过 fuzz run 的命令行参数指定。控制现有 fuzz job 时使用该 job 冻结的环境配置，并核对共享目录的归属。已有运行时新任务失败；旧 job ID 不能控制接管后的新运行。
+
+### Replay 一次性上传
+
+`upload.enabled: true` 或 replay 的 `--upload` 使用 `afx platform client once`，读取本次 `results.sqlite`，将上传游标保存在同目录的 `platform-sync.sqlite`。凭据使用远端 `platform.client_token_file`，未指定时回退到 `platform.remote_token_file`；本地 `platform.token_file` 不作为远端凭据。token 需具备上传和心跳权限。`--no-upload` 覆盖默认配置。
+
+移除配置中旧的 `upload.sync_config_path`，不再使用 sync.json。此操作不启动常驻进程、不执行复测或自动更新。上传命令失败会使 replay job 失败，完整复现证据仍保留。`upload=completed` 仅表示官方命令及回执检查完成，回执 uploaded 计数不保证所有记录被平台接收。

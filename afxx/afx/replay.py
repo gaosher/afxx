@@ -115,17 +115,14 @@ def replay_command(interpreter, options, normalized, results, batch):
     return [interpreter, "-m", "autofusex", "fuzz", *args, *common]
 
 
-def sync_command(interpreter, results):
+def upload_command(interpreter, results, settings):
+    """Upload saved attempts once; do not start a resident client or claim retests."""
     return [
-        interpreter,
-        "-m",
-        "autofusex",
-        "fuzz",
-        "maintenance",
-        "sync",
-        "start",
-        "--data-dir",
-        str(results),
+        interpreter, "-m", "afx", "platform", "client", "once",
+        "--endpoint", settings["url"],
+        "--token-file", settings.get("client_token_file") or settings["remote_token_file"],
+        "--results", str(results / "results.sqlite"),
+        "--state", str(results / "platform-sync.sqlite"),
     ]
 
 

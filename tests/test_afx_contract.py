@@ -207,7 +207,10 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
         retests._maybe_finish(conn, number, 1)
     assert issues.issue_detail(store, number)["status"] == "summarizing"
     summary = tmp_path / "summary.yaml"
-    summary.write_text("kind: bugfix_function\ntitle: Fix scheduling\nsymptom: Compile failed\nroot_cause: Incorrect boundary\nsolution: Correct the boundary\nfix_ref: abc123\n")
+    import yaml
+    from test_platform_summary import filled_summary
+    summary_fields = filled_summary(number)
+    summary.write_text(yaml.safe_dump(summary_fields, allow_unicode=True, sort_keys=False))
     with pytest.raises(workflow_common.WorkflowError, match="summary response lost"):
         cli("issue summarize", "--summary-file", str(summary), "--request-id", "summary-1")
     assert issues.issue_detail(store, number)["status"] == "resolved"
@@ -215,6 +218,11 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     assert published["status"] == "resolved" and published["knowledge_id"].startswith("K")
     assert cli("issue summarize", "--summary-file", str(summary), "--request-id", "summary-1") == published
     assert summary_keys == ["summary-1", "summary-1"]
+    from autofusex.platform import knowledge
+    with store.connect() as conn:
+        saved = knowledge.get(conn, published["knowledge_id"])
+    assert saved["body_md"] == summary_fields["body_md"]
+    assert saved["evidence"]["fix_ref"] == summary_fields["fix_ref"]
 
 
 def test_official_fuzz_command_contract(afx, cfg, tmp_path):
@@ -233,3 +241,83 @@ def test_official_fuzz_command_contract(afx, cfg, tmp_path):
     assert args.database == str(tmp_path / "results/results.sqlite")
     for action in ("status", "stop"):
         assert parser.parse_args([action, "--data-dir", str(tmp_path)]).command == action
+
+
+def test_official_one_shot_upload_contract(afx, platform_cfg, tmp_path, monkeypatch, capsys):
+    from autofusex.platform.cli import build_parser
+    from autofusex.platform import client
+    from afxx.afx.replay import upload_command
+
+    argv = upload_command(sys.executable, tmp_path, platform_cfg["platform"])
+    args = build_parser().parse_args(argv[4:])
+    assert args.action == "once" and not args.retest
+    assert args.token_file == platform_cfg["platform"]["remote_token_file"]
+    assert args.results == str(tmp_path / "results.sqlite")
+    assert args.state == str(tmp_path / "platform-sync.sqlite")
+    calls = []
+
+    class Client:
+        def __init__(self, api, results, state, **kwargs):
+            calls.append((results, str(state)))
+
+        def upload_once(self):
+            calls.append("upload")
+            # Official CLI counts processed statuses, not just accepted uploads.
+            return {"accepted": "accepted", "skipped": "skipped"}
+
+        def heartbeat(self):
+            calls.append("heartbeat")
+            return {"client_id": "client", "update_to": "9.9"}
+
+    monkeypatch.setattr(client, "API", lambda *a: object())
+    monkeypatch.setattr(client, "Client", Client)
+    assert client.main(args) == 0
+    import json
+    assert json.loads(capsys.readouterr().out) == {"uploaded": 2, "client_id": "client", "update_to": "9.9"}
+    assert calls == [(args.results, args.state), "upload", "heartbeat"]
+
+
+def test_managed_client_facade_contract(afx, tmp_path, monkeypatch, capsys):
+    from autofusex.fuzz.daemon.management import modern_cli
+    from afxx.afx.launcher import MANAGED_START
+    import json
+    home = tmp_path / "client"
+    home.mkdir()
+    token = tmp_path / "token"
+    token.write_text("test-secret")
+    original = modern_cli.run
+    calls = []
+    def run(argv):
+        calls.append(argv)
+        if argv[2] == "init":
+            return original(argv)
+        if argv[2] == "start":
+            return {"state": "preparing", "run_id": "r"}
+        return {"runs": [{"id": "r", "state": "running"}]}
+    monkeypatch.setattr(modern_cli, "run", run)
+    request = dict(home=str(home), token_file=str(token), endpoint="https://example.test", devices=["npu:0"])
+    monkeypatch.setattr(sys, "argv", ["adapter", json.dumps(request)])
+    for _ in range(2):
+        exec(compile(MANAGED_START, "managed_adapter", "exec"), {})
+        output = capsys.readouterr().out
+        assert json.loads(output)["status"]["runs"][0]["state"] == "running"
+        assert "test-secret" not in output
+    assert sum(argv[2] == "init" for argv in calls) == 1
+    assert json.loads((home / "client.json").read_text())["platform"]["retest"] is True
+
+    # Existing configuration is not silently overwritten and no session starts.
+    before = len(calls)
+    request["devices"] = ["npu:1"]
+    monkeypatch.setattr(sys, "argv", ["adapter", json.dumps(request)])
+    exec(compile(MANAGED_START, "managed_adapter", "exec"), {})
+    assert json.loads(capsys.readouterr().out)["error"] == "PLATFORM_CLIENT_MISMATCH"
+    assert len(calls) == before
+    request["devices"] = ["npu:0"]
+    monkeypatch.setattr(sys, "argv", ["adapter", json.dumps(request)])
+    def failed_run(argv):
+        if argv[2] == "start":
+            return {"state": "preparing", "run_id": "r"}
+        return {"runs": [{"id": "r", "state": "failed"}]}
+    monkeypatch.setattr(modern_cli, "run", failed_run)
+    exec(compile(MANAGED_START, "managed_adapter", "exec"), {})
+    assert json.loads(capsys.readouterr().out)["error"] == "PLATFORM_CLIENT_START_FAILED"

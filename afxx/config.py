@@ -27,7 +27,7 @@ FIELDS = {
         "batch_timeout_seconds",
         "dump",
     },
-    "upload": {"enabled", "sync_config_path"},
+    "upload": {"enabled"},
 }
 
 
@@ -191,7 +191,7 @@ def normalize_config(raw):
             "batch_timeout_seconds": 300,
             "dump": False,
         },
-        "upload": {"enabled": False, "sync_config_path": under("sync.json")},
+        "upload": {"enabled": False},
     }
     if "platform" in raw:
         defaults["platform"] = {
