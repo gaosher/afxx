@@ -228,7 +228,7 @@ def test_status_failure_is_successful_query(cfg, tmp_path, monkeypatch, capsys):
     p = tmp_path / "config.yaml"
     workflow_common.write(p, cfg)
     monkeypatch.setattr(
-        sys, "argv", ["afxx/cli.py", "status", "--config", str(p), "--job", "a" * 32]
+        sys, "argv", ["afxx/cli.py", "status", "--config", str(p), "--request-id", "a" * 32]
     )
     monkeypatch.setattr(workflow_jobs, "local_preflight", lambda *a: None)
     monkeypatch.setattr(
@@ -504,19 +504,19 @@ def test_invalid_arguments_stop_before_config_or_io(args, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["error"]["code"] == "INVALID_ARGUMENT"
 
 
-def test_replay_resolves_deploy_job_in_configured_state_dir(cfg, monkeypatch):
-    deploy_job = "a" * 32
-    monkeypatch.setattr(
-        sys, "argv", ["workflow", "replay", "--job-id", deploy_job, "--seed", "123"]
-    )
+def test_replay_groups_without_deploy(cfg, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["workflow", "replay", "--request-id", "repair", "--seed", "123"])
     monkeypatch.setattr(w.workflow_config, "config", lambda path: cfg)
     monkeypatch.setattr(workflow_jobs, "local_preflight", lambda *a: None)
-    monkeypatch.setattr(workflow_jobs, "submit", lambda c, request, *a: request)
-    data = w.main()
-    assert data["deployment"] == str(
-        Path(cfg["remote"]["state_dir"]) / deploy_job / "result.json"
-    )
-    assert data["seeds"] == ["123"]
+    requests = []
+    def submit(c, request, *args):
+        requests.append(request)
+        return {"state": "queued"}
+    monkeypatch.setattr(workflow_jobs, "submit", submit)
+    assert w.main()["run"] == 1
+    assert w.main()["run"] == 2
+    assert all("deployment" not in request for request in requests)
+    assert requests[0]["seeds"] == ["123"]
 
 
 def test_claim_response_preserves_issue_id_and_empty_result():

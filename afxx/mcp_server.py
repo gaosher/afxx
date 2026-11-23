@@ -24,6 +24,9 @@ Command = Literal[
     "env check",
     "deploy",
     "replay",
+    "replay list",
+    "replay show",
+    "replay compare",
     "fuzz run",
     "fuzz status",
     "fuzz stop",
@@ -86,7 +89,7 @@ async def invoke(arguments):
     return process.returncode, stdout.decode("utf-8", errors="replace")
 
 
-LONG_COMMANDS = {"env init", "env update", "env check", "deploy", "replay", "fuzz run",
+LONG_COMMANDS = {"env init", "env update", "env check", "deploy", "fuzz run",
                  "client start", "client stop", "client restart", "issue verify"}
 RequestId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")]
 JobId = Annotated[str, Field(pattern=re.compile(JOB_ID_PATTERN))]
@@ -142,7 +145,7 @@ def create_server(default_config=None):
         "Prefer typed tools; afxx_run is for commands without a typed tool. env update accepts explicit --afx VERSION|latest, --torch-npu DATE|latest, --torch VERSION and --cann DATE|latest [--ops]; no selectors only reports installed versions. --ops requires --cann. Optional --save-config writes resolved versions to the submitted config on successful status completion. Read afxx_help before constructing unfamiliar CLI arguments. Long commands return a local "
         "invocation receipt: query afxx_operation_status with the same request_id for the CLI result. "
         "A completed invocation is not necessarily a completed remote job. Use afxx_job_status or "
-        "afxx_issue_status next. Disconnecting does not cancel a submitted invocation. "
+        "afxx_issue_status next. Replay returns request_id/run directly; query replay show, not operation_status. Disconnecting does not cancel a submitted invocation. "
         "Restart and verify remain separate explicit actions."))
 
     async def dispatch(command, arguments=None, config=None, request_id=None):
@@ -150,21 +153,18 @@ def create_server(default_config=None):
             args, path = prepare(command, arguments, config, default_config)
         except ValueError as error:
             return tool_result(envelope(command, "CONFIG_CONFLICT", str(error)))
+        if command in LONG_COMMANDS and (request_id is None or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id)):
+            return tool_result(envelope(command, "INVALID_ARGUMENT", "long MCP commands require request_id for recovery"))
+        forwarded = {"env init", "env update", "env check", "deploy", "fuzz run",
+                     "replay", "replay list", "replay show", "replay compare", "status"}
+        if command in forwarded and request_id is not None:
+            keys = [args[i + 1] if i + 1 < len(args) else "" for i, arg in enumerate(args) if arg == "--request-id"]
+            keys += [arg.split("=", 1)[1] for arg in args if arg.startswith("--request-id=")]
+            if keys and any(key != request_id for key in keys):
+                return tool_result(envelope(command, "REQUEST_CONFLICT", "tool and CLI request_id differ"))
+            if not keys:
+                args += ["--request-id", request_id]
         if command in LONG_COMMANDS:
-            if request_id is None or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id):
-                return tool_result(envelope(command, "INVALID_ARGUMENT", "long MCP commands require request_id for recovery"))
-            # Forward the same key to CLI operations that already support idempotent submission.
-            if command in {"env init", "env update", "env check", "deploy", "replay", "fuzz run"}:
-                keys = []
-                for i, value in enumerate(args):
-                    if value == "--request-id":
-                        keys.append(args[i+1] if i+1 < len(args) else "")
-                    elif value.startswith("--request-id="):
-                        keys.append(value.split("=",1)[1])
-                if keys and any(key != request_id for key in keys):
-                    return tool_result(envelope(command,"REQUEST_CONFLICT","tool and CLI request_id differ"))
-                if not keys:
-                    args += ["--request-id", request_id]
             try:
                 payload = mcp_operations.submit(command, [*command.split(), *args], path, request_id)
             except (OSError, ValueError) as error:
@@ -190,7 +190,7 @@ def create_server(default_config=None):
                        config: str | None = None, request_id: RequestId | None = None) -> CallToolResult:
         """Fallback for commands without a dedicated typed tool; use afxx_help for arguments.
         Arguments are tokens, never shell code. Short commands return the CLI envelope directly.
-        Long commands: env init/update/check, deploy, replay, fuzz run, client start/stop/restart, issue verify.
+        Long commands: env init/update/check, deploy, fuzz run, client start/stop/restart, issue verify.
         Long commands require request_id and return an invocation receipt; query afxx_operation_status.
         Conflicting explicit config paths are rejected; server config is only a default.
         """
@@ -212,21 +212,24 @@ def create_server(default_config=None):
         return await dispatch("deploy",args,config,request_id)
 
     @server.tool()
-    async def afxx_replay(deploy_job_id: JobId, request_id: RequestId, seed: str | None = None,
+    async def afxx_replay(request_id: RequestId, seed: str | None = None,
                          seeds_file: str | None = None, dump: bool = False,
                          upload: bool | None = None, config: str | None = None) -> CallToolResult:
-        """Replay with a deployment reference; specify exactly one of seed or local seeds_file.
-        Returns an invocation receipt, then a replay job_id in the CLI result. Not managed replay.
+        """Submit to the existing AFX managed client; specify exactly one of seed or local seeds_file.
+        Every call starts a new AFXX run in request_id, without a deployment reference.
+        AFX owns execution resources and environment. dump=True and upload overrides are unsupported.
+        Query with afxx_run replay list/show/compare and --request-id, optionally --run/--runs.
+        Returns request_id, run and submission state; not an MCP operation receipt.
         """
         if (seed is None) == (seeds_file is None):
             return tool_result(envelope("replay","INVALID_ARGUMENT","provide exactly one of seed or seeds_file"))
-        args = ["--job-id",deploy_job_id] + (["--seed",seed] if seed is not None else ["--seeds-file",str(Path(seeds_file).expanduser().resolve())])
+        args = (["--seed",seed] if seed is not None else ["--seeds-file",str(Path(seeds_file).expanduser().resolve())])
         if dump: args += ["--dump"]
         if upload is not None: args += ["--upload" if upload else "--no-upload"]
         return await dispatch("replay",args,config,request_id)
 
     @server.tool()
-    async def afxx_job_status(job_id: JobId, config: str | None = None,
+    async def afxx_job_status(request_id: JobId, config: str | None = None,
                               wait: bool = False, since: str | None = None,
                               timeout: Annotated[float, Field(gt=0, le=50)] | None = None,
                               attempt: str | None = None, fields: list[str] | None = None) -> CallToolResult:
@@ -240,7 +243,7 @@ def create_server(default_config=None):
             return tool_result(envelope("status", "INVALID_ARGUMENT", "attempt cannot be empty"))
         if fields is not None and (not fields or not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", f) for f in fields)):
             return tool_result(envelope("status", "INVALID_ARGUMENT", "fields must be nonempty dotted field names"))
-        args = ["--job-id", job_id]
+        args = ["--request-id", request_id]
         if wait: args += ["--wait", "--timeout", str(timeout if timeout is not None else 30)]
         if since is not None: args += ["--since", since]
         if attempt is not None: args += ["--attempt", attempt]

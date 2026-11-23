@@ -94,7 +94,8 @@
 | `issue verify-check` | `afxx_issue(action="verify-check")` + `afxx_run` | 只读聚合验证、关联回归、任务摘要及生命周期判断；可等待，不续租 |
 | `issue wait` | 仅通过 `afxx_run` | 轮询上述状态；不是新的平台 API |
 | `client status/start/stop/restart` | `afxx_client` + `afxx_run` | 经 NPU 连接调用 AFX managed client，管理已有唯一 client；不是 /api/clients 的写接口 |
-| `deploy` / `replay` | `afxx_deploy` / `afxx_replay` + `afxx_run` | 同步、构建、安装及直接 replay；不等价于平台 retest submit |
+| `deploy` / `replay` | `afxx_deploy` / `afxx_replay` + `afxx_run` | 同步、构建、安装及 managed replay；replay 按 request_id 分组，每次新建 run，不依赖 deploy，不等价于平台 retest submit |
+| `replay list/show/compare` | `afxx_run` | 本地流程索引与远端执行记录查询、按 seed/backend/shape 对比；不调用平台 API |
 | `status` | `afxx_job_status` + `afxx_run` | 查询 AFXX 远端 job、attempt/fields 或等待变化，不查询平台 model job |
 | `env init/update/check`、`doctor` | 仅通过 `afxx_run` | 环境初始化、更新和检查 |
 | `fuzz run/status/stop` | 仅通过 `afxx_run` | AFX 随机测试执行与控制 |

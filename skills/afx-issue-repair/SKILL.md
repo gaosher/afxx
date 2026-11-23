@@ -17,7 +17,7 @@ description: 使用 AFXX 领取 AFX 平台 issue，复现并定位 graph-autofus
 - 远端 verify/续租使用 `platform.remote_token_file`，AFX client 使用 `platform.client_token_file`。配置 platform 后，env init 会复用或隐藏输入本地 token，并在环境成功后同步；异步 init 用 status/wait 完成同步。修复时复用已有凭据，遇到缺失或鉴权错误报告具体字段；不要为领取问题重建环境或重新签发 token。
 - 每个目标 NPU 环境只维护一个 AFX client，跨 issue、worktree 和部署轮次复用同一 client home 与身份。不要为单个问题初始化新 client、生成新 source_id 或另起旧版客户端；发现重复身份时先核对已有进程和平台记录，不自动删除平台记录。
 - 一个问题的工作记录保留 issue_id、租约到期时间、基线/候选 deploy job_id、request-id、verify round_no、AF 包身份及证据路径。复用任务已有笔记或修复总结，不另造状态数据库、不复制 wheel/源码快照。
-- 使用 MCP 时优先调用结构化工具。deploy/replay、client start/stop/restart 和 issue verify 等长操作先选定工具级 request_id，提交后用 afxx_operation_status 查询同一记录；completed 只表示 CLI 调用结束，必须检查 data.result.ok，再从其中取得 job_id/round_no 或 client running 状态。MCP 断开后继续查询原 request_id；unknown 时先核对远端，不换键盲目重试。restart 的调用记录成功后才进入 verify，不因收到 pending 回执就继续。
+- 使用 MCP 时优先调用结构化工具。deploy、client start/stop/restart 和 issue verify 等长操作先选定工具级 request_id，提交后用 afxx_operation_status 查询同一记录；completed 只表示 CLI 调用结束，必须检查 data.result.ok，再从其中取得 job_id/round_no 或 client running 状态。MCP 断开后继续查询原 request_id；unknown 时先核对远端，不换键盲目重试。restart 的调用记录成功后才进入 verify，不因收到 pending 回执就继续。
 - 网络重试复用同一请求与 request-id；源码/配置改变后使用新的 deploy request-id。一个候选 job 的 verify 重试取回原回执，不能用它开始新的修复轮次。
 
 ## 1. 领取 issue
@@ -51,7 +51,7 @@ TASK_CONFIG="/absolute/path/to/task-config.yaml"
 
 以下示例按 worktree 任务配置编写；未创建任务配置且使用默认配置时，省略 `--config "$TASK_CONFIG"`。
 
-基线和候选复现均使用 `replay --dump`，由 AFXX 开启本次任务的定位采集，无需修改 `replay.dump`。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集和读取证据。
+基线和候选复现均使用 `replay`，统一进入已有 AFX managed client。当前逐任务 dump 接口未接通，`--dump` 会明确报错；先读取结果中的诊断信息，若定位必须依赖 IR/kernel dump，报告缺失，不绕过工具另起旧执行进程。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集和读取证据。
 
 ### 2.1 Deploy 主线基线
 
@@ -67,16 +67,16 @@ afxx deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <基线�
 
 - 该 job 已成功，源码清单对应本次固定的 upstream/master SHA，且没有额外源码差异；仅有相同 HEAD 或包版本号不足以证明一致。
 - deploy 的来源、源码清单和安装身份仍可读取核验；远端当前加载的 AF 路径及 pyautofuse.so 哈希与该 job 的 result.json 一致，没有被后续安装替换。
-- 该部署属于本次目标 NPU、CANN 安装目录和运行环境，能够通过 replay 的部署与环境检查。
+- 该部署属于本次目标 NPU、CANN 安装目录和运行环境；由 agent 核对来源，replay 本身不检查 deploy 引用。
 
 记录复用的 job ID、SHA 和核验依据；任一条件不满足或无法确认，都重新部署主线基线。不能用来源不明的远端现有包代替。
 
 ### 2.2 等待基线部署成功
 
 ```bash
-afxx status --config "$TASK_CONFIG" --job-id <基线deploy-job-id>
+afxx status --config "$TASK_CONFIG" --request-id <基线deploy-job-id>
 # 尚未结束时，用上次返回的 cursor 等待变化；超时继续查询同一 job。
-afxx status --config "$TASK_CONFIG" --job-id <基线deploy-job-id> \
+afxx status --config "$TASK_CONFIG" --request-id <基线deploy-job-id> \
   --wait --since <cursor> --timeout 30
 ```
 
@@ -84,18 +84,18 @@ afxx status --config "$TASK_CONFIG" --job-id <基线deploy-job-id> \
 
 ### 2.3 Replay 复现原问题
 
-对 nnsmith seed，明确引用刚完成或已核验复用的基线 deploy job：
+对 nnsmith seed，使用本次修复的流程 request_id。replay 由 managed client 执行；先确认需要的基线已安装、client 已刷新，不能以提交进程的环境替代 worker 身份：
 
 ```bash
-afxx replay --config "$TASK_CONFIG" --dump --job-id <基线deploy-job-id> --seed <原始seed> --request-id <复现请求ID>
-afxx status --config "$TASK_CONFIG" --job-id <replay-job-id>
+afxx replay --config "$TASK_CONFIG" --seed <原始seed> --request-id <流程request-id>
+afxx replay show --config "$TASK_CONFIG" --request-id <流程request-id> --run <run>
 ```
 
-记录 replay 返回的新 job ID，后续查询使用 replay job，不能与基线 deploy job 混淆。
+记录 replay 返回的 request_id/run，所有修复轮次复用同一流程 request_id；每次调用都会执行，不需要 --new-run。用 replay list 查看历史、replay show --run N 查看指定一次、replay compare --runs N M 对比。MCP 的 afxx_replay 直接返回 request_id/run，通过 afxx_run 调用上述查询，不查 operation_status。断线先查历史，不能盲目重复 replay。
 
 若 replay 在准备阶段退出，先按[准备阶段失败](references/replay-evidence.md#准备阶段失败)定位出错的子命令。目标 seed 实际执行且失败阶段和关键诊断与平台记录吻合后，才能报告已复现。
 
-用 status/wait 等到终态并取得 evidence_path，再按 [复现证据清单](references/replay-evidence.md#replay-自动返回的证据) 读取必要的本地报告、日志和 dump。缺失证据注明原因；保持原 seed、输入和精度语义。
+用 replay show 查询指定 run 直到终态并取得 evidence_path，再按 [复现证据清单](references/replay-evidence.md#replay-自动返回的证据) 读取必要的本地报告、日志和 dump。缺失证据注明原因；保持原 seed、输入和精度语义。
 
 非 nnsmith 用例使用平台给出的复现方式和目标环境，不强行传入 AFXX seed 接口。失败无法复现时，先比较环境、包版本和用例条件；明确“未复现”及缺失证据，不直接宣称修复。
 
@@ -112,10 +112,10 @@ afxx status --config "$TASK_CONFIG" --job-id <replay-job-id>
 
 ```bash
 afxx deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <本轮唯一部署请求ID>
-afxx status --config "$TASK_CONFIG" --job-id <deploy-job-id>
+afxx status --config "$TASK_CONFIG" --request-id <deploy-job-id>
 ```
 
-部署和 replay 等待时，保存首次 status 的 cursor，使用 `status --config "$TASK_CONFIG" --wait --since <cursor> --timeout 30`（带同一 job ID）；无变化只得到 timeout 回执，继续沿用返回 cursor，不重复读取概要或提交任务。无 cursor 时该命令以首次查询为基线。replay 终态直接返回 state、evidence_path、failures，不再需要 cursor。event=attention 表示状态不确定，应排查进程。等待 job state=success，并保留部署记录和源码/包身份。构建或安装失败先处理对应失败，不进入 verify。候选部署后可用同一原始 seed 快速 replay；平台验证仍是下一步独立验收。
+部署等待时，保存首次 status 的 cursor，使用 `status --config "$TASK_CONFIG" --wait --since <cursor> --timeout 30`（带同一 job ID）；无变化只得到 timeout 回执，继续沿用返回 cursor，不重复读取概要或提交任务。无 cursor 时该命令以首次查询为基线。replay 使用 replay show 查询并取得 evidence_path，不使用部署的 cursor。event=attention 表示状态不确定，应排查进程。等待 job state=success，并保留部署记录和源码/包身份。构建或安装失败先处理对应失败，不进入 verify。候选部署后可用同一原始 seed 快速 replay；平台验证仍是下一步独立验收。
 
 环境一致性 WARNING 不会自动阻止 AFXX；agent 应读懂差异，并确认候选环境能用于该问题。不能把带差异的配置视为精确复现证据。平台复测执行期间不覆盖它使用的候选环境。
 

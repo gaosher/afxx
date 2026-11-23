@@ -1,4 +1,4 @@
-"""Current AFX seed, direct replay and result-query boundary."""
+"""Current AFX seed and result-query boundary."""
 
 import json
 import os
@@ -60,117 +60,21 @@ def normalized_seeds(output):
     return values
 
 
-def replay_environment(results, dump):
-    env = {
-        "AUTOFUSEX_HOME": str(results),
-        "TORCHINDUCTOR_CACHE_DIR": str(results / "cache"),
-        "AUTOFUSE_DFX_FLAGS": "--mlir_codegen_config=mlir;",
-    }
-    if dump:
-        graph_dir = results / "dump" / "ge"
-        graph_dir.mkdir(parents=True, exist_ok=True)
-        env.update({
-            "TORCH_COMPILE_DEBUG": "1",
-            "DUMP_GE_GRAPH": "1",
-            "DUMP_GRAPH_LEVEL": "1",
-            "DUMP_GRAPH_PATH": str(graph_dir),
-            "ASCEND_GLOBAL_LOG_LEVEL": "0",
-            "ASCEND_SLOG_PRINT_TO_STDOUT": "1",
-        })
-        env["AUTOFUSE_DFX_FLAGS"] += (
-            "--codegen_compile_debug=true;--debug_dir=" + str(results / "dump") + ";"
-        )
-    return env
-
-
-def replay_command(interpreter, options, normalized, results, batch):
-    seeds = [seed for seed, _ in normalized]
-    common = [
-        "--save",
-        "--database",
-        str(results / "results.sqlite"),
-        "--scheduling",
-        "staged",
-        "--compile-threads",
-        str(options["compile_threads"]),
-    ]
-    if batch:
-        args = [
-            "run",
-            *seeds,
-            "--data-dir",
-            str(results),
-            "--fg",
-            "--fixed-resources",
-            "--workers",
-            str(options["workers"]),
-            "--timeout",
-            str(options["batch_timeout_seconds"]),
-        ]
-        for device in options["devices"]:
-            args.extend(["--device", device])
-    else:
-        require(len(seeds) == 1, "single replay requires exactly one seed")
-        args = ["replay", seeds[0], "--device", options["devices"][0]]
-    return [interpreter, "-m", "autofusex", "fuzz", *args, *common]
-
-
-def upload_command(interpreter, results, settings):
-    """Upload saved attempts once; do not start a resident client or claim retests."""
-    return [
-        interpreter, "-m", "afx", "platform", "client", "once",
-        "--endpoint", settings["url"],
-        "--token-file", settings.get("client_token_file") or settings["remote_token_file"],
-        "--results", str(results / "results.sqlite"),
-        "--state", str(results / "platform-sync.sqlite"),
-    ]
-
-
-def read_results(interpreter, database, capture):
-    """Use AFX's direct-job result CLI, including pagination and attempt details."""
-    require(database.is_file(), "missing results database")
-    command = [
-        interpreter,
-        "-m",
-        "autofusex",
-        "fuzz",
-        "maintenance",
-        "results",
-        str(database),
-    ]
-    attempts, after = [], 0
-    while True:
-        page = json.loads(capture([*command, "--limit", "200", "--after", str(after)]))
-        require(
-            isinstance(page, dict) and isinstance(page.get("items"), list),
-            "invalid AFX results page",
-        )
-        for row in page["items"]:
-            detail = json.loads(capture([*command, "--attempt", row["id"]]))
-            require(detail["id"] == row["id"], "AFX attempt identity mismatch")
-            attempts.append(detail)
-        cursor = page["next_cursor"]
-        if cursor is None:
-            return attempts
-        require(
-            type(cursor) is int and cursor > after and page["items"],
-            "invalid AFX results cursor",
-        )
-        after = cursor
-
-
-def summarize(attempts, normalized):
-    expected = {
-        (seed, backend): count
-        for seed, count in normalized
-        for backend in ("cpu", "af-mlir")
-    }
+def summarize(attempts, normalized, *, expected=None):
+    if expected is None:
+        expected = {
+            (seed, backend): count
+            for seed, count in normalized
+            for backend in ("cpu", "af-mlir")
+        }
     actual = {}
     for attempt in attempts:
         key = (attempt["seed"], attempt["backend"])
         require(key not in actual, "duplicate result: " + str(key))
         actual[key] = attempt
     errors = []
+    if {seed for seed, _ in expected} != {seed for seed, _ in normalized}:
+        errors.append("requested seed coverage mismatch")
     if set(actual) != set(expected):
         errors.append("seed/backend coverage mismatch")
     for key, count in expected.items():

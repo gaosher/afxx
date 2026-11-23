@@ -402,143 +402,40 @@ def test_toolchain_parent_directory_is_allowed(cfg, tmp_path):
     assert workflow_config.config(path)["build"]["llvm_build_dir"] == str(tmp_path)
 
 
-# Adapter tests cover dump switches and command details. Here cover resource routing,
-# AFX drift, and each failure phase without multiplying independent dimensions.
-@pytest.mark.parametrize("batch,auto,failure,afx_changed,dump", [
-    pytest.param(False, False, None, False, False, id="single-explicit"),
-    pytest.param(False, True, None, False, True, id="single-auto-dump"),
-    pytest.param(True, False, None, False, True, id="batch-explicit-dump"),
-    pytest.param(True, True, None, False, False, id="batch-auto"),
-    pytest.param(False, False, None, True, True, id="single-updated-afx"),
-    pytest.param(True, True, None, True, True, id="batch-updated-afx"),
-    pytest.param(False, False, "seed", False, False, id="seed-error"),
-    pytest.param(True, True, "seed", False, True, id="seed-error-dump"),
-    pytest.param(False, False, "execution", False, False, id="execution-error"),
-    pytest.param(True, True, "execution", False, True, id="execution-error-dump"),
-    pytest.param(False, False, "database", False, False, id="database-error"),
-    pytest.param(True, True, "database", False, True, id="database-error-dump"),
-])
-def test_replay_uses_private_results_and_existing_cli(
-    cfg, tmp_path, monkeypatch, batch, auto, failure, afx_changed, dump
-):
-    cfg["replay"]["dump"] = dump
-    if auto:
-        cfg["replay"]["devices"] = cfg["replay"]["workers"] = "auto"
-    monkeypatch.setattr(workflow_execution, "record_environment", lambda c, job: {"af": {"debugger": {"sha256": "updated"}} if afx_changed else {}})
-    job = tmp_path / "replay-job"
+@pytest.mark.parametrize("failure", [None, "launch", "replay"])
+def test_replay_managed_worker_routing(cfg, tmp_path, monkeypatch, failure):
+    job = tmp_path / "managed-job"
     job.mkdir()
-    deployment = {
-        "state": "success",
-        "job": "deployed",
-        "environment": cfg["connection"]["environment"],
-        "install_root": cfg["runtime"]["install_root"],
-        "runtime": {},
-    }
-    dep = tmp_path / "result.json"
-    workflow_common.write(dep, deployment)
-    workflow_common.write(tmp_path / "registry.json", deployment)
-    monkeypatch.setattr(workflow_runtime, "registry", lambda c: tmp_path / "registry")
-    monkeypatch.setattr(workflow_runtime, "environment", lambda c: {})
-    monkeypatch.setattr(workflow_runtime, "venv_preflight", lambda *a: {})
-    monkeypatch.setattr(
-        workflow_runtime,
-        "probe",
-        lambda *a: pytest.fail("replay must reuse the captured AF probe"),
-    )
-
-    def capture(argv, **kwargs):
-        assert kwargs["env"] == {"AUTOFUSEX_HOME": str(Path(cfg["replay"]["results_dir"]) / job.name)}
-        if "device_count" in argv[2]:
-            return "2"
-        if failure == "seed":
-            raise ValueError("invalid seed")
-        if "maintenance" in argv:
-            if "--attempt" in argv:
-                return json.dumps(
-                    next(row for row in results() if row["id"] == argv[-1])
-                )
-            return json.dumps(
-                dict(items=[{"id": row["id"]} for row in results()], next_cursor=None)
-            )
-        return json.dumps([["123", 3]])
-
-    monkeypatch.setattr(workflow_common, "capture", capture)
-    commands = []
-
-    def execute(argv, **kwargs):
-        commands.append(argv)
-        if failure == "execution":
-            raise OSError("process failed")
-        if failure == "database":
-            return subprocess.CompletedProcess(argv, 1)
-        assert kwargs["env"]["AUTOFUSEX_HOME"] == str(
-            Path(cfg["replay"]["results_dir"]) / job.name
-        )
-        recorded = workflow_common.read(job / "result.json")["replay_environment"]
-        assert all(kwargs["env"][key] == value for key, value in recorded.items())
-        assert (recorded.get("TORCH_COMPILE_DEBUG") == "1") == dump
-        if dump:
-            assert Path(recorded["DUMP_GRAPH_PATH"]).is_dir()
-        path = Path(argv[argv.index("--database") + 1])
-        assert not (path.parent / "sync.json").exists()
-        path.touch()
-        return subprocess.CompletedProcess(argv, 0)
-
-    monkeypatch.setattr(workflow_common, "run", execute)
-    request = {
-        "deployment": str(dep),
-        "seeds": ["123"],
-        "batch": batch,
-        "upload": False,
-    }
+    monkeypatch.setattr(workflow_execution, "record_environment", lambda *a: {"af": {"sha": "submitter"}})
+    monkeypatch.setattr(workflow_runtime, "environment", lambda *a: {"EXISTING_HOME": "retained"})
+    def run(argv, **kwargs):
+        assert argv == [workflow_runtime.python(cfg), "-m", "afxx.afx.managed_replay", str(job)]
+        assert kwargs["env"] == {"EXISTING_HOME": "retained"}
+        if failure == "launch":
+            raise OSError("launch failed")
+        workflow_common.update_record(job / "result.json", passed=failure is None,
+                                     error_code="AFX_TEST_ERROR", error="replay failed")
+        return subprocess.CompletedProcess(argv, 2 if failure else 0)
+    monkeypatch.setattr(workflow_common, "run", run)
     if failure:
         with pytest.raises((ValueError, OSError)):
-            workflow_execution.replay(cfg, job, request)
-        report = workflow_common.read(job / "result.json")
-        assert "evidence" in report and report["evidence"]["dump_enabled"] == dump
-        assert report["state"] == "failed" and report["resources"]["devices"]
-        assert report["error"]
-        if failure == "database":
-            assert report["exit_code"] == 1
-        assert not (job / "replay-resources.json").exists()
-        return
-    workflow_execution.replay(cfg, job, request)
-    assert len(commands) == 1
-    assert ("--workers" in commands[0]) is batch
-    assert ("--timeout" in commands[0]) is batch
-    assert workflow_common.read(job / "result.json")["resources"]["devices"] == (
-        ["npu:0", "npu:1"]
-        if auto and batch
-        else cfg["replay"]["devices"]
-        if not auto and batch
-        else ["npu:0"]
-    )
-    if auto:
-        assert workflow_common.read(job / "result.json")["resources"]["workers"] == (
-            2 if batch else 1
-        )
-    assert workflow_common.read(job / "result.json")["evidence"]["files"]
-    assert workflow_common.read(job / "result.json")["passed"]
-    assert workflow_common.read(job / "result.json")["upload"] == "disabled"
+            workflow_execution.replay(cfg, job, {})
+    else:
+        workflow_execution.replay(cfg, job, {})
+    report = workflow_common.read(job / "result.json")
+    assert report["state"] == ("failed" if failure else "success")
+    assert report["execution_mode"] == "managed"
+    assert "runtime" not in report  # submitting interpreter is not the execution identity
+    assert "evidence" in report
 
 
-def test_deployment_drift_blocks_replay(cfg, tmp_path, monkeypatch):
-    dep = tmp_path / "result.json"
-    workflow_common.write(
-        dep,
-        {
-            "state": "success",
-            "job": "old",
-            "environment": cfg["connection"]["environment"],
-            "install_root": cfg["runtime"]["install_root"],
-            "runtime": {},
-        },
-    )
-    workflow_common.write(tmp_path / "registry.json", {"state": "invalid"})
-    monkeypatch.setattr(workflow_runtime, "registry", lambda c: tmp_path / "registry")
-    with pytest.raises(ValueError, match="no longer current"):
-        workflow_execution.replay(cfg, tmp_path, {"deployment": str(dep)})
-    assert not Path(cfg["replay"]["results_dir"]).exists()
+def test_replay_does_not_require_deployment(cfg, tmp_path, monkeypatch):
+    monkeypatch.setattr(workflow_runtime, "current_deployment", lambda *a: pytest.fail("deployment dependency"))
+    def capture(*args):
+        raise RuntimeError("actual environment capture reached")
+    monkeypatch.setattr(workflow_execution, "record_environment", capture)
+    with pytest.raises(RuntimeError, match="actual environment capture reached"):
+        workflow_execution.replay(cfg, tmp_path, {"request_id": "repair", "run": 1})
 
 
 def test_dependency_report_collects_import_failures_and_prefix(cfg, monkeypatch):
@@ -1127,13 +1024,17 @@ def test_replay_dump_override_is_frozen_without_editing_config(cfg, tmp_path, co
     path.write_text(original)
     result = subprocess.run(
         [sys.executable, "-m", "afxx.cli", "replay", "--config", str(path),
-         "--deployment", "/remote/result.json", "--seed", "F0SQR0HF7D3QEYXA8AE8QS7927Z", "--dry-run",
+         "--request-id", "repair", "--seed", "F0SQR0HF7D3QEYXA8AE8QS7927Z", "--dry-run",
          *(["--dump"] if flag else [])], capture_output=True, text=True,
     )
-    assert result.returncode == 0, result.stdout + result.stderr
-    data = json.loads(result.stdout)["data"]
-    frozen = yaml.safe_load((Path(data["local"]) / "config.yaml").read_text())
-    assert frozen["replay"]["dump"] is expected
+    if expected:
+        assert result.returncode == 2
+        assert json.loads(result.stdout)["error"]["code"] == "MANAGED_REPLAY_UNSUPPORTED"
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        data = json.loads(result.stdout)["data"]
+        frozen = yaml.safe_load((Path(data["local"]) / "config.yaml").read_text())
+        assert frozen["replay"]["dump"] is False
     assert path.read_text() == original
 
 

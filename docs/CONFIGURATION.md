@@ -26,7 +26,7 @@ afxx config init --source /absolute/path/graph-autofusion --output ~/.config/afx
 ├── graph-autofusion/
 │   └── build/                    编译缓存
 ├── workflow-state/<job-id>/      任务配置、日志、报告及 AF run 包
-├── workflow-results/<job-id>/    独立 replay 结果
+├── workflow-results/<job-id>/    本次 AFXX replay 证据目录
 └── workflow-env-state/           当前环境清单、锁文件和共享 wheel
 ```
 
@@ -44,7 +44,7 @@ afxx config init --source /absolute/path/graph-autofusion --output ~/.config/afx
 | `replay.devices` / `workers` | auto，查询可见逻辑 NPU，每卡一个 worker |
 | `replay.compile_threads` / `batch_timeout_seconds` / `dump` | 4 / 300 / false |
 | `sync.include_ignored_paths` / `exclude_paths` | 空列表，相对于源码根目录的精确路径 |
-| `upload.enabled` | false；replay 上传使用 `platform.url` 和远端 client token |
+| `upload.enabled` | false；managed replay 上传由已有 AFX client 管理 |
 
 Python 3.11 由工具自动准备；LLVM 和 LLD 仍由远端提供。修改 workflow_root 只影响路径推导；创建新环境应使用新目录，已有 venv 和编译缓存包含绝对路径。
 
@@ -136,9 +136,9 @@ AFXX 的 token 需要 `issue` 权限。远端独立运行的 AFX 客户端使用
 
 deploy/replay/check 在远端开始执行时保留提交的 `config.yaml`，并现场采集 `environment.json`：Python 版本和解释器路径、已安装 Python 包版本及安装来源（包含安装元数据已有的包哈希）、CANN 路径和版本、实际加载的 AF 库路径和哈希。采集失败的项目写入 errors，不使用旧 init/update 清单补作当前值。
 
-日常任务不再比对配置与 init/update 清单，也不要求缓存 wheel 或旧锁文件存在。必需依赖无法加载、replay 指定的 AF 部署被替换仍会报错。环境快照用于追溯，不能单凭版本列表保证精确重建；未发布 wheel 的原始来源可能需要另外保存。
+日常任务不再比对配置与 init/update 清单，也不要求缓存 wheel 或旧锁文件存在。必需依赖无法加载仍会报错；replay 不再引用部署记录。环境快照用于追溯，不能单凭版本列表保证精确重建；未发布 wheel 的原始来源可能需要另外保存。
 
-日常 deploy 检查构建与安装验证所需依赖；replay 检查用例执行及 seed/results 接口。全量依赖一致性检查（pip check）在 init/update 和 env check 中执行。replay 在本次任务持锁期间复用环境快照的 AF 探测结果。
+日常 deploy 检查构建与安装验证所需依赖；replay 检查用例执行及 seed/results 接口。全量依赖一致性检查（pip check）在 init/update 和 env check 中执行。managed replay 的 environment.json/submitter_runtime 是提交端记录，执行环境来自 attempt.contexts.environment 并保存于 execution_environments。
 
 安装 AF 前只检查本次包安装清单中的共享库是否被可见进程加载，不阻止仅使用其他 CANN 库的进程。init/update 共用入口在目标 venv 已存在时仍检查整个 venv 的占用。
 
@@ -150,23 +150,15 @@ deploy/replay/check 在远端开始执行时保留提交的 `config.yaml`，并�
 
 MCP 默认读取同一固定配置；需要覆盖时，通过调用的 `config` 字段、`arguments` 中的 `--config`，或启动 `afxx mcp --config ...` 提供。
 
-## Replay 定位采集
+## Managed replay 与定位证据
 
-普通 replay 默认 `replay.dump: false`。修复 skill 使用 `replay --dump` 为本次任务开启以下选项，无需修改配置或更新 Python 环境：
+AFXX replay 统一调用已有 client 的 `afx replay`。客户端目录按 AFX 的 AUTOFUSEX_HOME/active-home/default-home 解析；不创建独立 replay client。
 
-```yaml
-replay:
-  dump: true
-```
+设备、后端、线程和上传策略由 AFX 决定。`replay.devices` 仍可用于 client 初始化，但 replay.devices/workers/compile_threads/batch_timeout_seconds 不作为逐任务参数传给 managed replay。实际配置保存于 result.json/managed_specs。
 
-开启后，AFXX 设置 AF `codegen_compile_debug=true`（debug_dir 为结果目录下的 dump/）、`TORCH_COMPILE_DEBUG=1`、`DUMP_GE_GRAPH=1`、`DUMP_GRAPH_LEVEL=1`、`DUMP_GRAPH_PATH=<结果目录>/dump/ge`，以及 `ASCEND_GLOBAL_LOG_LEVEL=0`、`ASCEND_SLOG_PRINT_TO_STDOUT=1`。实际注入参数记录于 job 的 result.json/replay_environment；dump 参数仅传给实际执行用例的 AFX 进程及其子进程。设备自动探测、seed 解析、结果查询和上传沿用基础环境及本次任务的 AUTOFUSEX_HOME。
+当前 `--dump` 或 `replay.dump: true` 返回 MANAGED_REPLAY_UNSUPPORTED；`--upload`、`--no-upload` 或 upload.enabled=true 同样拒绝，因为不能覆盖常驻 client 的上传策略。配置中的 dump/upload.enabled 保持 false。AFXX 不回退旧执行入口，不假装已打开 dump。
 
-AF 图、逐 pass MLIR 和生成代码位于结果目录 dump/；GE 图位于 dump/ge/；PyTorch 调试产物默认位于 job 目录 torch_compile_debug/，Inductor cache 位于结果目录 cache/。日志保留在 job.log 和 AFX worker 日志中。只有执行到对应阶段才产生文件，具体产物取决于后端及安装版本。
-
-`--save` 始终保存 AFX 结果到 results.sqlite，与 dump 独立。dump 不自动保存所有输入/输出张量，也不强制同步运行或禁用缓存。性能验收应关闭 dump，避免调试开销影响结论。完整收集标准见 [复现证据清单](../skills/afx-issue-repair/references/replay-evidence.md)。
-
-replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 下载覆盖结果目录和 job 的诊断目录，不受报告摘录的 128 文件/文本长度限制；不跟随符号链接，不下载含凭据的 sync.json，跳过原因记在 evidence.json。开启 dump 不保证每个阶段都生成文件。
-
+终态使用 `replay show --request-id ID --run N` 下载本次 AFXX 报告和日志，并返回 evidence_path。不复制整个共享 client 数据库和其他任务的缓存。结果库中的诊断信息不等于持久 IR/kernel dump；完整定位采集等待 AFX 的逐任务接口，见[复现证据清单](../skills/afx-issue-repair/references/replay-evidence.md)。
 
 ## Init 平台凭据准备
 

@@ -14,7 +14,7 @@ MCP 优先使用结构化工具。长操作先选定 request_id，再提交并�
 | fuzz run | 远端 job 调用官方 AFX，返回 job ID | status 为 success 仅代表进程正常结束；用 fuzz status 查询用例结果 |
 | fuzz status / fuzz stop | 调用该 job 的 AFX 官方命令 | status 返回队列信息；stop 仅确认停止请求，随后轮询任务终态 |
 | evidence list / evidence read | 本地通过 npussh 只读远端证据 | ok=true；按 next_offset 续读，检查 sha256 和未关联标记 |
-| replay | 提交远端任务，返回 job ID | data.state=success 且 data.replay.passed=true |
+| replay | 每次提交新 run，返回 request_id/run | replay show 的 data.state=success 且 data.passed=true |
 | check | 提交远端依赖检查 | 任务 success、依赖检查通过 |
 | status | 查询远端 job | 查询成功后继续检查返回的任务 state |
 | issue claim / issue preview / issue renew | 本地直接调用平台 HTTPS | 保存领取响应、预览或续租到期时间 |
@@ -26,7 +26,7 @@ MCP 优先使用结构化工具。长操作先选定 request_id，再提交并�
 
 fuzz 使用固定的 `<workflow_root>/fuzz/`，一次只允许一个运行。重复启动的任务报 `FUZZ_ALREADY_RUNNING`；`FUZZ_JOB_REPLACED` 表示该目录已由新 job 接管，应使用新 job ID 控制。历史记录仍用普通 status 查询。
 
-命令之间使用 data.job_id、data.issue_id、data.round_no，分别传给 --job-id、--issue-id、--round-no。replay 使用成功 deploy 的 --job-id。各命令的 --help 列出接受的参数。
+命令之间使用 data.job_id、data.issue_id、data.round_no，分别传给 --job-id、--issue-id、--round-no。status 使用 --request-id；replay 使用分组 request_id 和自动 run 序号，不引用 deploy。各命令的 --help 列出接受的参数。
 
 所有公共命令 stdout 返回一个 JSON 对象，日志走 stderr。--help 返回帮助文本。
 
@@ -44,7 +44,7 @@ fuzz 使用固定的 `<workflow_root>/fuzz/`，一次只允许一个运行。重
 
 ```bash
 afxx deploy --request-id deploy-001
-afxx status --job-id <job-id>
+afxx status --request-id <job-id>
 ```
 
 提交前生成并保存 request-id，允许 1–128 位字母、数字、下划线、点或连字符。init/update/deploy/replay/check/fuzz run 支持此参数。省略时自动生成，但若整个响应丢失，将无法从响应取回该值。
@@ -53,9 +53,17 @@ afxx status --job-id <job-id>
 
 init/update 默认跟随远端日志，Ctrl+C 停止本地查看，任务仍可通过 status 查询。
 
+## Replay 分组
+
+单 seed/批量均调用 `afx replay`，不创建第二个 client。环境、设备、线程和上传由 AFX 管理。dump 和上传覆盖当前返回 MANAGED_REPLAY_UNSUPPORTED。结果按本次 task/attempt ID 关联，不使用同 seed 的最新结果代替。任意 seed 是否支持交给实际 AFX 服务处理，不做本地历史门禁。
+
+`replay --request-id repair-F152 --seed <seed>` 每次提交到现有 AFX managed client，自动递增 run。无部署引用或 `--new-run`。查询使用 `replay list/show/compare --request-id repair-F152`；show 默认最近一次，可指定 `--run 1`；compare 必须指定 `--runs 1 2`。MCP 的 afxx_replay 同样每次执行，直接返回 request_id/run；历史查询通过 afxx_run，传对应 CLI 参数，不查询 operation_status。
+
+每次执行冻结提交配置并从本次 attempt 保存执行环境；组索引保存在 local.state_dir/replay-groups/。提交中断后用 list/show 确认远端状态，重新 replay 会创建新 run。对比区分变化、缺失、新增和无法对齐，不将未执行判为通过。
+
 ## 幂等与恢复
 
-同一 local.state_dir 中，request-id 绑定首次请求的配置、参数、job ID 和源码清单。相同请求重试复用原任务；配置或参数变化返回 REQUEST_CONFLICT。dry-run 与实际提交使用不同 ID。修改源码后应创建新请求。
+除 replay 外，同一 local.state_dir 中，request-id 绑定首次请求的配置、参数、job ID 和源码清单。相同请求重试复用原任务；配置或参数变化返回 REQUEST_CONFLICT。dry-run 与实际提交使用不同 ID。修改源码后应创建新请求。
 
 本地请求锁保护冻结过程，远端启动锁和 launch.json 保护任务启动。上传中断可以重试同一请求，已确认远端启动后可清理本地快照。远端同步校验完成后清理远端快照。source.json 保存清理状态及源码清单。
 
@@ -68,7 +76,7 @@ afxx issue claim --issue-id F152 --request-id claim-001
 afxx issue preview --issue-id F152
 afxx issue renew --issue-id F152
 afxx deploy --issue-id F152 --request-id deploy-001
-afxx status --job-id <job-id>
+afxx status --request-id <job-id>
 afxx issue verify --issue-id F152 --job-id <job-id>
 afxx issue verify-check --issue-id F152 --round-no <round_no> --wait --timeout 30
 ```
@@ -79,7 +87,7 @@ verify 与 deploy 分离，在远端采集实际 AF 身份，核对部署后提�
 
 status/wait 以 verify 返回的 round_no 定位验证，跟踪同一候选包的下一轮 regress。只有相关轮次全部通过才返回 outcome=passed。wait 遇到失败和 invalid 均返回 PLATFORM_VERIFICATION_FAILED；等待超时可继续查同一轮次。查询保留历史轮次身份，不使用其他修复的结果。
 
-AFX >= 0.2.3 managed client 在 NPU 常驻。verify 前由官方 init/start/status 初始化、启动并确认执行会话运行，需配置 platform.client_token_file。start 会读取平台配置，可能开始 fuzz。AFXX 不自动 stop/restart；环境变化需要刷新进程时使用同一环境、同一 data-dir 的 afx restart。replay 保留独立入口，不享有 managed 队列调度或抢占优先级。部署、更新仍执行环境占用检查。
+AFX >= 0.2.3 managed client 在 NPU 常驻。verify 前由官方 init/start/status 初始化、启动并确认执行会话运行，需配置 platform.client_token_file。start 会读取平台配置，可能开始 fuzz。AFXX 不自动 stop/restart；环境变化需要刷新进程时使用同一环境、同一 data-dir 的 afx restart。replay 统一进入 managed 队列，派发优先级由 AFX 决定。部署、更新仍执行环境占用检查。
 
 ## 错误处理
 
@@ -167,31 +175,31 @@ MCP 对应 command 为 `evidence list` / `evidence read`，参数与 CLI 相同�
 
 ```bash
 # 运行中返回概要和 cursor；replay 终态自动下载全量现场。
-afxx status --config "$CONFIG" --job-id <job-id>
+afxx status --config "$CONFIG" --request-id <job-id>
 # 默认 attempt 只返回简短身份、状态、错误摘要；详细字段需显式选择。
-afxx status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id>
-afxx status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id> \
+afxx status --config "$CONFIG" --request-id <内部执行目录ID> --attempt <attempt-id>
+afxx status --config "$CONFIG" --request-id <内部执行目录ID> --attempt <attempt-id> \
   --fields error_stage,error_summary,diagnostic_view.summary,shape_results
 # 独立读取环境或图，避免把整份 attempt 放入上下文。
-afxx status --config "$CONFIG" --job-id <replay-job-id> --attempt <attempt-id> \
+afxx status --config "$CONFIG" --request-id <内部执行目录ID> --attempt <attempt-id> \
   --fields contexts.environment
 # 只等待变化/终态；没有变化时返回小型 timeout 回执。
-afxx status --config "$CONFIG" --job-id <job-id> --wait --since <cursor> --timeout 30
+afxx status --config "$CONFIG" --request-id <job-id> --wait --since <cursor> --timeout 30
 ```
 
-replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。
+新 replay 到达 success/failed 后，本地 `replay show --request-id ID --run N` 自动将本次 AFXX 报告、日志和证据清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回 request_id、run、state、passed、result、environment 和 evidence_path。异步提交后仍需调用 replay show，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。
 
 非 replay 终态仍返回概要和 cursor；`--attempt` 与 `--wait` 互斥。完整本地文件布局、缓存和失败重试规则见 [复现证据清单](../skills/afx-issue-repair/references/replay-evidence.md#replay-自动返回的证据)。按需提取文件内容，不要整体读取到上下文。
 
 attempt 默认字段为 id、seed_short、backend、status、error_stage、error_summary（缺失的可选字段省略），字符串最多 512 字符，裁剪字段列于 attempt_truncated_fields。`--fields` 使用逗号分隔的字段或字典点路径，例如 metadata.graph、contexts.environment、diagnostic_view.summary、shape_results；选择结果以完整字段路径为键。显式选择的大字段会完整返回，按定位需要逐次读取。未知执行返回 ATTEMPT_NOT_FOUND，未知字段返回 ATTEMPT_FIELD_NOT_FOUND，不默默忽略拼写错误。
 
-wait 默认 30 秒、允许 (0,50] 秒，CLI/MCP 均返回一次 JSON。携带 since 时与上次概要比较；未传时以首次查询为基线等待下一次变化。event=changed/terminal 返回新概要和 cursor；replay 终态直接返回上述 evidence_path 和 failures，不附 event/cursor；state=unknown 返回 event=attention，需处理进程不确定状态。没有变化时只返回 job_id、event=timeout、cursor，表示等待窗口结束而非任务失败。下一次继续使用返回的 cursor；不重复提交原任务。网络请求本身的超时独立于等待窗口。
+wait 默认 30 秒、允许 (0,50] 秒，CLI/MCP 均返回一次 JSON。携带 since 时与上次概要比较；未传时以首次查询为基线等待下一次变化。event=changed/terminal 返回新概要和 cursor；replay 终态直接返回上述 evidence_path 和 failures，不附 event/cursor；state=unknown 返回 event=attention，需处理进程不确定状态。没有变化时只返回 request_id、event=timeout、cursor，表示等待窗口结束而非任务失败。下一次继续使用返回的 cursor；不重复提交原任务。网络请求本身的超时独立于等待窗口。
 
-公开任务 ID 统一为 job_id，提交结果不重复返回 job 别名或嵌套 status。state 与 passed 含义不同；外层 ok 只表示查询成功。概要和字段投影在远端完成，避免轮询传回大图/日志。replay 终态优先读取本地证据文件；evidence list/read 保留为按需远端查询入口。
+status 的公开参数和输出使用 request_id；replay 查询使用 request_id/run。其他尚未迁移的 evidence、fuzz 和 issue verify 接口仍使用 job_id。state 与 passed 含义不同；外层 ok 只表示查询成功。概要和字段投影在远端完成，避免轮询传回大图/日志。replay 终态优先读取本地证据文件；evidence list/read 保留为按需远端查询入口。
 
 ### Job 记录入口
 
-通过 status 获取摘要，使用 status --full 获取 result.json、environment.json 和 platform.json 详情。result.json 按任务类型保存部署身份、replay 结果或环境更新/回滚结果；CANN 安装过程位于 result.json 的 cann 字段。Python 依赖检查位于 environment.json 的 dependencies 字段。请求、启动及状态继续独立保存，以保持不同进程的写入边界。
+通过 status 获取部署摘要；replay show 返回复跑结果、environment 及 evidence_path，可按需读取完整本地报告。result.json 按任务类型保存部署身份、replay 结果或环境更新/回滚结果；CANN 安装过程位于 result.json 的 cann 字段。Python 依赖检查位于 environment.json 的 dependencies 字段。请求、启动及状态继续独立保存，以保持不同进程的写入边界。
 
 使用 `client status/start/stop/restart` 管理远端唯一 client，CLI/MCP 行为一致。部署前先查状态，需要暂停或刷新时在已有授权范围内调用 stop/restart；不要通过 SSH 拼接 kill 或启动第二个 client。stop 超时先查 status，不把请求已接受视为退出完成。start 可能启动 fuzz，平台派发问题仍待定位；保留操作前状态，按用户约定恢复。详见 [生命周期接口](afxx-commands.md#client-生命周期)。
 

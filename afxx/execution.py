@@ -180,161 +180,34 @@ def frozen_config(c, manifest):
 
 
 def replay(c, job, request):
+    from afxx.afx import managed_replay
+    managed_replay.validate_options(c, request)
     results = Path(c["replay"]["results_dir"]) / job.name
-    attempts = []
+    results.mkdir(parents=True, exist_ok=True)
     try:
         with (
             workflow_common.lock(workflow_runtime.venv_lock(c), shared=True),
-            workflow_common.lock(
-                workflow_runtime.registry(c).with_suffix(".lock"), shared=True
-            ),
+            workflow_common.lock(workflow_runtime.registry(c).with_suffix(".lock"), shared=True),
         ):
-            deployment = workflow_runtime.current_deployment(c, request["deployment"])
-            environment_snapshot = record_environment(c, job)
-            workflow_common.update_record(
-                job / "result.json",
-                state="running",
-                passed=False,
-                deployment=deployment["job"],
+            snapshot = record_environment(c, job)
+            workflow_common.update_record(job / "result.json", state="running", passed=False,
+                request_id=request.get("request_id"), run=request.get("run"),
+                submitter_runtime=snapshot.get("af"), execution_mode="managed")
+            completed = workflow_common.run(
+                [workflow_runtime.python(c), "-m", "afxx.afx.managed_replay", str(job)],
+                env=workflow_runtime.environment(c), cwd=job, check=False,
             )
-            env = workflow_runtime.environment(c)
-            workflow_runtime.venv_preflight(c, env, job, "replay")
-            workflow_common.require(
-                "af" in environment_snapshot,
-                "AF environment probe failed; see environment.json",
-            )
-            runtime = environment_snapshot["af"]
-            expected_runtime = deployment["runtime"]
-            workflow_common.require(
-                {k: v for k, v in runtime.items() if k != "debugger"}
-                == {k: v for k, v in expected_runtime.items() if k != "debugger"},
-                "installed AF runtime changed",
-            )
-            if runtime.get("debugger") != expected_runtime.get("debugger"):
-                print(
-                    f"WARNING: AFX changed since deployment: "
-                    f"expected={expected_runtime.get('debugger')!r}, "
-                    f"actual={runtime.get('debugger')!r}; continuing replay",
-                    file=sys.stderr,
-                    flush=True,
-                )
-            workflow_common.update_record(job / "result.json", runtime=runtime)
-            results = Path(c["replay"]["results_dir"]) / job.name
-            results.mkdir(parents=True, mode=0o700)
-            replay_env = replay_adapter.replay_environment(results, c["replay"]["dump"])
-            env = {**env, "AUTOFUSEX_HOME": replay_env["AUTOFUSEX_HOME"]}
-            workflow_common.update_record(job / "result.json", replay_environment=replay_env)
-            workflow_common.phase(job, "replay_prepare", results_dir=str(results))
-            options = dict(c["replay"])
-            if options["devices"] == "auto":
-                count = replay_adapter.visible_device_count(
-                    workflow_common.capture(
-                        replay_adapter.device_command(workflow_runtime.python(c)),
-                        env=env,
-                        cwd=job,
-                        timeout=60,
-                    )
-                )
-                options["devices"] = ["npu:" + str(index) for index in range(count)]
-            if options["workers"] == "auto":
-                options["workers"] = len(options["devices"])
-            if not request["batch"]:
-                options["devices"] = options["devices"][:1]
-                options["workers"] = 1
-            workflow_common.update_record(
-                job / "result.json", resources=options, results_dir=str(results)
-            )
-            normalized = replay_adapter.normalized_seeds(
-                workflow_common.capture(
-                    replay_adapter.seed_command(
-                        workflow_runtime.python(c), request["seeds"]
-                    ),
-                    env=env,
-                    cwd=job,
-                )
-            )
-            upload = (
-                request["upload"]
-                if request["upload"] is not None
-                else c["upload"]["enabled"]
-            )
-            upload_command = replay_adapter.upload_command(
-                workflow_runtime.python(c), results, workflow_config.platform_settings(c)
-            ) if upload else None
-            command = replay_adapter.replay_command(
-                workflow_runtime.python(c),
-                options,
-                normalized,
-                results,
-                request["batch"],
-            )
-            workflow_common.phase(job, "replay", results_dir=str(results))
-            # --save persists evidence locally; uploading is a separate explicit command.
-            completed = workflow_common.run(command, env={**env, **replay_env}, cwd=job, check=False)
-            workflow_common.update_record(
-                job / "result.json", exit_code=completed.returncode
-            )
-            attempts = replay_adapter.read_results(
-                workflow_runtime.python(c),
-                results / "results.sqlite",
-                lambda argv: workflow_common.capture(argv, env=env, cwd=job),
-            )
-            report = replay_adapter.summarize(attempts, normalized)
-            report.update(
-                resources=options,
-                deployment=deployment["job"],
-                results_dir=str(results),
-                exit_code=completed.returncode,
-                upload="pending" if upload else "disabled",
-            )
-            report = workflow_common.update_record(job / "result.json", **report)
-            if upload:
-                workflow_common.update_record(job / "result.json", upload="failed")
-                try:
-                    sent = workflow_common.run(
-                        upload_command, env=env, cwd=job, check=False,
-                        stdout=subprocess.PIPE, text=True,
-                    )
-                except (OSError, subprocess.SubprocessError) as error:
-                    raise workflow_common.WorkflowError(
-                        "UPLOAD_FAILED", "AFX one-shot upload could not complete; see job.log"
-                    ) from error
-                report["upload_exit_code"] = sent.returncode
-                report["upload"] = "failed"
-                if sent.returncode == 0:
-                    try:
-                        receipt = json.loads(sent.stdout)
-                        workflow_common.require(
-                            isinstance(receipt, dict)
-                            and type(receipt.get("uploaded")) is int
-                            and receipt["uploaded"] >= 0
-                            and isinstance(receipt.get("client_id"), str),
-                            "invalid AFX upload receipt",
-                        )
-                        report["upload_receipt"] = receipt
-                        report["upload"] = "completed"
-                    except (ValueError, TypeError):
-                        report["upload_error"] = "invalid AFX upload receipt; see job.log"
-            workflow_common.update_record(job / "result.json", **report)
-            workflow_common.require(
-                completed.returncode == 0 and report["passed"],
-                "retest failed; see result.json",
-            )
-            workflow_common.require_code(
-                report["upload"] != "failed", "UPLOAD_FAILED",
-                "AFX one-shot upload failed; see result.json and job.log",
-            )
+            report = workflow_common.read(job / "result.json")
+            workflow_common.require_code(completed.returncode == 0 and report.get("passed"),
+                report.get("error_code", "AFX_REPLAY_FAILED"), report.get("error", "managed replay did not complete"))
             workflow_common.update_record(job / "result.json", state="success")
     except BaseException as error:
-        workflow_common.update_record(
-            job / "result.json", state="failed", error=str(error)
-        )
+        workflow_common.update_record(job / "result.json", state="failed", error=str(error))
         raise
     finally:
-        # Collection failures must not hide the original replay failure.
         try:
-            evidence = replay_adapter.collect_evidence(job, results, c["replay"]["dump"])
-            replay_adapter.associate_evidence(evidence, attempts)
+            evidence = replay_adapter.collect_evidence(job, results, False)
+            replay_adapter.associate_evidence(evidence, workflow_common.read(job / "result.json").get("attempts", []))
         except OSError as error:
             evidence = {"errors": [{"error": str(error)}], "files": []}
         workflow_common.update_record(job / "result.json", evidence=evidence)

@@ -76,81 +76,6 @@ def test_duplicate_and_unexpected_attempts():
     assert not adapter.summarize([], [["123", 3]])["passed"]
 
 
-def test_result_cli_pagination_and_details(tmp_path):
-    database = tmp_path / "results.sqlite"
-    database.touch()
-    calls = []
-
-    def capture(argv):
-        calls.append(argv)
-        assert argv[:7] == [
-            "/python",
-            "-m",
-            "autofusex",
-            "fuzz",
-            "maintenance",
-            "results",
-            str(database),
-        ]
-        if "--attempt" in argv:
-            return json.dumps(next(row for row in results() if row["id"] == argv[-1]))
-        return json.dumps(
-            dict(items=[{"id": "cpu"}], next_cursor=200)
-            if argv[-1] == "0"
-            else dict(items=[{"id": "af-mlir"}], next_cursor=None)
-        )
-
-    assert adapter.read_results("/python", database, capture) == results()
-    assert len(calls) == 4
-    assert "--after" in calls[2] and calls[2][-1] == "200"
-
-
-def test_missing_database_not_created(tmp_path):
-    path = tmp_path / "missing.sqlite"
-    with pytest.raises(ValueError, match="missing"):
-        adapter.read_results(
-            "/python", path, lambda argv: pytest.fail("must not query")
-        )
-    assert not path.exists()
-
-
-@pytest.mark.parametrize("cursor", [0, -1, True, "200"])
-def test_bad_result_cursor_rejected(tmp_path, cursor):
-    path = tmp_path / "results.sqlite"
-    path.touch()
-
-    def capture(argv):
-        return json.dumps(
-            results()[0]
-            if "--attempt" in argv
-            else dict(items=[{"id": "cpu"}], next_cursor=cursor)
-        )
-
-    with pytest.raises(ValueError, match="cursor"):
-        adapter.read_results("/python", path, capture)
-
-
-@pytest.mark.parametrize("batch", [False, True])
-def test_command_contract(batch, tmp_path):
-    options = {
-        "compile_threads": 4,
-        "workers": 2,
-        "batch_timeout_seconds": 300,
-        "devices": ["npu:0", "npu:1"],
-    }
-    normalized = [["123", 8], ["456", 1]] if batch else [["123", 2]]
-    argv = adapter.replay_command(
-        "/venv/bin/python", options, normalized, tmp_path, batch
-    )
-    assert argv[:4] == ["/venv/bin/python", "-m", "autofusex", "fuzz"]
-    assert argv[4] == ("run" if batch else "replay")
-    assert argv[argv.index("--database") + 1] == str(tmp_path / "results.sqlite")
-    assert argv[argv.index("--scheduling") + 1] == "staged"
-    assert ("--timeout" in argv) == batch
-    assert argv.count("--device") == (2 if batch else 1)
-    assert "--save" in argv
-
-
 def test_seed_command_uses_installed_current_contract(tmp_path):
     package = tmp_path / "autofusex/fuzz/client/generation"
     package.mkdir(parents=True)
@@ -207,10 +132,6 @@ def test_requested_seeds_and_environment(tmp_path):
     assert adapter.requested_seeds(None, seeds) == ["123", "456"]
     with pytest.raises(ValueError):
         adapter.requested_seeds("invalid seed", None)
-    env = adapter.replay_environment(tmp_path, True)
-    assert env["AUTOFUSEX_HOME"] == str(tmp_path)
-    assert "AUTOFUSEDBG_HOME" not in env
-    assert "--debug_dir=" in env["AUTOFUSE_DFX_FLAGS"]
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "true", "[]", ""])
@@ -222,32 +143,6 @@ def test_auto_devices_rejects_no_or_invalid_devices(value):
 def test_auto_devices_uses_logical_runtime_count():
     assert adapter.visible_device_count("driver diagnostic\n2\n") == 2
     assert "torch.npu.device_count()" in adapter.device_command("/target/python")[2]
-
-
-@pytest.mark.parametrize("dump", [False, True])
-def test_diagnostics_are_scoped_to_replay(tmp_path, monkeypatch, dump):
-    import os
-    monkeypatch.setenv("AUTOFUSE_DFX_FLAGS", "parent-flags")
-    before = dict(os.environ)
-    results = tmp_path / "results"
-    env = adapter.replay_environment(results, dump)
-    assert dict(os.environ) == before
-    assert env["TORCHINDUCTOR_CACHE_DIR"] == str(results / "cache")
-    if dump:
-        assert env["TORCH_COMPILE_DEBUG"] == "1"
-        assert env["DUMP_GE_GRAPH"] == "1"
-        assert env["DUMP_GRAPH_LEVEL"] == "1"
-        assert Path(env["DUMP_GRAPH_PATH"]) == results / "dump" / "ge"
-        assert Path(env["DUMP_GRAPH_PATH"]).is_dir()
-        assert "--codegen_compile_debug=true;" in env["AUTOFUSE_DFX_FLAGS"]
-        assert f"--debug_dir={results / 'dump'};" in env["AUTOFUSE_DFX_FLAGS"]
-        assert env["ASCEND_GLOBAL_LOG_LEVEL"] == "0"
-        assert env["ASCEND_SLOG_PRINT_TO_STDOUT"] == "1"
-    else:
-        assert not results.exists()
-        assert set(env) == {"AUTOFUSEX_HOME", "TORCHINDUCTOR_CACHE_DIR", "AUTOFUSE_DFX_FLAGS"}
-    assert "ASCEND_LAUNCH_BLOCKING" not in env
-    assert "TORCHINDUCTOR_FORCE_DISABLE_CACHES" not in env
 
 
 def test_evidence_returns_text_and_missing_directories(tmp_path):

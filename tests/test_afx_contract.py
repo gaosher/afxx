@@ -61,7 +61,9 @@ def test_real_seed_and_saved_result_cli(afx, tmp_path, count):
                 ],
             )
         )
-    attempts = d.read_results(sys.executable, repo.path, capture)
+    from autofusex.fuzz.client.storage.queries import ResultQueries
+    queries = ResultQueries(repo.path)
+    attempts = [queries.detail(row["id"]) for row in queries.page()["items"]]
     assert d.summarize(attempts, normalized)["passed"]
 
 
@@ -243,38 +245,22 @@ def test_official_fuzz_command_contract(afx, cfg, tmp_path):
         assert parser.parse_args([action, "--data-dir", str(tmp_path)]).command == action
 
 
-def test_official_one_shot_upload_contract(afx, platform_cfg, tmp_path, monkeypatch, capsys):
-    from autofusex.platform.cli import build_parser
-    from autofusex.platform import client
-    from afxx.afx.replay import upload_command
-
-    argv = upload_command(sys.executable, tmp_path, platform_cfg["platform"])
-    args = build_parser().parse_args(argv[4:])
-    assert args.action == "once" and not args.retest
-    assert args.token_file == platform_cfg["platform"]["remote_token_file"]
-    assert args.results == str(tmp_path / "results.sqlite")
-    assert args.state == str(tmp_path / "platform-sync.sqlite")
-    calls = []
-
-    class Client:
-        def __init__(self, api, results, state, **kwargs):
-            calls.append((results, str(state)))
-
-        def upload_once(self):
-            calls.append("upload")
-            # Official CLI counts processed statuses, not just accepted uploads.
-            return {"accepted": "accepted", "skipped": "skipped"}
-
-        def heartbeat(self):
-            calls.append("heartbeat")
-            return {"client_id": "client", "update_to": "9.9"}
-
-    monkeypatch.setattr(client, "API", lambda *a: object())
-    monkeypatch.setattr(client, "Client", Client)
-    assert client.main(args) == 0
+def test_managed_replay_command_contract(afx, tmp_path, monkeypatch, capsys):
+    from autofusex import cli
+    from autofusex.fuzz.daemon.management import modern_cli
+    from autofusex.fuzz.daemon import runtime
+    from afxx.afx.managed_replay import command
     import json
-    assert json.loads(capsys.readouterr().out) == {"uploaded": 2, "client_id": "client", "update_to": "9.9"}
-    assert calls == [(args.results, args.state), "upload", "heartbeat"]
+    calls = []
+    monkeypatch.setattr(modern_cli, "_legacy", lambda args: {})
+    def request(home, body):
+        calls.append((home, body))
+        return {"run_id": "session", "task_ids": ["task"], "state": "queued"}
+    monkeypatch.setattr(runtime, "request", request)
+    argv = command(sys.executable, ["arbitrary-seed"], tmp_path)
+    assert cli.main(argv[3:]) == 0
+    assert calls == [(tmp_path, {"action": "replay", "seeds": ["arbitrary-seed"]})]
+    assert json.loads(capsys.readouterr().out)["data"]["state"] == "queued"
 
 
 def test_managed_client_facade_contract(afx, tmp_path, monkeypatch, capsys):

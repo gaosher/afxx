@@ -46,20 +46,21 @@ def test_typed_preview_uses_cli_tokens(monkeypatch):
 
 def test_typed_replay_and_generic_have_same_invocation(monkeypatch):
     seen=[]
-    def submit(*args):
+    async def invoke(args):
         seen.append(args)
-        return {'ok':True,'data':{'request_id':args[-1]},'error':None}
-    monkeypatch.setattr(op,'submit',submit)
+        return 0, json.dumps({'ok': True, 'data': {'request_id': 'r', 'run': len(seen)}, 'error': None})
+    monkeypatch.setattr(m, 'invoke', invoke)
+    monkeypatch.setattr(op, 'submit', lambda *a: pytest.fail('replay must not reuse MCP receipt'))
     server=m.create_server('/config')
-    call(server,'afxx_replay',dict(deploy_job_id='a'*32,request_id='r',seed='ABC',dump=True,upload=False))
-    call(server,'afxx_run',dict(command='replay',request_id='r',arguments=['--job-id','a'*32,'--seed','ABC','--dump','--no-upload']))
+    call(server,'afxx_replay',dict(request_id='r',seed='ABC',dump=True,upload=False))
+    call(server,'afxx_run',dict(command='replay',request_id='r',arguments=['--seed','ABC','--dump','--no-upload']))
     assert seen[0]==seen[1]
-    assert seen[0][1][-2:]==['--request-id','r']
+    assert seen[0][-2:]==['--request-id','r']
 
 
 def test_mutually_exclusive_replay_fields(monkeypatch):
     monkeypatch.setattr(op,'submit',lambda *a: pytest.fail('must not submit'))
-    result=call(m.create_server(),'afxx_replay',dict(deploy_job_id='a'*32,request_id='r',seed='ABC',seeds_file='/tmp/seeds'))
+    result=call(m.create_server(),'afxx_replay',dict(request_id='r',seed='ABC',seeds_file='/tmp/seeds'))
     assert result.structuredContent['error']['code']=='INVALID_ARGUMENT'
 
 
@@ -80,9 +81,9 @@ def test_typed_restart_never_submits_verify(monkeypatch):
 def test_schema_has_types_and_constraints():
     tools={t.name:t for t in asyncio.run(m.create_server().list_tools())}
     schema=tools['afxx_replay'].inputSchema
-    assert set(schema['required'])=={'deploy_job_id','request_id'}
+    assert set(schema['required'])=={'request_id'}
     assert schema['properties']['dump']['type']=='boolean'
-    assert schema['properties']['deploy_job_id']['pattern']==m.JOB_ID_PATTERN
+    assert 'deploy_job_id' not in schema['properties']
     assert 'afxx_operation_status' in tools
 
 
@@ -353,7 +354,7 @@ def test_case_spec_rejects_pagination(monkeypatch,args):
 def test_job_status_rejects_ignored_options(monkeypatch,args):
     async def forbidden(*a): pytest.fail('must not invoke')
     monkeypatch.setattr(m,'invoke',forbidden)
-    assert call(m.create_server(),'afxx_job_status',dict(args,job_id='a'*32)).isError
+    assert call(m.create_server(),'afxx_job_status',dict(args,request_id='a'*32)).isError
 
 
 @pytest.mark.parametrize('args,tokens', [
@@ -362,10 +363,10 @@ def test_job_status_rejects_ignored_options(monkeypatch,args):
 ])
 def test_job_status_extended_queries(monkeypatch,args,tokens):
     async def invoke(argv):
-        assert argv==['status','--config','/config','--job-id','a'*32]+tokens
+        assert argv==['status','--config','/config','--request-id','a'*32]+tokens
         return 0,json.dumps({'ok':True,'data':{},'error':None})
     monkeypatch.setattr(m,'invoke',invoke)
-    assert not call(m.create_server('/config'),'afxx_job_status',dict(args,job_id='a'*32)).isError
+    assert not call(m.create_server('/config'),'afxx_job_status',dict(args,request_id='a'*32)).isError
 
 
 def test_consolidated_tool_inventory():
@@ -395,14 +396,33 @@ def test_verify_check_mcp_constraints(monkeypatch,options):
 
 def test_readable_job_id_forwarded(monkeypatch):
     async def invoke(args):
-        assert args==['status','--config','/config','--job-id','deploy-F152-001']
+        assert args==['status','--config','/config','--request-id','deploy-F152-001']
         return 0,json.dumps({'ok':True,'data':{},'error':None})
     monkeypatch.setattr(m,'invoke',invoke)
-    assert not call(m.create_server('/config'),'afxx_job_status',{'job_id':'deploy-F152-001'}).isError
+    assert not call(m.create_server('/config'),'afxx_job_status',{'request_id':'deploy-F152-001'}).isError
 
 
 @pytest.mark.parametrize('identity',['.','..','requests','../bad'])
 def test_mcp_job_id_reserved_names(identity):
     from mcp.server.fastmcp.exceptions import ToolError
     with pytest.raises(ToolError):
-        call(m.create_server(),'afxx_job_status',{'job_id':identity})
+        call(m.create_server(),'afxx_job_status',{'request_id':identity})
+
+
+@pytest.mark.parametrize('command,options', [('replay list', []), ('replay show', ['--run', '2']), ('replay compare', ['--runs', '1', '2'])])
+def test_replay_history_mcp_forwards_group(monkeypatch, command, options):
+    async def invoke(args):
+        assert args == [*command.split(), '--config', '/config', *options, '--request-id', 'repair']
+        return 0, json.dumps({'ok': True, 'data': {}, 'error': None})
+    monkeypatch.setattr(m, 'invoke', invoke)
+    monkeypatch.setattr(op, 'submit', lambda *a: pytest.fail('history must not create operations'))
+    assert not call(m.create_server('/config'), 'afxx_run', dict(command=command, arguments=options, request_id='repair')).isError
+
+
+@pytest.mark.parametrize('command', ['replay', 'replay show', 'status'])
+def test_replay_and_status_reject_conflicting_group(monkeypatch, command):
+    async def forbidden(*a):
+        pytest.fail('conflicting request must not execute')
+    monkeypatch.setattr(m, 'invoke', forbidden)
+    result = call(m.create_server(), 'afxx_run', dict(command=command, request_id='one', arguments=['--request-id', 'two']))
+    assert result.structuredContent['error']['code'] == 'REQUEST_CONFLICT'
