@@ -20,8 +20,8 @@ def alive(pid):
         return False
 
 
-def other_clients(home):
-    """Detect other resident AFX homes owned by the current remote user."""
+def live_clients():
+    """Discover current-user resident clients; a supervisor and its child count once."""
     found = []
     for proc in Path('/proc').glob('[0-9]*'):
         try:
@@ -41,11 +41,24 @@ def other_clients(home):
             if not directory:
                 env = dict(part.split('=', 1) for part in (proc/'environ').read_text().split('\0') if '=' in part)
                 directory = env.get('AUTOFUSEX_HOME')
-            if legacy or not directory or Path(directory).resolve() != home.resolve():
-                found.append({'pid': int(proc.name), 'home': directory, 'legacy': legacy})
+            parent = int((proc/'stat').read_text().rsplit(')', 1)[1].split()[1])
+            found.append({'pid': int(proc.name), 'parent': parent,
+                          'home': str(Path(directory).resolve()) if directory else None,
+                          'legacy': legacy, 'supervisor': daemon and 'supervise' in argv})
         except (OSError, ValueError, IndexError):
             continue
-    return found
+    return [item for item in found if not (item['supervisor'] and any(
+        child['parent'] == item['pid'] and not child['legacy'] and not child['supervisor']
+        and child['home'] == item['home'] for child in found))]
+
+
+def selected_client():
+    clients = live_clients()
+    if len(clients) > 1:
+        raise ClientError('PLATFORM_CLIENT_CONFLICT', 'multiple live AFX clients: ' + json.dumps(clients))
+    if clients and (clients[0]['legacy'] or not clients[0]['home']):
+        raise ClientError('PLATFORM_CLIENT_UNTRACKED', 'live client is legacy or its home cannot be determined')
+    return clients[0] if clients else None
 
 
 def execute(settings, run, legacy):
@@ -54,9 +67,10 @@ def execute(settings, run, legacy):
     timeout = settings.get('timeout', 300)
     deadline = time.monotonic() + timeout
     prefix = ['--data-dir', str(home)]
-    conflicts = other_clients(home)
-    if conflicts and action != 'status':
-        raise ClientError('PLATFORM_CLIENT_CONFLICT', 'another resident AFX client exists: ' + json.dumps(conflicts))
+    selected = selected_client()
+    if selected and Path(selected['home']).resolve() != home.resolve():
+        raise ClientError('PLATFORM_CLIENT_CONFLICT', 'live client changed during lifecycle operation; query status again')
+    conflicts = []
 
     def status():
         try:
@@ -87,29 +101,20 @@ def execute(settings, run, legacy):
     if action == 'status':
         return view(current)
 
-    # Validate start/restart settings before stopping a healthy existing client.
-    if action in ('start', 'restart'):
-        path = home/'client.json'
+    if action == 'restart' and not current:
+        raise ClientError('PLATFORM_CLIENT_NOT_RUNNING', 'no live client to restart; use client start')
+
+    # Existing client configuration belongs to AFX; workflow settings only seed a new home.
+    if action == 'start' and not (home/'client.json').exists():
         token = Path(settings['token_file']).read_text().strip() if settings.get('token_file') else None
-        if settings.get('token_file') and (not token or any(c.isspace() for c in token)):
-            raise ClientError('CONFIG_INVALID', 'invalid platform.client_token_file')
-        if path.exists():
-            client = json.loads(path.read_text())
-            expected = {'mode':'managed','endpoint':settings['endpoint'],'devices':settings['devices']}
-            if token is not None:
-                expected['token'] = token
-            if any(client.get(k) != v for k,v in expected.items()):
-                raise ClientError('PLATFORM_CLIENT_MISMATCH', 'managed client endpoint, devices or token differs from configuration')
-        else:
-            if not token:
-                raise ClientError('CONFIG_INVALID', 'fill platform.client_token_file to initialize AFX client')
-            # An old installation may have used hostname; do not silently replace its identity.
-            if (home/'platform-client.json').exists() and not (home/'config.json').exists():
-                raise ClientError('PLATFORM_CLIENT_MIGRATION_REQUIRED', 'legacy client identity requires explicit migration before managed init')
-            argv = prefix + ['init','--endpoint',settings['endpoint'],'--token',token]
-            for device in settings['devices']:
-                argv += ['--device',device]
-            run(argv)
+        if not token or any(c.isspace() for c in token):
+            raise ClientError('CONFIG_INVALID', 'fill platform.client_token_file to initialize AFX client')
+        if (home/'platform-client.json').exists() and not (home/'config.json').exists():
+            raise ClientError('PLATFORM_CLIENT_MIGRATION_REQUIRED', 'legacy client identity requires explicit migration before managed init')
+        argv = prefix + ['init','--endpoint',settings['endpoint'],'--token',token]
+        for device in settings['devices']:
+            argv += ['--device',device]
+        run(argv)
 
     if action in ('stop', 'restart') and current:
         daemon_pid = current.get('pid')

@@ -292,13 +292,15 @@ def test_managed_client_facade_contract(afx, tmp_path, monkeypatch, capsys):
     assert sum(argv[2] == "init" for argv in calls) == 1
     assert json.loads((home / "client.json").read_text())["platform"]["retest"] is True
 
-    # Existing configuration is not silently overwritten and no session starts.
+    # Existing AFX configuration remains authoritative when workflow settings differ.
     before = len(calls)
+    saved = (home / "client.json").read_text()
     request["devices"] = ["npu:1"]
     monkeypatch.setattr(sys, "argv", ["adapter", json.dumps(request)])
     exec(compile(MANAGED_START, "managed_adapter", "exec"), {"__name__": "__main__"})
-    assert json.loads(capsys.readouterr().out)["error"] == "PLATFORM_CLIENT_MISMATCH"
-    assert len(calls) == before
+    assert json.loads(capsys.readouterr().out)["state"] == "running"
+    assert len(calls) == before + 1
+    assert (home / "client.json").read_text() == saved
     request["devices"] = ["npu:0"]
     monkeypatch.setattr(sys, "argv", ["adapter", json.dumps(request)])
     def failed_run(argv):

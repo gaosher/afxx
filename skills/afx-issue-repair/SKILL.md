@@ -121,13 +121,13 @@ afxx status --config "$TASK_CONFIG" --request-id <deploy-job-id>
 
 ## 5. 提交并等待 verify
 
-每轮候选 deploy 成功后，首次提交该候选的 verify 前，先重启同一配置对应的唯一 client，让驻留执行进程重新加载当前安装的 AF 包：
+每轮候选 deploy 成功后，首次提交该候选的 verify 前，先查询 client status；存在唯一存活 client 时重启其实际 home，让驻留执行进程重新加载当前安装的 AF 包。没有存活 client 时使用 client start，多个存活 client 报错时停止流程，不自行挑选或强杀：
 
 ```bash
 afxx client restart --config "$TASK_CONFIG" --timeout 300
 ```
 
-只有 restart 返回 `ok=true` 且 `data.state=running` 才提交下面的 verify。失败或超时时先用 `client status` 检查并处理，不继续提交，不手工 kill 或新建 client。此重启是本修复流程的必要步骤，包含等待在途任务结束；已有完整修复流程授权时无需重复确认。重启可能按平台配置恢复 fuzz，但不代表复测领取或平台派发已经正常。
+只有 restart（或无存活 client 时的 start）返回 `ok=true` 且 `data.state=running` 才提交下面的 verify。失败或超时时先用 `client status` 检查并处理，不继续提交，不手工 kill 或新建 client。此重启是本修复流程的必要步骤，包含等待在途任务结束；已有完整修复流程授权时无需重复确认。重启可能按平台配置恢复 fuzz，但不代表复测领取或平台派发已经正常。
 
 同一候选的 verify 已提交或响应丢失时，先查询已有轮次或按原请求幂等重试，不为等待、轮询或提交重试再次重启，避免打断在途复测。
 
@@ -135,7 +135,7 @@ afxx client restart --config "$TASK_CONFIG" --timeout 300
 afxx issue verify --config "$TASK_CONFIG" --issue-id <issue-id> --job-id <deploy-job-id>
 ```
 
-verify 在远端核对候选 AF 身份，确保环境中唯一的 AFX client 启动，再向平台提交；客户端 token 由配置的 `platform.client_token_file` 提供。保存返回的 verify round_no，`submitted` 只表示提交成功，client/session running 也不证明平台已派发或本机已领取。平台复测派发问题当前待平台侧定位；排队、领取和执行结果分别取证，不通过启动额外 client、重复提交 verify 或修改 AFX 领取逻辑绕过。
+verify 在远端核对候选 AF 身份，确保环境中唯一的 AFX client 启动，再向平台提交；已有 client 沿用 AFX 保存的凭据，首次创建时才使用 `platform.client_token_file`。保存返回的 verify round_no，`submitted` 只表示提交成功，client/session running 也不证明平台已派发或本机已领取。平台复测派发问题当前待平台侧定位；排队、领取和执行结果分别取证，不通过启动额外 client、重复提交 verify 或修改 AFX 领取逻辑绕过。
 
 ```bash
 afxx issue verify-check --config "$TASK_CONFIG" --issue-id <issue-id> --round-no <verify-round-no> --wait --timeout 30

@@ -8,6 +8,7 @@ from afxx.afx import launcher as l
 
 @pytest.fixture
 def launch_env(platform_cfg, monkeypatch):
+    monkeypatch.setattr(l, "selected_client", lambda: None)
     c = platform_cfg
     c["platform"]["client_token_file"] = "/tokens/client.token"
     c["replay"]["devices"] = ["npu:0", "npu:1"]
@@ -68,3 +69,28 @@ def test_invalid_response_fails_closed(launch_env, monkeypatch):
     with pytest.raises(w.WorkflowError) as error:
         l.ensure_started(c, {})
     assert error.value.code == "PLATFORM_CLIENT_CONTROL_FAILED"
+
+
+@pytest.mark.parametrize('action', ['status', 'start', 'stop', 'restart'])
+def test_existing_live_home_wins_and_needs_no_platform_config(launch_env, monkeypatch, tmp_path, action):
+    c, calls = launch_env
+    home = tmp_path/'live'
+    home.mkdir()
+    (home/'client.json').write_text('{}')
+    c.pop('platform')
+    monkeypatch.setattr(l, 'selected_client', lambda: {'home': str(home), 'pid': 12})
+    monkeypatch.setattr(l, 'client_home', lambda c: pytest.fail('must use live home'))
+    result = l.control(c, action)
+    assert result['home'] == str(home)
+    request = json.loads(calls[0][0][-1])
+    assert request['home'] == str(home)
+    assert request['token_file'] is None and request['devices'] is None
+
+
+def test_no_live_restart_does_not_resolve_or_create_home(launch_env, monkeypatch):
+    c, calls = launch_env
+    monkeypatch.setattr(l, 'client_home', lambda c: pytest.fail('must not resolve home'))
+    with pytest.raises(w.WorkflowError) as error:
+        l.control(c, 'restart')
+    assert error.value.code == 'PLATFORM_CLIENT_NOT_RUNNING'
+    assert not calls

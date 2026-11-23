@@ -121,7 +121,7 @@ Python 更新失败时同时读取 result.json.error 和 rollback，分别确认
 
 deploy/replay/check 保留提交配置，并将现场采集的 Python 包版本与来源、CANN 版本和 AF 加载身份写入 environment.json；缺失信息见 errors。日常任务不比对历史环境清单或检查缓存 wheel。运行依赖检查和 AF 部署产物完整性检查仍需通过。
 
-客户端启动失败返回 PLATFORM_CLIENT_START_FAILED，检查远端 afx-client/client.log 和 runs/<run-id>/execution.log。PLATFORM_CLIENT_MISMATCH 表示 managed 配置的 endpoint、token 或设备不匹配；PLATFORM_CLIENT_UNTRACKED 表示旧客户端仍存活，需要先停止旧进程再迁移。上述错误均不提交 verify，也不自动停止已有进程。
+客户端启动失败返回 PLATFORM_CLIENT_START_FAILED，检查远端 afx-client/client.log 和 runs/<run-id>/execution.log。PLATFORM_CLIENT_CONFLICT 表示有多个存活 client；PLATFORM_CLIENT_NOT_RUNNING 表示没有存活 client 可重启，应使用 start；PLATFORM_CLIENT_UNTRACKED 表示旧客户端仍存活，需要先停止旧进程再迁移。上述错误均不提交 verify，也不自动停止已有进程。
 
 ## 平台只读证据查询
 

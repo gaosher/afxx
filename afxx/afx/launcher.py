@@ -10,6 +10,7 @@ from afxx import common as w
 from afxx import config
 from afxx.environment import runtime
 from afxx.afx import replay
+from afxx.afx.managed_client import selected_client, ClientError
 
 
 # Read credentials inside the selected interpreter, never in process arguments.
@@ -38,9 +39,18 @@ def client_home(c):
 def control(c, action, timeout=300):
     """Control the one selected AFX home without replacing its identity."""
     w.require_code(action in ("status", "start", "stop", "restart"), "INVALID_ARGUMENT", "invalid client action")
-    settings = config.platform_settings(c) if action in ("start", "restart") else {}
+    try:
+        selected = selected_client()
+    except ClientError as error:
+        raise w.WorkflowError(error.code, str(error)) from None
+    if not selected and action == "restart":
+        raise w.WorkflowError("PLATFORM_CLIENT_NOT_RUNNING", "no live client to restart; use client start")
+    if not selected and action in ("status", "stop"):
+        return dict(state="stopped", daemon_running=False, home=None, runs=[], conflicts=[], retest_readiness="not_checked")
+    home = Path(selected["home"]) if selected else client_home(c)
+    initialize = action == "start" and not (home / "client.json").exists()
+    settings = config.platform_settings(c) if initialize else {}
     token = settings.get("client_token_file")
-    home = client_home(c)
     if action != "status":
         home.mkdir(parents=True, exist_ok=True, mode=0o700)
     with contextlib.nullcontext() if action == "status" else w.lock(home / "launch.lock"):
@@ -56,8 +66,8 @@ def control(c, action, timeout=300):
                 )
         env = runtime.environment(c) if action in ("start", "restart") else dict(os.environ)
         env["AUTOFUSEX_HOME"] = str(home)
-        devices = c["replay"]["devices"]
-        if action in ("start", "restart") and devices == "auto":
+        devices = c["replay"]["devices"] if initialize else None
+        if initialize and devices == "auto":
             count = replay.visible_device_count(
                 w.capture(replay.device_command(runtime.python(c)), env=env, timeout=60)
             )

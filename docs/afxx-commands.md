@@ -381,11 +381,11 @@ afxx client stop --config "$TASK_CONFIG" --timeout 300
 afxx client restart --config "$TASK_CONFIG" --timeout 300
 ```
 
-四个接口不创建 workflow job，与 verify 自动启动共用远端 AFX 的 data_home 解析：优先 AUTOFUSEX_HOME，再读取系统默认目录的 active-home.json，最后回退系统默认目录（Linux 通常为 ~/.local/share/autofusex）。不再派生 workflow-root/afx-client，也不为 issue/worktree 初始化第二个 client。发现当前用户的其他 managed home 或旧版常驻 client 时，status 返回 conflicts，写操作返回 PLATFORM_CLIENT_CONFLICT；不会停止其他目录的进程。该检查用于发现现有冲突，不替代 AFX 对外部并发启动的互斥管理。
+四个接口不创建 workflow job，按远端当前用户的存活 client 选择目标。只有一个时使用其实际 home；daemon 与对应 supervisor 算一个 client，两个独立 daemon 即使 home 相同也算冲突。多个存活 client 时包括 status 在内均返回 PLATFORM_CLIENT_CONFLICT。无法识别 home 或发现旧版常驻 client 时返回 PLATFORM_CLIENT_UNTRACKED，不猜测目标、不强杀进程。
 
-status 不启动 daemon、不加载 CANN、不读取平台 token，返回 home、machine_id、daemon_running、state、runs、active_operation 和 conflicts。state 区分 uninitialized、stopped、idle、preparing、running、draining 等实际状态；运行会话不等于可以领取复测，retest_readiness 当前固定为 not_checked。
+没有存活 client 时：status/stop 返回 stopped、daemon_running=false、home=null；restart 返回 PLATFORM_CLIENT_NOT_RUNNING。只有 start 使用 AFX 当前 data_home（AUTOFUSEX_HOME → active-home.json → 系统默认目录）启动。已有目录沿用 AFX 保存的身份、平台地址、设备和凭据，不与 workflow 配置比较。首次创建才使用 platform.client_token_file 等配置。
 
-start 复用已有身份和目录；首次初始化必须有 platform.client_token_file；已有 client 可以复用其保存的凭据。已有 endpoint、设备或 token 不匹配时拒绝覆盖；旧版目录缺失身份配置时返回 PLATFORM_CLIENT_MIGRATION_REQUIRED，不悄悄生成新身份。AFX start 会读取平台配置，可能持续运行 fuzz。stop 请求会话停止，等待在途任务退出后关闭 daemon；已停止时重复调用成功。restart 校验配置后完成同样的停止过程，再在当前配置环境中启动。stop/restart 不删除身份、历史和平台记录，不强杀 worker。超时返回 PLATFORM_CLIENT_TIMEOUT，应先查询 status，不能将超时视为已停止。
+status 不启动 daemon、不加载 CANN、不读取平台 token；运行会话不等于可以领取复测，retest_readiness 当前固定为 not_checked。stop 等待在途任务退出后关闭 daemon；restart 完成停止后使用当前配置的 Python/CANN 环境启动同一个 home。start 可能开启 fuzz；不删除身份、历史和平台记录。超时返回 PLATFORM_CLIENT_TIMEOUT，先查询状态，不强杀 worker。进程扫描不替代 AFX 的并发启动互斥管理。
 
 --timeout 范围为 (0,3600] 秒，默认 300，控制等待期限；SSH、准备和单次 AFX 请求另有开销。中断本地命令不意味着远端已取消，先查询 status。MCP 使用同名 `client status/start/stop/restart`，参数与 CLI 一致。
 
