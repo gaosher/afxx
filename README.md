@@ -1,5 +1,7 @@
 # AFXX — AFX Extensions
 
+使用 `afxx --version` 查看当前安装版本，`afxx --help` 查看命令列表。
+
 AFXX 是面向本地 agent 的 AFX 开发与问题修复工具包：准备 NPU 环境，同步本地 graph-autofusion 源码，编包安装，再通过 AFX managed client 复跑 seed 和提交平台验证。CLI 与 MCP 共用实现。
 
 下面从环境初始化开始。假定已安装 AFXX、完成 `npussh login` 并填写 `~/.config/afxx/config.yaml`；首次使用先看[安装与配置](#安装与配置)。所有命令默认读取该配置，其他配置通过 `--config /absolute/path/config.yaml` 指定。

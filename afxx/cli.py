@@ -2,6 +2,7 @@
 """CLI entry point for AF development workflows."""
 
 import argparse
+from importlib.metadata import version
 import json
 import math
 import os
@@ -85,6 +86,7 @@ def parse_arguments():
         prog="afxx", usage="%(prog)s <命令> [参数]",
         description="AFXX · 环境管理、源码部署与 AFX 验证", allow_abbrev=False,
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {version('afxx')}", help="显示安装版本并退出")
     commands = parser.add_subparsers(dest="command", required=True, title="命令", metavar="", prog="afxx")
     groups = {}
     env_jobs = (

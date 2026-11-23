@@ -583,3 +583,16 @@ def test_old_request_preserves_original_job(cfg):
     workflow_common.write(record,saved)
     result=workflow_jobs.submit(cfg,request(),'old-request',True)
     assert result['job']==legacy and result['reused']
+
+
+def test_version_without_configuration():
+    import subprocess
+    import sys
+    from importlib.metadata import version
+    result = subprocess.run(
+        [sys.executable, '-m', 'afxx.cli', '--version'],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == f"afxx {version('afxx')}"
+    assert result.stderr == ''
