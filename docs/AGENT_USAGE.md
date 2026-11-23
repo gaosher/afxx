@@ -190,3 +190,5 @@ wait 默认 30 秒、允许 (0,50] 秒，CLI/MCP 均返回一次 JSON。携带 s
 ### Job 记录入口
 
 通过 status 获取摘要，使用 status --full 获取 result.json、environment.json 和 platform.json 详情。result.json 按任务类型保存部署身份、replay 结果或环境更新/回滚结果；CANN 安装过程位于 result.json 的 cann 字段。Python 依赖检查位于 environment.json 的 dependencies 字段。请求、启动及状态继续独立保存，以保持不同进程的写入边界。
+
+使用 `client status/start/stop/restart` 管理远端唯一 client，CLI/MCP 行为一致。部署前先查状态，需要暂停或刷新时在已有授权范围内调用 stop/restart；不要通过 SSH 拼接 kill 或启动第二个 client。stop 超时先查 status，不把请求已接受视为退出完成。start 可能启动 fuzz，平台派发问题仍待定位；保留操作前状态，按用户约定恢复。详见 [生命周期接口](afxx-commands.md#client-生命周期)。

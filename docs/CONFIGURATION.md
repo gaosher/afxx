@@ -119,7 +119,7 @@ platform:
 
 AFXX 的 token 需要 `issue` 权限。远端独立运行的 AFX 客户端使用自己的 client token，需要 `upload/retest` 权限；不要将默认只具备客户端权限的 token 用于 AFXX 领取和提交问题。
 
-`platform.client_token_file` 在 issue verify 时必填，为远端已有 token 文件路径。AFX >= 0.2.3 managed init/start/status 管理客户端，设备沿用 replay.devices。客户端目录为 remote.state_dir 上一级的 afx-client/。启动读取平台配置，可能同时执行 fuzz；已有 endpoint、token 或设备不匹配时报错。AFXX 不自动停止或重启驻留进程。详见 README 的 AFX 常驻客户端章节。
+`platform.client_token_file` 为远端已有 token 文件路径，首次初始化 client 时必填；已有 managed client 可以复用其保存的凭据。AFX >= 0.2.3 managed init/start/status 管理客户端，设备沿用 replay.devices。客户端目录由远端 AFX 自身解析（AUTOFUSEX_HOME、active-home 指针或系统默认目录）。启动读取平台配置，可能同时执行 fuzz；已有 endpoint、token 或设备不匹配时报错。AFXX 不自动停止或重启驻留进程。详见 README 的 AFX 常驻客户端章节。
 
 ## Job 环境快照
 

@@ -27,6 +27,7 @@ FILES = (
     "afxx/afx/fuzz.py",
     "afxx/afx/platform.py",
     "afxx/afx/launcher.py",
+    "afxx/afx/managed_client.py",
     "afxx/environment/package_sources.json",
     "afxx/resources/config.example.yaml",
 )

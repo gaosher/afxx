@@ -333,3 +333,22 @@ afxx skills install --agent codex
 ```
 
 随 wheel 提供 afx-issue-repair 和 afx-issue-summary，安装到 ~/.agents/skills/。命令独立于工作流配置和远端连接，返回统一 JSON，包含每个 skill 的路径和 reused 状态。相同内容重复安装会跳过；已有内容不同或目标为符号链接时返回 SKILL_CONFLICT，并保留已有文件。更新前先保留并移走存在差异的目录，再执行安装命令。
+
+## Client 生命周期
+
+```bash
+afxx client status --config "$TASK_CONFIG"
+afxx client start --config "$TASK_CONFIG"
+afxx client stop --config "$TASK_CONFIG" --timeout 300
+afxx client restart --config "$TASK_CONFIG" --timeout 300
+```
+
+四个接口不创建 workflow job，与 verify 自动启动共用远端 AFX 的 data_home 解析：优先 AUTOFUSEX_HOME，再读取系统默认目录的 active-home.json，最后回退系统默认目录（Linux 通常为 ~/.local/share/autofusex）。不再派生 workflow-root/afx-client，也不为 issue/worktree 初始化第二个 client。发现当前用户的其他 managed home 或旧版常驻 client 时，status 返回 conflicts，写操作返回 PLATFORM_CLIENT_CONFLICT；不会停止其他目录的进程。该检查用于发现现有冲突，不替代 AFX 对外部并发启动的互斥管理。
+
+status 不启动 daemon、不加载 CANN、不读取平台 token，返回 home、machine_id、daemon_running、state、runs、active_operation 和 conflicts。state 区分 uninitialized、stopped、idle、preparing、running、draining 等实际状态；运行会话不等于可以领取复测，retest_readiness 当前固定为 not_checked。
+
+start 复用已有身份和目录；首次初始化必须有 platform.client_token_file；已有 client 可以复用其保存的凭据。已有 endpoint、设备或 token 不匹配时拒绝覆盖；旧版目录缺失身份配置时返回 PLATFORM_CLIENT_MIGRATION_REQUIRED，不悄悄生成新身份。AFX start 会读取平台配置，可能持续运行 fuzz。stop 请求会话停止，等待在途任务退出后关闭 daemon；已停止时重复调用成功。restart 校验配置后完成同样的停止过程，再在当前配置环境中启动。stop/restart 不删除身份、历史和平台记录，不强杀 worker。超时返回 PLATFORM_CLIENT_TIMEOUT，应先查询 status，不能将超时视为已停止。
+
+--timeout 范围为 (0,3600] 秒，默认 300，控制等待期限；SSH、准备和单次 AFX 请求另有开销。中断本地命令不意味着远端已取消，先查询 status。MCP 使用同名 `client status/start/stop/restart`，参数与 CLI 一致。
+
+平台派发、runner 环境和结果身份问题仍待定位；这些接口只管理生命周期，不保证复测已领取或使用了正确候选包。replay 保留独立入口。

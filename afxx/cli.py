@@ -66,7 +66,7 @@ def response(command, data=None, error=None):
     return {
         "schema_version": 1,
         "ok": error is None,
-        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-")) else command,
+        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-", "client-")) else command,
         "data": data,
         "error": None if error is None else {"code": error.code, "message": str(error)},
     }
@@ -101,7 +101,9 @@ def parse_arguments():
         "issue-regression-preview",
         "issue-summarize",
     )
+    clients = tuple("client-" + action for action in ("status", "start", "stop", "restart"))
     descriptions = {
+        **{name: "管理远端唯一 AFX client：" + name.split("-", 1)[1] for name in clients},
         "init": "远端环境：初始化 Python 和 CANN 环境",
         "update": "远端环境：按配置更新 Python 依赖，默认不更新 CANN",
         "check": "远端环境：检查运行环境及 Python 依赖",
@@ -126,14 +128,15 @@ def parse_arguments():
         "evidence-read": "定位证据：按字节分页读取日志、IR 和代码",
         "doctor": "本地检查：检查配置、连接工具及登录状态",
     }
-    for name in (*env_jobs, *jobs, *issues, "fuzz-status", "fuzz-stop", "execution-show", "evidence-list", "evidence-read", "status", "doctor"):
+    for name in (*env_jobs, *jobs, *issues, *clients, "fuzz-status", "fuzz-stop", "execution-show", "evidence-list", "evidence-read", "status", "doctor"):
         parent = commands
         leaf = name
-        if name in env_jobs or name.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-")):
+        if name in env_jobs or name.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-", "client-")):
             group = "env" if name in env_jobs else name.split("-", 1)[0]
             leaf = name if group == "env" else name.split("-", 1)[1]
             if group not in groups:
                 summary = {
+                    "client": "查询、启动、停止和重启远端 AFX client",
                     "fuzz": "运行、查询和停止远端 AFX 随机测试",
                     "env": "管理远端 Python、CANN 和依赖环境",
                     "issue": "领取问题、提交验证及查询回归结果",
@@ -159,6 +162,8 @@ def parse_arguments():
             cmd.add_argument("--dry-run", action="store_true")
         if name in (*env_jobs, *jobs) or name in ("issue-claim", "issue-summarize"):
             cmd.add_argument("--request-id", required=name == "issue-summarize")
+        if name in clients:
+            cmd.add_argument("--timeout", type=float, default=300, help="等待生命周期完成的秒数，默认 300；超时不强杀")
         if name in ("init", "update"):
             cmd.add_argument("--detach", action="store_true")
         if name == "issue-preview":
@@ -294,6 +299,10 @@ def main():
             "CONFIG_INVALID",
             "init/update requires python_env configuration",
         )
+    if args.command.startswith("client-"):
+        workflow_common.require_code(math.isfinite(args.timeout) and 0 < args.timeout <= 3600,
+                                     "INVALID_ARGUMENT", "client timeout must be in (0, 3600]")
+        return workflow_jobs.client_control(c, args.command.split("-", 1)[1], args.timeout)
     if args.command == "execution-show":
         return platform.execution_detail(c, args.exec_uuid)
     if args.command.startswith("issue-"):
@@ -484,7 +493,7 @@ def cli():
         mcp_main(sys.argv[2:])
         return 0
     command = sys.argv[1] if len(sys.argv) > 1 else None
-    if command in ("issue", "execution", "config", "evidence", "fuzz", "skills") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
+    if command in ("issue", "execution", "config", "evidence", "fuzz", "skills", "client") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()

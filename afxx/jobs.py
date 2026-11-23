@@ -590,3 +590,43 @@ def localize_replay(c, job_id, data):
     from afxx import evidence_bundle
     directory = evidence_bundle.download(c, job_id, remote)
     return evidence_bundle.terminal_result(directory, dict(data, job_id=job_id))
+
+def client_control(c, action, timeout=300):
+    """Ship the adapter only; no remote AFXX installation or workflow job required."""
+    import base64
+    import io
+    import shlex
+    import subprocess
+    import zipfile
+    local_preflight("status")
+    root = Path(__file__).resolve().parent
+    buffer = io.BytesIO()
+    modules = ("__init__.py", "common.py", "config.py", "environment/__init__.py",
+               "environment/runtime.py", "afx/__init__.py", "afx/replay.py", "afx/launcher.py",
+               "afx/managed_client.py")
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in modules:
+            archive.writestr("afxx/" + name, (root / name).read_bytes())
+    bootstrap = """import base64,json,sys,tempfile,zipfile,io,contextlib
+with tempfile.TemporaryDirectory(prefix='afxx-client-control-') as directory:
+    zipfile.ZipFile(io.BytesIO(base64.b64decode(sys.argv[1]))).extractall(directory)
+    sys.path.insert(0,directory)
+    from afxx.afx.launcher import control
+    from afxx.common import WorkflowError
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            data=control(json.loads(sys.argv[2]),sys.argv[3],float(sys.argv[4]))
+        result={'data':data}
+    except WorkflowError as error:
+        result={'error':{'code':error.code,'message':str(error)}}
+    print(json.dumps(result))
+"""
+    argv = [workflow_runtime.python(c), "-c", bootstrap, base64.b64encode(buffer.getvalue()).decode(),
+            json.dumps(c), action, str(timeout)]
+    try:
+        result = json.loads(workflow_common.capture(["npussh", c["connection"]["environment"], shlex.join(argv)], timeout=timeout + 120))
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        raise workflow_common.WorkflowError("REMOTE_UNAVAILABLE", "client response unavailable; query client status before retrying") from error
+    if result.get("error"):
+        raise workflow_common.WorkflowError(result["error"]["code"], result["error"]["message"])
+    return result["data"]

@@ -211,21 +211,18 @@ afxx issue summarize --issue-id F152 \
 
 AFXX 使用 AFX >= 0.2.3 的 managed client 生命周期。`issue verify` 提交前，在配置的 venv/CANN 环境下首次调用 `afx init`，随后调用 `afx start`，等待 `afx status` 中的执行会话进入 running；失败则不提交 verify。AFX 负责进程、任务队列、心跳、上传和复测领取。启动会读取平台配置，也可能开始 fuzz，并非仅启动复测监听。
 
-配置 `platform.client_token_file` 为已有远端 token 文件。AFXX 在远端进程内读取 token，避免将秘密放进系统命令参数；AFX 将其保存到自己管理的 client 配置中。设备沿用 replay.devices（auto 时查询可见卡）。客户端目录为 remote.state_dir 上一级的 `afx-client/`；AFXX 调用日志为 `client.log`，执行日志由 AFX 保存在 `runs/<run-id>/execution.log`。
+配置 `platform.client_token_file` 为已有远端 token 文件。AFXX 在远端进程内读取 token，避免将秘密放进系统命令参数；AFX 将其保存到自己管理的 client 配置中。设备沿用 replay.devices（auto 时查询可见卡）。客户端目录由远端 AFX 自身解析（AUTOFUSEX_HOME、active-home 指针或系统默认目录）；AFXX 调用日志为 `client.log`，执行日志由 AFX 保存在 `runs/<run-id>/execution.log`。
 
-可在远端使用同一 Python/CANN 环境操作已有 managed client，例如（路径按实际配置调整）：
+在本地使用统一生命周期接口，无需手工 SSH：
 
 ```bash
-source /mnt/workspace/af-workflow/Ascend/cann/set_env.sh
-source /mnt/workspace/af-workflow/venv/bin/activate
-afx status --data-dir /mnt/workspace/af-workflow/afx-client
-afx stop --data-dir /mnt/workspace/af-workflow/afx-client
-afx start --data-dir /mnt/workspace/af-workflow/afx-client
-# 更新包后，需要刷新驻留执行进程时：
-afx restart --data-dir /mnt/workspace/af-workflow/afx-client
+afxx client status
+afxx client start
+afxx client stop --timeout 300
+afxx client restart --timeout 300
 ```
 
-stop/restart 的排空和退出行为由 AFX 决定；AFXX 不自行 kill、重启或刷新驻留库。已有 client 的 endpoint、token 或设备与配置不符时直接报错，不覆盖已有设置。迁移时如有旧 `platform client run` 存活，须先停止旧进程，防止重复领取任务。
+默认读取 AFXX 配置，返回实际 client home、身份、daemon 和会话状态。stop 等待在途任务退出并关闭 daemon；restart 完成停止后按当前环境启动；超时不强杀。检测到其他 client 时报告冲突，不另建实例。详细返回和错误语义见 [命令说明](docs/afxx-commands.md#client-生命周期)。
 
 本次只接入 client 生命周期。AFXX replay（包括任意 seed 和 `--dump`）仍使用原入口，不进入 managed 队列；deploy 仍执行已有环境占用检查。`start` 复用会话不意味着更新了已加载的 AF 库，启动成功也不代表平台回归通过，仍需通过 issue status/wait 查询结果。
 

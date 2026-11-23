@@ -13,6 +13,7 @@ def launch_env(platform_cfg, monkeypatch):
     c["replay"]["devices"] = ["npu:0", "npu:1"]
     monkeypatch.setattr(l.runtime, "environment", lambda c: {"VIRTUAL_ENV": c["runtime"]["venv_dir"]})
     monkeypatch.setattr(l, "process_identity", lambda pid: "100" if pid == 123 else None)
+    monkeypatch.setattr(l, "client_home", lambda c: Path(c["remote"]["state_dir"]).parent / "afx-client")
     calls = []
     def capture(argv, **kw):
         calls.append((argv, kw))
@@ -43,12 +44,11 @@ def test_managed_failure_is_propagated(launch_env, monkeypatch, code):
     assert error.value.code == code
 
 
-def test_missing_client_token(launch_env):
+def test_existing_client_can_reuse_persisted_token(launch_env):
     c, calls = launch_env
     del c["platform"]["client_token_file"]
-    with pytest.raises(w.WorkflowError, match="platform.client_token_file"):
-        l.ensure_started(c, {})
-    assert not calls
+    l.ensure_started(c, {})
+    assert json.loads(calls[0][0][-1])["token_file"] is None
 
 
 @pytest.mark.parametrize("name", ["launch.json", "platform-client.json"])
@@ -67,4 +67,4 @@ def test_invalid_response_fails_closed(launch_env, monkeypatch):
     monkeypatch.setattr(l.w, "capture", lambda *a, **k: "native log\n{}")
     with pytest.raises(w.WorkflowError) as error:
         l.ensure_started(c, {})
-    assert error.value.code == "PLATFORM_CLIENT_START_FAILED"
+    assert error.value.code == "PLATFORM_CLIENT_CONTROL_FAILED"

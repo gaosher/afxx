@@ -23,6 +23,7 @@ description: 使用 AFXX 领取 AFX 平台 issue，复现并定位 graph-autofus
 
 ```bash
 afxx doctor
+afxx client status
 afxx issue claim --request-id <本次领取请求ID>
 # 指定问题时增加 --issue-id F152
 ```
@@ -105,6 +106,9 @@ afxx status --config "$TASK_CONFIG" --job-id <replay-job-id>
 
 ## 4. 部署修复版本
 
+先通过 `afxx client status --config "$TASK_CONFIG"` 记录唯一 client 的原状态。需要释放共享安装目录时，在授权范围内执行 `client stop --timeout 300`，只有返回 stopped 才视为退出完成；超时先查询状态，不手工 kill。部署成功后需要恢复原有会话或刷新已加载库时，使用 `client start/restart`。start 会读取平台配置，可能开启 fuzz，不能将它当作仅启动复测监听。停止状态不应在未约定恢复时被擅自改为持续 fuzz；verify 的自动启动行为也需纳入本次执行范围。
+
+
 ```bash
 afxx deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <本轮唯一部署请求ID>
 afxx status --config "$TASK_CONFIG" --job-id <deploy-job-id>
@@ -133,7 +137,7 @@ agent 使用 `issue wait --config "$TASK_CONFIG" --timeout 30` 等待原轮次�
 - outcome=invalid：优先排查包身份、结果缺失和执行环境，不等同于代码缺陷。
 - verification.outcome=passed：转第 6 步；不能提前 commit 为已验证修复。
 
-失败任务查询、环境阻塞和客户端身份处理按 [平台定位参考](references/platform-evidence.md)。尤其第二轮 deploy 后可能遇到存活客户端的旧 AF 身份：当前 AFXX 不自动 stop/restart，此时报告阻塞，不绕过检查或误报循环成功。
+失败任务查询、环境阻塞和客户端身份处理按 [平台定位参考](references/platform-evidence.md)。尤其第二轮 deploy 后可能遇到存活客户端的旧 AF 身份：先调用 `client status`，在已有客户端协调授权范围内使用 `client stop/restart`，不绕过检查或误报循环成功。deploy 本身仍不自动协调 client。
 
 ## 6. 等待关联回归
 

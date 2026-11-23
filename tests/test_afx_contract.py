@@ -295,10 +295,11 @@ def test_managed_client_facade_contract(afx, tmp_path, monkeypatch, capsys):
             return {"state": "preparing", "run_id": "r"}
         return {"runs": [{"id": "r", "state": "running"}]}
     monkeypatch.setattr(modern_cli, "run", run)
+    monkeypatch.setattr(modern_cli, "_legacy", lambda argv: {"runs": [{"id": "r", "state": "running"}]})
     request = dict(home=str(home), token_file=str(token), endpoint="https://example.test", devices=["npu:0"])
     monkeypatch.setattr(sys, "argv", ["adapter", json.dumps(request)])
     for _ in range(2):
-        exec(compile(MANAGED_START, "managed_adapter", "exec"), {})
+        exec(compile(MANAGED_START, "managed_adapter", "exec"), {"__name__": "__main__"})
         output = capsys.readouterr().out
         assert json.loads(output)["status"]["runs"][0]["state"] == "running"
         assert "test-secret" not in output
@@ -309,7 +310,7 @@ def test_managed_client_facade_contract(afx, tmp_path, monkeypatch, capsys):
     before = len(calls)
     request["devices"] = ["npu:1"]
     monkeypatch.setattr(sys, "argv", ["adapter", json.dumps(request)])
-    exec(compile(MANAGED_START, "managed_adapter", "exec"), {})
+    exec(compile(MANAGED_START, "managed_adapter", "exec"), {"__name__": "__main__"})
     assert json.loads(capsys.readouterr().out)["error"] == "PLATFORM_CLIENT_MISMATCH"
     assert len(calls) == before
     request["devices"] = ["npu:0"]
@@ -319,5 +320,6 @@ def test_managed_client_facade_contract(afx, tmp_path, monkeypatch, capsys):
             return {"state": "preparing", "run_id": "r"}
         return {"runs": [{"id": "r", "state": "failed"}]}
     monkeypatch.setattr(modern_cli, "run", failed_run)
-    exec(compile(MANAGED_START, "managed_adapter", "exec"), {})
+    monkeypatch.setattr(modern_cli, "_legacy", lambda argv: {"runs": [{"id": "r", "state": "failed"}]})
+    exec(compile(MANAGED_START, "managed_adapter", "exec"), {"__name__": "__main__"})
     assert json.loads(capsys.readouterr().out)["error"] == "PLATFORM_CLIENT_START_FAILED"
