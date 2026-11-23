@@ -151,7 +151,7 @@ agent 使用 `issue wait --config "$TASK_CONFIG" --timeout 30` 等待原轮次�
 
 1. 核对将提交的源码与已验证部署一致；影响产物的代码若再次变化，重新部署验证。
 2. 遵循目标仓库规范，只提交本次修复和必要测试/文档，记录完整 SHA。用户要求仅出补丁或不提交时遵循该要求。
-3. 读取并使用 [afxxsummary](../afxxsummary/SKILL.md) 生成可提交的 summary.yaml。交接 issue、源码仓库、基线与修复 commit、已有 IR/日志/测试证据位置、平台 verify/回归轮次、任务配置及输出路径 `<local.state_dir>/issues/<issue-id>/summary.yaml`。直接沿用已有任务上下文，不另建交接文件；本地路径用于取证，不进入总结正文。
-4. 向用户交付修复 commit、summary.yaml 绝对路径和验证结论，等待人工检视。总结规则与模板由 afxxsummary 维护，不在这里重复。
+3. 读取并使用 [afx-issue-summary](../afx-issue-summary/SKILL.md) 生成可提交的 summary.yaml。交接 issue、源码仓库、基线与修复 commit、已有 IR/日志/测试证据位置、平台 verify/回归轮次、任务配置及输出路径 `<local.state_dir>/issues/<issue-id>/summary.yaml`。直接沿用已有任务上下文，不另建交接文件；本地路径用于取证，不进入总结正文。
+4. 向用户交付修复 commit、summary.yaml 绝对路径和验证结论，等待人工检视。总结规则与模板由 afx-issue-summary 维护，不在这里重复。
 
 不自动发布总结。人工检视且用户明确要求提交后，再按 [平台提交说明](references/platform-evidence.md) 执行独立的 issue summarize；若检视导致代码变化，重新验证受影响内容并更新总结。不得将测试通过推断为已经合入或平台归档完成。

@@ -130,7 +130,7 @@ deploy/replay/check 保留提交配置，并将现场采集的 Python 包版本�
 
 `issue summarize --issue-id F152 --summary-file /absolute/path/summary.yaml --request-id summary-F152-001` 读取 YAML 知识字段，使用本地平台 token 和领取记录中的租约提交。MCP 命令路径为 `issue summarize`，参数与 CLI 一致。仅在用户明确要求提交已检视总结时调用，不从修复循环自动发布。
 
-本地必需 kind、title、symptom、root_cause、solution 五个非空字符串；未知字段拒绝，平台继续校验字段类型、长度、状态及权限。文件必须是 YAML，不能仅传自由文本 Markdown。body_md 可作为 YAML 多行字段携带完整正文。 `afx-issue-repair` 完成修复后交给独立的 [afxxsummary](../skills/afxxsummary/SKILL.md)，后者使用 [summary.yaml 模板](../skills/afxxsummary/assets/summary.yaml)，在 body_md 中保留完整证据链，供人工检视及后续知识检索；这是修复交付约定，不改变平台字段必填规则。
+本地必需 kind、title、symptom、root_cause、solution 五个非空字符串；未知字段拒绝，平台继续校验字段类型、长度、状态及权限。文件必须是 YAML，不能仅传自由文本 Markdown。body_md 可作为 YAML 多行字段携带完整正文。 `afx-issue-repair` 完成修复后交给独立的 [afx-issue-summary](../skills/afx-issue-summary/SKILL.md)，后者使用 [summary.yaml 模板](../skills/afx-issue-summary/assets/summary.yaml)，在 body_md 中保留完整证据链，供人工检视及后续知识检索；这是修复交付约定，不改变平台字段必填规则。
 
 总结正文以技术分析为主：按独立根因展示最小实际错误 IR（无 IR 时使用实际日志、代码或输入输出），结合源码符号解释错误机制、修复行为和验证依据。错误机制应追溯关键类型、属性或操作的上游来源、转换过程与违反约束的位置。修复分析说明语义为何保持；替换操作、放宽判断或新增分支时，解释选择依据、适用边界、后续处理支持及直接替代方案的取舍。验证证据应区分编译通过、输出正确和边界行为保持，并对应修复依赖的语义假设；未证明的部分留作人工检视问题。片段附一行具体来源；修复后 IR 必须来自实际产物，没有时说明转换规则，不能伪造现场。顶层 symptom/root_cause/solution 保持简短，正文不重复概述。
 

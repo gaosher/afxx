@@ -6,7 +6,7 @@ from pathlib import Path
 
 from afxx import common
 
-SKILLS = ("afx-issue-repair", "afxxsummary")
+SKILLS = ("afx-issue-repair", "afx-issue-summary")
 
 
 def bundled_skills():

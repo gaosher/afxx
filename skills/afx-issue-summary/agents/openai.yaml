@@ -1,4 +1,4 @@
 interface:
   display_name: "AFXX 修复总结"
   short_description: "从修复源码与实际证据生成独立可读的总结，交付人工检视和知识库沉淀"
-  default_prompt: "使用 $afxxsummary 根据当前 issue 的修复提交与已有验证证据生成 summary.yaml，等待人工检视，不提交平台。"
+  default_prompt: "使用 $afx-issue-summary 根据当前 issue 的修复提交与已有验证证据生成 summary.yaml，等待人工检视，不提交平台。"

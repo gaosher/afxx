@@ -20,7 +20,7 @@ def test_install_and_repeat(tmp_path, monkeypatch):
 
 def test_conflict_preserves_both_skills(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    target = tmp_path / ".agents/skills/afxxsummary"
+    target = tmp_path / ".agents/skills/afx-issue-summary"
     target.mkdir(parents=True)
     (target / "SKILL.md").write_text("local changes")
     with pytest.raises(common.WorkflowError) as error:

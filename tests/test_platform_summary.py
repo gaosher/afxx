@@ -9,7 +9,7 @@ from afxx.afx import platform as p
 
 def filled_summary(issue_id="F152"):
     """Fill the shipped template with synthetic review evidence, not live results."""
-    template = Path(__file__).parents[1] / "skills/afxxsummary/assets/summary.yaml"
+    template = Path(__file__).parents[1] / "skills/afx-issue-summary/assets/summary.yaml"
     fields = config.read_config(template)
     fields.update(
         kind="bugfix_function", title="修复空维度的边界处理",

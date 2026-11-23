@@ -6,7 +6,7 @@ AFXX 是适配 AFX 的开发与问题修复工具包，从本地工作区同步�
 
 - [命令参考与参数矩阵](docs/afxx-commands.md)
 - [配置说明与默认值](docs/CONFIGURATION.md) · [YAML 模板](afxx/resources/config.example.yaml)
-- [Agent 调用约定](docs/AGENT_USAGE.md) · [问题修复 Skill](skills/afx-issue-repair/SKILL.md) · [修复总结 Skill](skills/afxxsummary/SKILL.md)
+- [Agent 调用约定](docs/AGENT_USAGE.md) · [问题修复 Skill](skills/afx-issue-repair/SKILL.md) · [修复总结 Skill](skills/afx-issue-summary/SKILL.md)
 - [设计与模块边界](docs/DESIGN.md)
 
 ## 工具目录
@@ -205,7 +205,7 @@ afxx issue summarize --issue-id F152 \
 
 必填字段为 kind/title/symptom/root_cause/solution。kind 使用 AFX 类型，如 bugfix_function、bugfix_accuracy 或 perf_tuning；可选字段包括 keywords、ops、dtypes、backends、graph_pattern、applicability、version_range、fix_ref、body_md。具体类型和长度由平台校验。提交后知识会发布，不只是保存草稿。
 
-修复交付使用 [总结模板](skills/afxxsummary/assets/summary.yaml)：正文按独立根因展示实际错误 IR、错误机制、修复行为和验证依据，补充人工检视重点与同类问题定位指引。验证依据随根因说明，末尾保留一行平台索引；部署追踪信息留在任务记录。填写规则见 [Agent 调用约定](docs/AGENT_USAGE.md)。
+修复交付使用 [总结模板](skills/afx-issue-summary/assets/summary.yaml)：正文按独立根因展示实际错误 IR、错误机制、修复行为和验证依据，补充人工检视重点与同类问题定位指引。验证依据随根因说明，末尾保留一行平台索引；部署追踪信息留在任务记录。填写规则见 [Agent 调用约定](docs/AGENT_USAGE.md)。
 
 ## AFX 常驻客户端
 
@@ -434,17 +434,17 @@ git push origin v1.0
 
 ## 问题修复 Skill
 
-`afx-issue-repair` 编排领取、复现定位、修改、deploy、verify、回归和修复提交，完成后交给 `afxxsummary` 生成待人工检视的 summary.yaml。`afxxsummary` 也可独立重写已有总结，不修改代码、不触发部署/复测、不发布平台。使用现有 AFXX CLI/MCP，不另实现客户端。通过 CLI 将随 wheel 发布的两个 skill 安装到 Codex 用户目录：
+`afx-issue-repair` 编排领取、复现定位、修改、deploy、verify、回归和修复提交，完成后交给 `afx-issue-summary` 生成待人工检视的 summary.yaml。`afx-issue-summary` 也可独立重写已有总结，不修改代码、不触发部署/复测、不发布平台。使用现有 AFXX CLI/MCP，不另实现客户端。通过 CLI 将随 wheel 发布的两个 skill 安装到 Codex 用户目录：
 
 ```bash
 afxx skills install --agent codex
 ```
 
-目标为 ~/.agents/skills/ 下的 afx-issue-repair 和 afxxsummary，无需工作流配置或远端连接。重复安装相同内容会跳过；已有目录内容不同时返回 SKILL_CONFLICT，先保留并移走旧目录，再重新安装。pip 升级后重新执行此命令即可检查 skill 是否需要更新。Codex 发现后可调用 $afx-issue-repair 或 $afxxsummary；未出现时重启 Codex。
+目标为 ~/.agents/skills/ 下的 afx-issue-repair 和 afx-issue-summary，无需工作流配置或远端连接。重复安装相同内容会跳过；已有目录内容不同时返回 SKILL_CONFLICT，先保留并移走旧目录，再重新安装。pip 升级后重新执行此命令即可检查 skill 是否需要更新。Codex 发现后可调用 $afx-issue-repair 或 $afx-issue-summary；未出现时重启 Codex。
 
 调用示例：`使用 $afx-issue-repair 修复 AFX issue F152，验证和回归通过后 commit，等待检视。`
 
-独立总结：`使用 $afxxsummary 根据 F152 的修复提交和现有证据重新生成 summary.yaml，不提交平台。`
+独立总结：`使用 $afx-issue-summary 根据 F152 的修复提交和现有证据重新生成 summary.yaml，不提交平台。`
 
 replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 单个执行可用 `status --attempt <id> --fields ...` 按字段查询。详见 [证据读取说明](docs/AGENT_USAGE.md#status-概要字段查询与等待)。
 

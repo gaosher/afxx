@@ -1,5 +1,5 @@
 ---
-name: afxxsummary
+name: afx-issue-summary
 description: 根据 AFX issue 的修复源码、实际 IR/日志和验证结果生成或更新可提交的 summary.yaml，用于人工检视和知识库沉淀。适用于修复完成后的总结交接，或独立重写已有总结；不执行修复、部署、复测或平台发布。
 ---
 
