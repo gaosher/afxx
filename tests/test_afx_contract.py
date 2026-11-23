@@ -212,11 +212,11 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     summary_fields = filled_summary(number)
     summary.write_text(yaml.safe_dump(summary_fields, allow_unicode=True, sort_keys=False))
     with pytest.raises(workflow_common.WorkflowError, match="summary response lost"):
-        cli("issue summarize", "--summary-file", str(summary), "--request-id", "summary-1")
+        cli("issue submit-summary", "--summary-file", str(summary), "--request-id", "summary-1")
     assert issues.issue_detail(store, number)["status"] == "resolved"
-    published = cli("issue summarize", "--summary-file", str(summary), "--request-id", "summary-1")
+    published = cli("issue submit-summary", "--summary-file", str(summary), "--request-id", "summary-1")
     assert published["status"] == "resolved" and published["knowledge_id"].startswith("K")
-    assert cli("issue summarize", "--summary-file", str(summary), "--request-id", "summary-1") == published
+    assert cli("issue submit-summary", "--summary-file", str(summary), "--request-id", "summary-1") == published
     assert summary_keys == ["summary-1", "summary-1"]
     from autofusex.platform import knowledge
     with store.connect() as conn:

@@ -545,3 +545,41 @@ def test_numbered_claim_displays_summary_and_keeps_full_receipt():
     )
     assert w.response("issue-claim", receipt)["data"] == summary
     assert receipt["repro"]["cases"] == [{"case_key": "seed"}]
+
+
+@pytest.mark.parametrize('command', ['deploy','replay','check','init','update','fuzz-run'])
+def test_job_id_is_request_id(cfg, command):
+    identity='F152-'+command+'-001'
+    result=workflow_jobs.submit(cfg,request(command),identity,True)
+    assert result['job']==result['request_id']==identity
+    assert Path(result['local']).name==Path(result['remote']).name==identity
+    assert workflow_jobs.submit(cfg,request(command),identity,True)['job']==identity
+
+
+@pytest.mark.parametrize('identity', ['.', '..', 'requests', '../escape', '/absolute', 'bad name', 'a'*129])
+def test_job_request_id_is_safe_directory_component(cfg, identity):
+    with pytest.raises(workflow_common.WorkflowError) as error:
+        workflow_jobs.submit(cfg,request(),identity,True)
+    assert error.value.code=='INVALID_ARGUMENT'
+
+
+def test_job_directory_collision_preserves_existing_files(cfg):
+    path=Path(cfg['local']['state_dir'])/'existing'
+    path.mkdir(parents=True)
+    (path/'keep').write_text('untouched')
+    with pytest.raises(workflow_common.WorkflowError) as error:
+        workflow_jobs.submit(cfg,request(),'existing',True)
+    assert error.value.code=='REQUEST_CONFLICT'
+    assert (path/'keep').read_text()=='untouched'
+
+
+def test_old_request_preserves_original_job(cfg):
+    result=workflow_jobs.submit(cfg,request(),'old-request',True)
+    record=Path(cfg['local']['state_dir'])/'requests'/(workflow_common.digest('old-request')+'.json')
+    saved=workflow_common.read(record)
+    legacy='a'*32
+    Path(result['local']).rename(Path(result['local']).with_name(legacy))
+    saved['job']=legacy
+    workflow_common.write(record,saved)
+    result=workflow_jobs.submit(cfg,request(),'old-request',True)
+    assert result['job']==legacy and result['reused']

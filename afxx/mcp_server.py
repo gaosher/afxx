@@ -6,7 +6,14 @@ import json
 import os
 import signal
 import sys
-from typing import Literal
+from typing import Annotated, Literal
+from pathlib import Path
+import re
+from pydantic import Field
+
+from afxx import mcp_operations
+from afxx.common import JOB_ID_PATTERN
+from afxx.config import default_config_path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import CallToolResult, TextContent
@@ -26,16 +33,26 @@ Command = Literal[
     "client restart",
     "doctor",
     "status",
+    "issue list",
+    "issue cases",
+    "platform me",
+    "platform summary",
     "issue claim",
     "issue preview",
     "issue status",
     "issue wait",
     "issue verify",
+    "issue verify-check",
     "issue renew",
+    "issue release",
+    "case list",
+    "case spec",
+    "case history",
+    "retest list",
     "issue detail",
     "issue tasks",
     "issue regression-preview",
-    "issue summarize",
+    "issue submit-summary",
     "execution show",
     "evidence list",
     "evidence read",
@@ -69,77 +86,295 @@ async def invoke(arguments):
     return process.returncode, stdout.decode("utf-8", errors="replace")
 
 
+LONG_COMMANDS = {"env init", "env update", "env check", "deploy", "replay", "fuzz run",
+                 "client start", "client stop", "client restart", "issue verify"}
+RequestId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")]
+JobId = Annotated[str, Field(pattern=re.compile(JOB_ID_PATTERN))]
+Timeout = Annotated[float, Field(gt=0, le=3600)]
+
+
+def envelope(command, code, message):
+    return {"schema_version":1, "ok":False, "command":command, "data":None,
+            "error":{"code":code,"message":message}}
+
+
+def tool_result(payload, code=0):
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],
+                          structuredContent=payload, isError=code != 0 or not payload["ok"])
+
+
+def prepare(command, arguments, config, default_config):
+    """Resolve one config path; explicit conflicts are never silently overridden."""
+    args = list(arguments or [])
+    clean, paths = [], []
+    index = 0
+    while index < len(args):
+        item = args[index]
+        if item == "--config":
+            index += 1
+            if index == len(args) or args[index].startswith("--"):
+                raise ValueError("--config requires a path")
+            paths.append(args[index])
+        elif item.startswith("--config="):
+            paths.append(item.split("=",1)[1])
+        else:
+            clean.append(item)
+        index += 1
+    if config is not None:
+        paths.append(config)
+    if any(not p.strip() for p in paths):
+        raise ValueError("config path cannot be empty")
+    paths = [str(Path(p).expanduser().resolve()) for p in paths]
+    if len(set(paths)) > 1:
+        raise ValueError("conflicting explicit config paths")
+    if command == "config init":
+        if paths:
+            raise ValueError("config init uses --output, not config/--config")
+        return clean, None
+    path = paths[0] if paths else str(Path(default_config or default_config_path()).expanduser().resolve())
+    if command in ("env init", "env update") and "--detach" not in clean:
+        clean.append("--detach")
+    return ["--config", path, *clean], path
+
+
 def create_server(default_config=None):
-    server = FastMCP(
-        "AFXX",
-        instructions=(
-            "Use afxx_help for command options. Commands may change the NPU environment "
-            "or platform state. init/update return a job ID; poll status. deploy and "
-            "issue verify are separate actions. stderr carries diagnostic logs."
-        ),
-    )
+    server = FastMCP("AFXX", instructions=(
+        "Prefer typed tools; afxx_run is for commands without a typed tool. Read afxx_help before constructing unfamiliar CLI arguments. Long commands return a local "
+        "invocation receipt: query afxx_operation_status with the same request_id for the CLI result. "
+        "A completed invocation is not necessarily a completed remote job. Use afxx_job_status or "
+        "afxx_issue_status next. Disconnecting does not cancel a submitted invocation. "
+        "Restart and verify remain separate explicit actions."))
+
+    async def dispatch(command, arguments=None, config=None, request_id=None):
+        try:
+            args, path = prepare(command, arguments, config, default_config)
+        except ValueError as error:
+            return tool_result(envelope(command, "CONFIG_CONFLICT", str(error)))
+        if command in LONG_COMMANDS:
+            if request_id is None or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id):
+                return tool_result(envelope(command, "INVALID_ARGUMENT", "long MCP commands require request_id for recovery"))
+            # Forward the same key to CLI operations that already support idempotent submission.
+            if command in {"env init", "env update", "env check", "deploy", "replay", "fuzz run"}:
+                keys = []
+                for i, value in enumerate(args):
+                    if value == "--request-id":
+                        keys.append(args[i+1] if i+1 < len(args) else "")
+                    elif value.startswith("--request-id="):
+                        keys.append(value.split("=",1)[1])
+                if keys and any(key != request_id for key in keys):
+                    return tool_result(envelope(command,"REQUEST_CONFLICT","tool and CLI request_id differ"))
+                if not keys:
+                    args += ["--request-id", request_id]
+            try:
+                payload = mcp_operations.submit(command, [*command.split(), *args], path, request_id)
+            except (OSError, ValueError) as error:
+                return tool_result(envelope(command,"OPERATION_STORAGE_ERROR",str(error)))
+            return tool_result(payload)
+        code, output = await invoke([*command.split(), *args])
+        try:
+            payload = json.loads(output)
+            if not isinstance(payload, dict) or type(payload.get("ok")) is not bool:
+                raise ValueError("invalid CLI envelope")
+        except (ValueError, TypeError):
+            payload = envelope(command,"CLI_PROTOCOL_ERROR", "CLI returned no valid workflow envelope")
+        return tool_result(payload,code)
 
     @server.tool()
-    async def afxx_help(command: Command | Literal["issue", "execution", "config", "evidence", "fuzz", "client"] | None = None) -> str:
-        """Read CLI command options without loading config or contacting the NPU."""
+    async def afxx_help(command: Command | Literal["issue", "execution", "config", "evidence", "fuzz", "client", "case", "platform", "retest"] | None = None) -> str:
+        """Read CLI help without loading config or contacting the NPU."""
         _, output = await invoke((command.split() if command else []) + ["--help"])
         return output
 
     @server.tool()
-    async def afxx_run(
-        command: Command,
-        arguments: list[str] | None = None,
-        config: str | None = None,
-    ) -> CallToolResult:
-        """Run an explicit workflow command, e.g. "issue preview" or "issue verify".
-        arguments are CLI tokens, never a shell command.
-        status returns compact progress; terminal replay automatically downloads complete evidence to /tmp.
-        Terminal replies contain evidence_path and basic failures, not dump contents.
-        replay --dump enables diagnostic dumps for that job without editing the config file.
-        --attempt selects an execution, --fields selects dotted fields.
-        --wait --since <cursor> returns changes/end or a tiny timeout receipt (default 30 seconds).
-
-        init/update are detached; use status --job-id to poll. Public commands only.
-        Init needs an existing local token file when platform is configured (no interactive prompt).
-        Successful init status/wait also synchronizes credentials to the NPU.
-        All commands default to ~/.config/afxx/config.yaml.
-        Override via tool config, --config argument, or server --config.
+    async def afxx_run(command: Command, arguments: list[str] | None = None,
+                       config: str | None = None, request_id: RequestId | None = None) -> CallToolResult:
+        """Fallback for commands without a dedicated typed tool; use afxx_help for arguments.
+        Arguments are tokens, never shell code. Short commands return the CLI envelope directly.
+        Long commands: env init/update/check, deploy, replay, fuzz run, client start/stop/restart, issue verify.
+        Long commands require request_id and return an invocation receipt; query afxx_operation_status.
+        Conflicting explicit config paths are rejected; server config is only a default.
         """
-        arguments = list(arguments or [])
-        path = config if config is not None else default_config
-        if path is not None and command != "config init":
-            arguments = ["--config", path, *arguments]
-        if command in ("env init", "env update") and "--detach" not in arguments:
-            arguments.append("--detach")
-        code, output = await invoke([*command.split(), *arguments])
-        try:
-            payload = json.loads(output)
-            if not isinstance(payload, dict) or "ok" not in payload:
-                raise ValueError("missing workflow envelope")
-        except (ValueError, TypeError):
-            payload = {
-                "schema_version": 1,
-                "ok": False,
-                "command": command,
-                "data": None,
-                "error": {
-                    "code": "CLI_PROTOCOL_ERROR",
-                    "message": output or f"CLI exited {code}",
-                },
-            }
-        return CallToolResult(
-            content=[
-                TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))
-            ],
-            structuredContent=payload,
-            isError=code != 0 or not payload["ok"],
-        )
+        return await dispatch(command, arguments, config, request_id)
+
+    @server.tool()
+    async def afxx_operation_status(request_id: RequestId) -> CallToolResult:
+        """Read durable local invocation state, including the original CLI result when completed.
+        No cancellation or resubmission. Works after MCP reconnect on this machine/account.
+        Completion describes the CLI call; use its job_id/round_no to track remote execution.
+        """
+        return tool_result(mcp_operations.status(request_id))
+
+    @server.tool()
+    async def afxx_deploy(request_id: RequestId, issue_id: str | None = None,
+                          config: str | None = None, dry_run: bool = False) -> CallToolResult:
+        """Sync, build and install through CLI; return a queryable invocation receipt."""
+        args = (["--issue-id",issue_id] if issue_id else []) + (["--dry-run"] if dry_run else [])
+        return await dispatch("deploy",args,config,request_id)
+
+    @server.tool()
+    async def afxx_replay(deploy_job_id: JobId, request_id: RequestId, seed: str | None = None,
+                         seeds_file: str | None = None, dump: bool = False,
+                         upload: bool | None = None, config: str | None = None) -> CallToolResult:
+        """Replay with a deployment reference; specify exactly one of seed or local seeds_file.
+        Returns an invocation receipt, then a replay job_id in the CLI result. Not managed replay.
+        """
+        if (seed is None) == (seeds_file is None):
+            return tool_result(envelope("replay","INVALID_ARGUMENT","provide exactly one of seed or seeds_file"))
+        args = ["--job-id",deploy_job_id] + (["--seed",seed] if seed is not None else ["--seeds-file",str(Path(seeds_file).expanduser().resolve())])
+        if dump: args += ["--dump"]
+        if upload is not None: args += ["--upload" if upload else "--no-upload"]
+        return await dispatch("replay",args,config,request_id)
+
+    @server.tool()
+    async def afxx_job_status(job_id: JobId, config: str | None = None,
+                              wait: bool = False, since: str | None = None,
+                              timeout: Annotated[float, Field(gt=0, le=50)] | None = None,
+                              attempt: str | None = None, fields: list[str] | None = None) -> CallToolResult:
+        """Query job summary, one attempt (optional fields), or wait for changes.
+        attempt and wait are exclusive; fields requires attempt; since/timeout require wait.
+        Fields are nonempty dotted field names. Terminal replay may download evidence.
+        """
+        if ((since is not None or timeout is not None) and not wait) or (attempt is not None and wait) or (fields is not None and attempt is None):
+            return tool_result(envelope("status", "INVALID_ARGUMENT", "attempt conflicts with wait; fields requires attempt; since/timeout require wait"))
+        if attempt is not None and not attempt.strip():
+            return tool_result(envelope("status", "INVALID_ARGUMENT", "attempt cannot be empty"))
+        if fields is not None and (not fields or not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", f) for f in fields)):
+            return tool_result(envelope("status", "INVALID_ARGUMENT", "fields must be nonempty dotted field names"))
+        args = ["--job-id", job_id]
+        if wait: args += ["--wait", "--timeout", str(timeout if timeout is not None else 30)]
+        if since is not None: args += ["--since", since]
+        if attempt is not None: args += ["--attempt", attempt]
+        if fields is not None: args += ["--fields", ",".join(fields)]
+        return await dispatch("status", args, config)
+
+    @server.tool()
+    async def afxx_client(action: Literal["status", "start", "stop", "restart"],
+                          request_id: RequestId | None = None, config: str | None = None,
+                          timeout: Timeout | None = None) -> CallToolResult:
+        """Manage the existing unique remote client.
+        status returns directly (default timeout 30s), does not prove retest readiness,
+        and rejects request_id. start/stop/restart require request_id and return a durable
+        invocation receipt; query afxx_operation_status (default timeout 300s).
+        Start may start fuzz. Stop/restart drain work; timeout does not force-kill.
+        Restart reuses the same client and does not submit verify.
+        """
+        command = "client " + action
+        if action == "status" and request_id is not None:
+            return tool_result(envelope(command, "INVALID_ARGUMENT", "client status does not accept request_id"))
+        if timeout is None:
+            timeout = 30 if action == "status" else 300
+        return await dispatch(command, ["--timeout", str(timeout)], config, request_id)
+
+    @server.tool()
+    async def afxx_issue(action: Literal["claim", "preview", "verify", "release", "verify-check"],
+                         issue_id: Annotated[str, Field(pattern=r"^[FAP][0-9]{1,9}$")],
+                         request_id: RequestId | None = None, deploy_job_id: JobId | None = None,
+                         round_no: Annotated[int, Field(ge=1, le=999999)] | None = None,
+                         wait: bool | None = None, timeout: Annotated[float, Field(gt=0, le=50)] | None = None,
+                         full: bool | None = None, config: str | None = None) -> CallToolResult:
+        """Act on an explicit issue_id (required for every action).
+        claim/release mutate the lease and require request_id; they return directly.
+        preview is read-only, accepts only full (optional), and returns directly.
+        verify-check requires round_no; optional wait/timeout (<=50s) polls read-only,
+        returns state/progress/failures directly, never renews or restarts. timed_out is not failure.
+        verify requires request_id and deploy_job_id, submits candidate verification and
+        returns an invocation receipt: query afxx_operation_status, then afxx_issue_status.
+        Restart the client separately before verification; this tool never restarts it.
+        For verify request_id identifies the local invocation; CLI owns platform idempotency.
+        Parameters irrelevant to the action are rejected, even full=false outside preview.
+        """
+        command = "issue " + action
+        supplied = {key for key, value in {"request_id": request_id, "deploy_job_id": deploy_job_id, "full": full, "round_no": round_no, "wait": wait, "timeout": timeout}.items() if value is not None}
+        allowed = {"claim": {"request_id"}, "preview": {"full"},
+                   "verify": {"request_id", "deploy_job_id"}, "release": {"request_id"}, "verify-check": {"round_no", "wait", "timeout"}}[action]
+        required = {"round_no"} if action == "verify-check" else set() if action == "preview" else allowed
+        if supplied - allowed or required - supplied:
+            return tool_result(envelope(command, "INVALID_ARGUMENT",
+                f"{action}: missing parameters {sorted(required - supplied)}; irrelevant parameters {sorted(supplied - allowed)}"))
+        args = ["--issue-id", issue_id]
+        if action == "verify-check":
+            if timeout is not None and wait is not True:
+                return tool_result(envelope(command, "INVALID_ARGUMENT", "timeout requires wait=true"))
+            args += ["--round-no", str(round_no)]
+            if wait: args += ["--wait"]
+            if timeout is not None: args += ["--timeout", str(timeout)]
+            return await dispatch(command, args, config)
+        if action == "verify":
+            return await dispatch(command, args + ["--job-id", deploy_job_id], config, request_id)
+        if action in ("claim", "release"):
+            args += ["--request-id", request_id]
+        elif full:
+            args += ["--full"]
+        return await dispatch(command, args, config)
+
+    @server.tool()
+    async def afxx_issue_status(issue_id: Annotated[str, Field(pattern=r"^[FAP][0-9]{1,9}$")],
+                                round_no: Annotated[int, Field(ge=1, le=999999)],
+                                include_tasks: bool = False, config: str | None = None) -> CallToolResult:
+        """Read verify/regression summary; optionally include tasks for both associated rounds.
+        round_no identifies the verify round. Pending is not failure. With include_tasks,
+        verification.tasks and regression.tasks contain their respective tasks; no lease needed.
+        """
+        args = ["--issue-id", issue_id, "--round-no", str(round_no)]
+        if include_tasks: args += ["--include-tasks"]
+        return await dispatch("issue status", args, config)
+
+    @server.tool()
+    async def afxx_execution_show(exec_uuid: Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{8,64}$")],
+                                   config: str | None = None) -> CallToolResult:
+        """Read platform execution details/logs by exec_uuid, not numeric exec_id.
+        Preserves log_missing/log_truncated; does not contact the NPU or require an issue lease.
+        """
+        return await dispatch("execution show", ["--exec-uuid", exec_uuid], config)
+
+    @server.tool()
+    async def afxx_evidence_list(job_id: JobId, offset: Annotated[int, Field(ge=0)] = 0,
+                                 config: str | None = None) -> CallToolResult:
+        """List remote replay evidence and failure associations. offset is a file-list cursor.
+        Requires the configured NPU connection; does not start replay or generate missing dumps.
+        """
+        return await dispatch("evidence list", ["--job-id", job_id, "--offset", str(offset)], config)
+
+    @server.tool()
+    async def afxx_evidence_read(job_id: JobId, path: str,
+                                 offset: Annotated[int, Field(ge=0)] = 0,
+                                 limit: Annotated[int, Field(ge=1, le=65536)] = 8192,
+                                 sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None,
+                                 config: str | None = None) -> CallToolResult:
+        """Read a remote artifact from evidence list in byte-sized pages.
+        path is the absolute remote path, never a local path. Reuse sha256 from a previous
+        read to reject changed content. CLI enforces allowed evidence roots and symlink restrictions.
+        """
+        if not path.startswith("/") or ".." in path.split("/"):
+            return tool_result(envelope("evidence read", "INVALID_ARGUMENT", "path must be absolute without parent traversal"))
+        args = ["--job-id", job_id, "--path", path, "--offset", str(offset), "--limit", str(limit)]
+        if sha256 is not None:
+            args += ["--sha256", sha256]
+        return await dispatch("evidence read", args, config)
+
+    @server.tool()
+    async def afxx_case(action: Literal["spec", "history"], case_key: str,
+                        after: Annotated[int, Field(ge=0)] | None = None,
+                        limit: Annotated[int, Field(ge=1, le=200)] | None = None,
+                        config: str | None = None) -> CallToolResult:
+        """Read a case's saved graph spec or execution history. Read-only, no NPU required.
+        spec returns graph metadata (empty object if absent) and rejects pagination parameters.
+        history defaults to 50 executions; pass next_cursor as after for the next page.
+        """
+        command = "case " + action
+        if action == "spec" and (after is not None or limit is not None):
+            return tool_result(envelope(command, "INVALID_ARGUMENT", "spec does not accept after/limit"))
+        args = ["--case-key", case_key]
+        if action == "history":
+            args += ["--limit", str(limit if limit is not None else 50)]
+            if after is not None: args += ["--after", str(after)]
+        return await dispatch(command, args, config)
 
     return server
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog="afxx mcp", description=__doc__, allow_abbrev=False)
+    parser = argparse.ArgumentParser(prog="afxx mcp", description=__doc__)
     parser.add_argument("--config", help="default workflow configuration path")
     args = parser.parse_args(argv)
     create_server(args.config).run(transport="stdio")

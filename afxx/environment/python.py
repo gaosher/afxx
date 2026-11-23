@@ -132,10 +132,10 @@ def validate(c, mode, target):
     )
     require(
         isinstance(p["afx"], dict)
-        and set(p["afx"]) in ({"wheel", "sha256"}, {"version", "wheel", "sha256"}),
+        and set(p["afx"]) == {"version"},
         "invalid AFX configuration",
     )
-    for name in ("torch_npu", "afx"):
+    for name in ("torch_npu",):
         checksum = p[name]["sha256"]
         require(
             checksum is None
@@ -168,35 +168,12 @@ def validate(c, mode, target):
             )
         )
     if target in (None, "afx"):
-        wheel = p["afx"]["wheel"]
-        version = p["afx"].get("version")
+        version = p["afx"]["version"]
         require(
-            (wheel is None) != (version is None),
-            "set exactly one of afx.version or afx.wheel",
+            isinstance(version, str) and (version == "latest" or re.fullmatch(
+                r"[0-9]+(?:[.][0-9a-zA-Z]+)*(?:[a-zA-Z]+[0-9]+)?", version)),
+            "afx.version must be latest or an exact release version",
         )
-        if version is not None:
-            require(
-                isinstance(version, str)
-                and (
-                    version == "latest"
-                    or re.fullmatch(
-                        r"[0-9]+(?:[.][0-9a-zA-Z]+)*(?:[a-zA-Z]+[0-9]+)?", version
-                    )
-                ),
-                "afx.version must be latest or an exact release version",
-            )
-            return p
-        require(
-            isinstance(wheel, str) and wheel.endswith(".whl"),
-            "fill afx.wheel with an absolute wheel path or HTTPS URL",
-        )
-        if wheel.startswith("https:"):
-            url(wheel)
-        else:
-            require(
-                Path(wheel).is_absolute() and Path(wheel).is_file(),
-                "AFX wheel must exist on the NPU host",
-            )
     return p
 
 
@@ -499,46 +476,35 @@ def artifact(c, target, job):
 def cache_wheel(c, target, job, staging, cache):
     p = c["python_env"]
     if target == "afx":
-        source = p["afx"]["wheel"]
-        if source is None:
-            version = p["afx"]["version"]
-            # Ignore host pip configuration so the default official PyPI index is used.
-            env = dict(clean_env(), PIP_CONFIG_FILE=os.devnull)
-            workflow_common.run(
-                [
-                    workflow_runtime.python(c),
-                    "-I",
-                    "-m",
-                    "pip",
-                    "download",
-                    "--no-deps",
-                    "--only-binary=:all:",
-                    "--dest",
-                    staging,
-                    "autofusex" if version == "latest" else "autofusex==" + version,
-                ],
-                env=env,
-                stdout=sys.stderr,
-            )
-            candidates = list(staging.glob("*.whl"))
-            require(len(candidates) == 1, "expected one autofusex wheel from PyPI")
-            path = candidates[0]
-            name = path.name
-            require(
-                not p["afx"]["sha256"]
-                or workflow_common.sha(path) == p["afx"]["sha256"],
-                "AFX wheel checksum mismatch",
-            )
-        else:
-            name = Path(urllib.parse.urlsplit(source).path).name
-            path = staging / name
-            fetch(source, path, p["afx"]["sha256"])
+        version = p["afx"]["version"]
+        # Ignore host pip configuration so the default official PyPI index is used.
+        env = dict(clean_env(), PIP_CONFIG_FILE=os.devnull)
+        workflow_common.run(
+            [
+                workflow_runtime.python(c),
+                "-I",
+                "-m",
+                "pip",
+                "download",
+                "--no-deps",
+                "--only-binary=:all:",
+                "--dest",
+                staging,
+                "autofusex" if version == "latest" else "autofusex==" + version,
+            ],
+            env=env,
+            stdout=sys.stderr,
+        )
+        candidates = list(staging.glob("*.whl"))
+        require(len(candidates) == 1, "expected one autofusex wheel from PyPI")
+        path = candidates[0]
+        name = path.name
         require(
             compatible_wheels(c, [name]) == [name],
             "AFX wheel incompatible with this interpreter/platform",
         )
         info = wheel_info(path, "autofusex")
-        if source is None and version != "latest":
+        if version != "latest":
             require(
                 info["version"] == version,
                 "AFX wheel version differs from configured version",
@@ -793,29 +759,8 @@ def planned_components(c, before, job):
             if candidate["sha256"] != previous["sha256"]:
                 plan.append((component, candidate))
             continue
-        elif desired.get("version"):
-            if desired["version"] == installed.get("version") and desired["sha256"] in (
-                None,
-                previous["sha256"],
-            ):
-                continue
-        else:
-            source = desired["wheel"]
-            checksum = desired["sha256"]
-            if Path(source).is_absolute():
-                actual = workflow_common.sha(source)
-                require(
-                    not checksum or checksum == actual,
-                    "AFX configured wheel checksum mismatch",
-                )
-                checksum = actual
-            if source == installed["wheel"] and checksum == previous["sha256"]:
-                continue
-            if source == installed["wheel"] and checksum is None:
-                candidate = artifact(c, component, job)
-                if candidate["sha256"] != previous["sha256"]:
-                    plan.append((component, candidate))
-                continue
+        elif desired["version"] == installed.get("version"):
+            continue
         plan.append((component, artifact(c, component, job)))
     return plan
 

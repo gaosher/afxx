@@ -406,6 +406,7 @@ def query_job(c, job_id, action="status"):
 
 
 def submit(c, request, request_id, dry_run):
+    workflow_common.validate_job_id(request_id)
     state = Path(c["local"]["state_dir"])
     identity = workflow_common.digest(request_id)
     record = state / "requests" / (identity + ".json")
@@ -427,8 +428,10 @@ def submit(c, request, request_id, dry_run):
                 "首次冻结任务被中断；检查本地目录后使用新的 request-id，不复用不完整快照。",
             )
         else:
+            workflow_common.require_code(not (state / request_id).exists() and not (state / request_id).is_symlink(),
+                                         "REQUEST_CONFLICT", "job directory already exists without a matching request record")
             saved = {
-                "job": uuid.uuid4().hex,
+                "job": request_id,
                 "fingerprint": fingerprint,
                 "prepared": False,
             }

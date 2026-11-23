@@ -843,12 +843,13 @@ def test_daily_python_and_cann_defaults(cfg):
         "base_python": "/fixture/bin/python",
         "uv_bin": "/fixture/bin/uv",
         "torch_version": "2.10.0+cpu",
-        "afx": {"wheel": "/fixture/afx.whl"},
+        "afx": {},
     }
     raw["cann"] = {"repository_url": "https://fixture.invalid/"}
     c = workflow_config.normalize_config(raw)
     assert c["python_env"]["state_dir"] == "/fixture/workspace/workflow-env-state"
     assert c["python_env"]["stable_requirements"][0] == "torch==2.10.0+cpu"
+    assert c["python_env"]["afx"] == {"version": "latest"}
     assert c["python_env"]["torch_npu"]["date"] == "latest"
     assert c["python_env"]["torch_npu"]["version"] == "2.10.0"
     assert c["cann"]["auto_install"] and not c["cann"]["nnal"]
@@ -1134,3 +1135,11 @@ def test_replay_dump_override_is_frozen_without_editing_config(cfg, tmp_path, co
     frozen = yaml.safe_load((Path(data["local"]) / "config.yaml").read_text())
     assert frozen["replay"]["dump"] is expected
     assert path.read_text() == original
+
+
+@pytest.mark.parametrize('removed', ['wheel', 'sha256'])
+def test_afx_rejects_removed_source_options(cfg, removed):
+    raw = minimal_config(cfg)
+    raw['python_env'] = {'afx': {removed: '/fixture/afx.whl' if removed == 'wheel' else 'a' * 64}}
+    with pytest.raises(ValueError, match='unknown configuration'):
+        workflow_config.normalize_config(raw)

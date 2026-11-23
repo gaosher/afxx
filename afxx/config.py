@@ -224,7 +224,7 @@ def normalize_config(raw):
                 "url_template": None,
                 "sha256": None,
             },
-            "afx": {"version": None, "wheel": None, "sha256": None},
+            "afx": {"version": "latest"},
         }
     if "cann" in raw:
         defaults["cann"] = {
@@ -243,9 +243,6 @@ def normalize_config(raw):
     if "python_env" in c:
         if c["python_env"]["python_dir"] is None:
             c["python_env"]["python_dir"] = str(Path(c["runtime"]["venv_dir"]).parent / "python")
-        afx = c["python_env"]["afx"]
-        if afx.get("version") is None and afx.get("wheel") is None:
-            afx["version"] = "latest"
     c.pop("workflow_root")
     c["remote"].pop("workspace")
 

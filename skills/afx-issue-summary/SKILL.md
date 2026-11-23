@@ -29,4 +29,4 @@ description: 根据 AFX issue 的修复源码、实际 IR/日志和验证结果�
 
 默认写到 `<local.state_dir>/issues/<issue-id>/summary.yaml`，用户指定路径时沿用；从任务配置解析 state_dir，不猜环境或硬编码目录。总结放在源码 worktree 外，不随源码同步。更新已有总结时以当前修复证据为准，保留仍有效的技术分析。
 
-交付文件绝对路径、修复 commit（若有）和影响检视的证据缺口，标记“待人工检视”。本 skill 不执行 issue summarize、不上传附件、不关闭 issue。人工检视后如用户明确要求发布，再按 [平台提交说明](../afx-issue-repair/references/platform-evidence.md) 执行独立命令；生成总结不代表平台已 resolved 或代码已合入。
+交付文件绝对路径、修复 commit（若有）和影响检视的证据缺口，标记“待人工检视”。本 skill 不执行 issue submit-summary、不上传附件、不关闭 issue。人工检视后如用户明确要求发布，再按 [平台提交说明](../afx-issue-repair/references/platform-evidence.md) 执行独立命令；生成总结不代表平台已 resolved 或代码已合入。

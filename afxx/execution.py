@@ -157,10 +157,8 @@ def frozen_config(c, manifest):
     p = dict(
         c["python_env"],
         torch_npu=daily["source"],
-        afx=dict(afx["source"], sha256=afx["sha256"]),
+        afx={"version": afx["metadata"]["version"]},
     )
-    if p["afx"].get("wheel") and Path(p["afx"]["wheel"]).is_absolute():
-        p["afx"]["wheel"] = afx["path"]
     locked = Path(manifest["lock"]["path"]).read_text()
     workflow_common.require(
         hashlib.sha256(locked.encode()).hexdigest() == manifest["lock"]["sha256"],

@@ -66,7 +66,7 @@ def response(command, data=None, error=None):
     return {
         "schema_version": 1,
         "ok": error is None,
-        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-", "client-")) else command,
+        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-", "client-", "case-", "platform-", "retest-")) else command,
         "data": data,
         "error": None if error is None else {"code": error.code, "message": str(error)},
     }
@@ -90,19 +90,33 @@ def parse_arguments():
         "fuzz-run",
     )
     issues = (
+        "issue-list",
+        "issue-cases",
         "issue-claim",
         "issue-preview",
         "issue-status",
         "issue-wait",
         "issue-verify",
+        "issue-verify-check",
         "issue-renew",
+        "issue-release",
         "issue-detail",
         "issue-tasks",
         "issue-regression-preview",
-        "issue-summarize",
+        "issue-submit-summary",
     )
     clients = tuple("client-" + action for action in ("status", "start", "stop", "restart"))
+    queries = ("platform-me", "platform-summary", "case-list", "case-spec", "case-history", "retest-list")
     descriptions = {
+        "issue-list": "分页查询平台问题",
+        "issue-cases": "分页查询问题关联用例",
+        "platform-me": "查询当前 token 的用户身份",
+        "platform-summary": "查询平台运行概况",
+        "issue-release": "释放已领取问题的租约",
+        "case-list": "筛选并分页查询用例及最近执行",
+        "case-spec": "查看用例保存的图元数据",
+        "case-history": "分页查询用例执行历史",
+        "retest-list": "查询当前用户的手动复测批次",
         **{name: "管理远端唯一 AFX client：" + name.split("-", 1)[1] for name in clients},
         "init": "远端环境：初始化 Python 和 CANN 环境",
         "update": "远端环境：按配置更新 Python 依赖，默认不更新 CANN",
@@ -117,25 +131,29 @@ def parse_arguments():
         "issue-preview": "问题验证：查看复现用例和失败摘要",
         "issue-status": "问题验证：查询平台验证和回归结果",
         "issue-wait": "问题验证：轮询等待验证和回归结果",
+        "issue-verify-check": "只读检查验证和关联回归，可等待并汇总失败任务",
         "issue-verify": "问题验证：针对已部署的 AF 提交验证",
         "issue-renew": "问题验证：续期已领取问题的租约",
         "issue-detail": "问题查询：查看生命周期、租约和历史轮次",
         "issue-tasks": "问题查询：查看指定轮次的任务与失败信息",
         "issue-regression-preview": "问题查询：预览平台回归候选集",
-        "issue-summarize": "问题归档：提交已检视的本地修复总结",
+        "issue-submit-summary": "问题归档：提交已检视的本地修复总结",
         "execution-show": "执行查询：查看执行详情、Shape 和日志",
         "evidence-list": "定位证据：分页列出远端复测产物与失败关联",
         "evidence-read": "定位证据：按字节分页读取日志、IR 和代码",
         "doctor": "本地检查：检查配置、连接工具及登录状态",
     }
-    for name in (*env_jobs, *jobs, *issues, *clients, "fuzz-status", "fuzz-stop", "execution-show", "evidence-list", "evidence-read", "status", "doctor"):
+    for name in (*env_jobs, *jobs, *issues, *clients, *queries, "fuzz-status", "fuzz-stop", "execution-show", "evidence-list", "evidence-read", "status", "doctor"):
         parent = commands
         leaf = name
-        if name in env_jobs or name.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-", "client-")):
+        if name in env_jobs or name.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-", "client-", "case-", "platform-", "retest-")):
             group = "env" if name in env_jobs else name.split("-", 1)[0]
             leaf = name if group == "env" else name.split("-", 1)[1]
             if group not in groups:
                 summary = {
+                    "platform": "查询平台身份与运行概况",
+                    "case": "查询用例图及执行历史",
+                    "retest": "查询手动复测批次",
                     "client": "查询、启动、停止和重启远端 AFX client",
                     "fuzz": "运行、查询和停止远端 AFX 随机测试",
                     "env": "管理远端 Python、CANN 和依赖环境",
@@ -160,8 +178,8 @@ def parse_arguments():
         )
         if name in (*env_jobs, *jobs) or name == "doctor":
             cmd.add_argument("--dry-run", action="store_true")
-        if name in (*env_jobs, *jobs) or name in ("issue-claim", "issue-summarize"):
-            cmd.add_argument("--request-id", required=name == "issue-summarize")
+        if name in (*env_jobs, *jobs) or name in ("issue-claim", "issue-submit-summary", "issue-release"):
+            cmd.add_argument("--request-id", required=name in ("issue-submit-summary", "issue-release"))
         if name in clients:
             cmd.add_argument("--timeout", type=float, default=300, help="等待生命周期完成的秒数，默认 300；超时不强杀")
         if name in ("init", "update"):
@@ -170,15 +188,41 @@ def parse_arguments():
             cmd.add_argument(
                 "--full", action="store_true", help="show full preview details"
             )
-        if name == "deploy" or name in issues:
-            cmd.add_argument("--issue-id", required=name not in ("deploy", "issue-verify", "issue-claim"),
+        if name == "deploy" or (name in issues and name != "issue-list"):
+            cmd.add_argument("--issue-id", required=name not in ("deploy", "issue-verify"),
                              help="AFX platform issue, e.g. F152")
-        if name in ("issue-wait", "issue-status"):
+        if name in ("issue-wait", "issue-status", "issue-verify-check"):
             cmd.add_argument("--round-no", type=int, required=True, help="verification round returned by issue verify")
-        if name == "issue-summarize":
+        if name == "issue-verify-check":
+            cmd.add_argument("--wait", action="store_true")
+            cmd.add_argument("--timeout", type=float)
+        if name == "issue-status":
+            cmd.add_argument("--include-tasks", action="store_true", help="include verification and associated regression tasks")
+        if name == "issue-submit-summary":
             cmd.add_argument("--summary-file", required=True, help="reviewed local YAML knowledge fields")
         if name == "issue-tasks":
             cmd.add_argument("--round-no", type=int, required=True, help="verify or regression round number")
+        if name in ("case-spec", "case-history"):
+            cmd.add_argument("--case-key", required=True)
+        if name == "case-list":
+            for option in ("backend", "arch", "q"):
+                cmd.add_argument("--" + option)
+            cmd.add_argument("--status", choices=("pass", "fail", "function_fail", "accuracy_fail"))
+            selector = cmd.add_mutually_exclusive_group()
+            selector.add_argument("--case-key")
+            selector.add_argument("--case-id", type=int)
+        if name in ("case-history", "case-list"):
+            cmd.add_argument("--after", type=int)
+            cmd.add_argument("--limit", type=int, default=50)
+        if name == "issue-list":
+            for option in ("dimension", "backend", "status", "q", "after"):
+                cmd.add_argument("--" + option)
+            cmd.add_argument("--limit", type=int, default=50)
+        if name == "issue-cases":
+            cmd.add_argument("--role", choices=("affected", "regression"), default="affected")
+            cmd.add_argument("--after", type=int)
+        if name == "platform-summary":
+            cmd.add_argument("--scope", choices=("mine", "all"), default="mine")
         if name == "execution-show":
             cmd.add_argument("--exec-uuid", required=True, help="AFX execution UUID, not numeric exec_id")
         if name == "issue-wait":
@@ -272,11 +316,7 @@ def main():
     if args.issue_id is not None:
         platform.validate_issue_id(args.issue_id)
     if args.job is not None:
-        workflow_common.require_code(
-            re.fullmatch(r"[0-9a-f]{32}", args.job),
-            "INVALID_ARGUMENT",
-            "invalid job ID",
-        )
+        workflow_common.validate_job_id(args.job)
     workflow_common.require_code(
         args.request_id is None
         or re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", args.request_id),
@@ -303,16 +343,36 @@ def main():
         workflow_common.require_code(math.isfinite(args.timeout) and 0 < args.timeout <= 3600,
                                      "INVALID_ARGUMENT", "client timeout must be in (0, 3600]")
         return workflow_jobs.client_control(c, args.command.split("-", 1)[1], args.timeout)
+    if args.command == "platform-me":
+        return platform.platform_me(c)
+    if args.command == "platform-summary":
+        return platform.platform_summary(c, scope=args.scope)
+    if args.command == "case-list":
+        return platform.case_list(c, **{key: getattr(args, key) for key in ("backend", "status", "arch", "case_key", "case_id", "q", "after", "limit")})
+    if args.command == "case-spec":
+        return platform.case_spec(c, args.case_key)
+    if args.command == "case-history":
+        return platform.case_history(c, args.case_key, after=args.after, limit=args.limit)
+    if args.command == "retest-list":
+        return platform.retest_list(c)
     if args.command == "execution-show":
         return platform.execution_detail(c, args.exec_uuid)
     if args.command.startswith("issue-"):
         workflow_config.platform_settings(c)
+        if args.command == "issue-list":
+            return platform.issue_list(c, **{key: getattr(args, key) for key in ("dimension", "backend", "status", "q", "after", "limit")})
+        if args.command == "issue-cases":
+            return platform.issue_cases(c, args.issue_id, role=args.role, after=args.after)
         if args.command == "issue-claim":
             request_id = args.request_id or uuid.uuid4().hex
             if args.request_id is None:
                 print(f"issue claim --request-id {request_id}", file=sys.stderr, flush=True)
             return platform.claim(c, request_id, issue_id=args.issue_id)
-        if args.command == "issue-summarize":
+        if args.command == "issue-verify-check":
+            return platform.verify_check(c, args.issue_id, args.round_no, wait=args.wait, timeout=args.timeout)
+        if args.command == "issue-release":
+            return platform.release(c, args.issue_id, args.request_id)
+        if args.command == "issue-submit-summary":
             return platform.summarize(c, args.issue_id, args.summary_file, args.request_id)
         if args.command == "issue-detail":
             return platform.issue_detail(c, args.issue_id)
@@ -332,7 +392,7 @@ def main():
                     "invalid timeout",
                 )
                 return platform.wait(c, args.issue_id, args.round_no, args.timeout)
-            return platform.poll(c, args.issue_id, args.round_no)
+            return platform.poll(c, args.issue_id, args.round_no, include_tasks=True) if args.include_tasks else platform.poll(c, args.issue_id, args.round_no)
         workflow_jobs.local_preflight("status")
         directory = str(Path(c["remote"]["state_dir"]) / args.job)
         lease = platform.claimed(c, args.issue_id) if args.issue_id else None
@@ -493,7 +553,7 @@ def cli():
         mcp_main(sys.argv[2:])
         return 0
     command = sys.argv[1] if len(sys.argv) > 1 else None
-    if command in ("issue", "execution", "config", "evidence", "fuzz", "skills", "client") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
+    if command in ("issue", "execution", "config", "evidence", "fuzz", "skills", "client", "case", "platform", "retest") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()

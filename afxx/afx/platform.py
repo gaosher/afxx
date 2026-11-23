@@ -7,6 +7,7 @@ from afxx.environment import runtime as workflow_runtime
 
 import contextlib
 import json
+import math
 from pathlib import Path
 import re
 import threading
@@ -96,13 +97,15 @@ def record_path(c, issue_id):
     )
 
 
-def claimed(c, issue_id):
+def claimed(c, issue_id, *, allow_released=False):
     value = workflow_common.read(record_path(c, issue_id))
     workflow_common.require(
         value["platform_url"] == workflow_config.platform_settings(c)["url"]
         and value["agent_id"] == c["platform"]["agent_id"],
         "issue belongs to another platform or agent",
     )
+    workflow_common.require_code(allow_released or not value.get("release"),
+                                 "ISSUE_RELEASED", "issue lease has been released; claim again")
     return value
 
 
@@ -141,6 +144,8 @@ def claim(c, request_key, *, issue_id=None):
                 or prior["lease_id"] == value["lease_id"],
                 "stale claim retry; newer lease exists locally",
             )
+        if path.exists() and prior.get("release") and prior["lease_id"] == value["lease_id"]:
+            raise workflow_common.WorkflowError("ISSUE_RELEASED", "claim retry refers to a released lease; use a new request-id")
         workflow_common.write(path, value)
     return value
 
@@ -401,12 +406,15 @@ def execution_detail(c, exec_uuid):
     return value
 
 
-def poll(c, issue_id, round_no):
+def poll(c, issue_id, round_no, *, include_tasks=False):
     validate_issue_id(issue_id)
     workflow_common.require(
         type(round_no) is int and round_no > 0, "round number must be positive"
     )
-    detail = issue_detail(c, issue_id)
+    return round_status(c, issue_detail(c, issue_id), issue_id, round_no, include_tasks=include_tasks)
+
+
+def round_status(c, detail, issue_id, round_no, *, include_tasks=False):
     rounds = detail["rounds"]
     verification = next((r for r in rounds if r["round_no"] == round_no), None)
     workflow_common.require(
@@ -424,6 +432,10 @@ def poll(c, issue_id, round_no):
             ),
             "regression candidate differs from verification",
         )
+    if include_tasks:
+        verification = dict(verification, tasks=issue_tasks(c, issue_id, verification["round_no"])["tasks"])
+        if regression:
+            regression = dict(regression, tasks=issue_tasks(c, issue_id, regression["round_no"])["tasks"])
     last = regression or verification
     terminal = last["finished_at"] is not None
     return {
@@ -483,3 +495,222 @@ def retry_remote(job, lease=None):
             "error_code": "PLATFORM_VERIFY_FAILED",
             "error": str(error),
         }
+
+
+def release(c, issue_id, request_id):
+    """Release the claimed lease; retain the successful receipt for safe retries."""
+    workflow_common.require(isinstance(request_id, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id),
+                            "release requires a valid request-id")
+    path = record_path(c, issue_id)
+    with workflow_common.lock(path.with_suffix(".lock")):
+        lease = claimed(c, issue_id, allow_released=True)
+        receipt = path.with_suffix("") / "releases" / (workflow_common.digest(request_id) + ".json")
+        body = {"lease_id": lease["lease_id"], "request_key": request_id}
+        context = {key: lease[key] for key in ("platform_url", "agent_id")}
+        state = workflow_common.read(receipt) if receipt.exists() else {}
+        if state:
+            workflow_common.require_code(state["body"] == body and state["context"] == context,
+                                         "REQUEST_CONFLICT", "release request-id belongs to another lease or platform")
+        else:
+            workflow_common.require_code(not lease.get("release"), "ISSUE_RELEASED", "lease already released")
+            state = {"body": body, "context": context}
+            workflow_common.write(receipt, state)
+        if "response" not in state:
+            value = call(c, "POST", f"/api/issues/{issue_id}/release", body)
+            workflow_common.require_code(isinstance(value, dict) and value.get("issue_id") == issue_id
+                                         and isinstance(value.get("status"), str),
+                                         "PLATFORM_RESPONSE_INVALID", "invalid release response")
+            state["response"] = value
+            workflow_common.write(receipt, state)
+        lease["release"] = {"request_id": request_id, "response": state["response"]}
+        workflow_common.write(path, lease)
+        return state["response"]
+
+
+def case_path(case_key):
+    workflow_common.require(isinstance(case_key, str) and case_key.strip() == case_key
+                            and bool(case_key) and case_key not in (".", "..")
+                            and not any(ch.isspace() or ord(ch) < 32 for ch in case_key),
+                            "invalid case key")
+    return "/api/cases/" + urllib.parse.quote(case_key, safe="")
+
+
+def case_spec(c, case_key):
+    value = call(c, "GET", case_path(case_key) + "/spec")
+    workflow_common.require_code(isinstance(value, dict), "PLATFORM_RESPONSE_INVALID", "invalid case spec")
+    return value
+
+
+def case_history(c, case_key, *, after=None, limit=50):
+    path = case_path(case_key)
+    workflow_common.require(type(limit) is int and 1 <= limit <= 200, "limit must be 1..200")
+    workflow_common.require(after is None or (type(after) is int and after >= 0), "after must be a nonnegative cursor")
+    params = {"limit": limit}
+    if after is not None:
+        params["after"] = after
+    value = call(c, "GET", path + "/history?" + urllib.parse.urlencode(params))
+    workflow_common.require_code(isinstance(value, dict) and isinstance(value.get("case"), dict)
+                                 and value["case"].get("case_key") == case_key
+                                 and isinstance(value.get("executions"), list)
+                                 and type(value.get("total")) is int
+                                 and "next_cursor" in value
+                                 and (value["next_cursor"] is None or type(value["next_cursor"]) is int),
+                                 "PLATFORM_RESPONSE_INVALID", "invalid case history")
+    return value
+
+
+def retest_list(c):
+    value = call(c, "GET", "/api/retests")
+    workflow_common.require_code(isinstance(value, list), "PLATFORM_RESPONSE_INVALID", "invalid retests list")
+    return value
+
+
+def issue_list(c, *, dimension=None, backend=None, status=None, q=None, after=None, limit=50):
+    workflow_common.require(type(limit) is int and 1 <= limit <= 200, "limit must be 1..200")
+    params = {"limit": limit}
+    for key, value in (("dimension", dimension), ("backend", backend), ("status", status), ("after", after)):
+        if value is not None:
+            workflow_common.require(isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:/+<>=-]{1,256}", value), "invalid " + key)
+            params[key] = value
+    if q is not None:
+        workflow_common.require(isinstance(q, str) and 1 <= len(q) <= 128 and not any(ord(ch) < 32 or ord(ch) == 127 for ch in q), "invalid q")
+        params["q"] = q
+    value = call(c, "GET", "/api/issues?" + urllib.parse.urlencode(params))
+    workflow_common.require_code(isinstance(value, dict) and isinstance(value.get("issues"), list)
+                                 and "next_cursor" in value and (value["next_cursor"] is None or isinstance(value["next_cursor"], str)),
+                                 "PLATFORM_RESPONSE_INVALID", "invalid issue list")
+    return value
+
+
+def issue_cases(c, issue_id, *, role="affected", after=None):
+    validate_issue_id(issue_id)
+    workflow_common.require(role in ("affected", "regression"), "role must be affected or regression")
+    workflow_common.require(after is None or (type(after) is int and after >= 0), "after must be a nonnegative cursor")
+    params = {"role": role}
+    if after is not None:
+        params["after"] = after
+    value = call(c, "GET", f"/api/issues/{issue_id}/cases?" + urllib.parse.urlencode(params))
+    workflow_common.require_code(isinstance(value, dict) and isinstance(value.get("cases"), list)
+                                 and "next_cursor" in value and (value["next_cursor"] is None or type(value["next_cursor"]) is int),
+                                 "PLATFORM_RESPONSE_INVALID", "invalid issue cases")
+    return value
+
+
+def platform_me(c):
+    value = call(c, "GET", "/api/me")
+    workflow_common.require_code(isinstance(value, dict) and isinstance(value.get("user_id"), str)
+                                 and isinstance(value.get("role"), str), "PLATFORM_RESPONSE_INVALID", "invalid platform identity")
+    return value
+
+
+def platform_summary(c, *, scope="mine"):
+    workflow_common.require(scope in ("mine", "all"), "scope must be mine or all")
+    value = call(c, "GET", "/api/ops/summary?" + urllib.parse.urlencode({"scope": scope}))
+    workflow_common.require_code(isinstance(value, dict) and isinstance(value.get("clients"), list),
+                                 "PLATFORM_RESPONSE_INVALID", "invalid platform summary")
+    return value
+
+
+def case_list(c, *, backend=None, status=None, arch=None, case_key=None, case_id=None, q=None, after=None, limit=50):
+    workflow_common.require(type(limit) is int and 1 <= limit <= 200, "limit must be 1..200")
+    workflow_common.require(after is None or (type(after) is int and after >= 0), "after must be a nonnegative cursor")
+    workflow_common.require(case_id is None or (type(case_id) is int and case_id > 0), "case-id must be positive")
+    workflow_common.require(case_id is None or case_key is None, "case-id and case-key are mutually exclusive")
+    exact = case_id is not None or case_key is not None
+    workflow_common.require(not exact or all(v is None for v in (backend, status, arch, q, after)),
+                            "exact case lookup cannot combine filters or after")
+    workflow_common.require(q is None or all(v is None for v in (backend, status, arch)),
+                            "combine backend/status/arch into q instead of separate filters")
+    workflow_common.require(status is None or status in ("pass", "fail", "function_fail", "accuracy_fail"), "invalid status")
+    workflow_common.require((status is None and arch is None) or backend is not None, "status/arch require backend")
+    params = {"limit": limit}
+    for key, value in (("backend", backend), ("status", status), ("arch", arch), ("case_key", case_key)):
+        if value is not None:
+            workflow_common.require(isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:/+<>=-]{1,256}", value), "invalid " + key)
+            params[key] = value
+    if q is not None:
+        workflow_common.require(isinstance(q, str) and bool(q.strip()) and len(q) <= 128
+                                and not any(ord(ch) < 32 or ord(ch) == 127 for ch in q), "invalid q")
+        params["q"] = q
+    for key, value in (("case_id", case_id), ("after", after)):
+        if value is not None:
+            params[key] = value
+    value = call(c, "GET", "/api/cases?" + urllib.parse.urlencode(params))
+    workflow_common.require_code(isinstance(value, dict) and isinstance(value.get("groups"), list)
+                                 and all(isinstance(g, dict) and isinstance(g.get("case"), dict)
+                                         and isinstance(g.get("executions"), list) and type(g.get("more_executions")) is bool
+                                         for g in value["groups"])
+                                 and "next_cursor" in value and (value["next_cursor"] is None or type(value["next_cursor"]) is int),
+                                 "PLATFORM_RESPONSE_INVALID", "invalid case list")
+    return value
+
+
+def verify_check_once(c, issue_id, round_no):
+    detail = issue_detail(c, issue_id)
+    snapshot = round_status(c, detail, issue_id, round_no, include_tasks=True)
+    verification, regression = snapshot["verification"], snapshot["regression"]
+    failures = []
+    summaries = {}
+    for phase, rnd in (("verification", verification), ("regression", regression)):
+        if rnd is None:
+            summaries[phase] = None
+            continue
+        counts = {}
+        for task in rnd["tasks"]:
+            result = task.get("result") or task.get("status") or "unknown"
+            counts[result] = counts.get(result, 0) + 1
+            if result in ("fail", "invalid", "cancelled", "skip"):
+                item = {k: task[k] for k in ("task_id", "case_key", "npu_arch", "status", "result", "exec_uuid", "executions") if k in task}
+                item.update(phase=phase, round_no=rnd["round_no"], detail=str(task.get("detail") or "")[:1000])
+                failures.append(item)
+        summaries[phase] = {k: v for k, v in rnd.items() if k != "tasks"}
+        summaries[phase].update(task_count=len(rnd["tasks"]), counts=counts)
+    state, phase, reason = "running", "verification", None
+    def completed_state(rnd, summary):
+        if rnd["finished_at"] is None:
+            return "running"
+        if rnd.get("outcome") == "failed":
+            return "failed"
+        if rnd.get("outcome") == "invalid":
+            return "invalid"
+        counts = summary["counts"]
+        if rnd.get("outcome") == "passed" and summary["task_count"] > 0 and set(counts) == {"pass"}:
+            return "passed"
+        return "attention"
+    state = completed_state(verification, summaries["verification"])
+    if state == "passed":
+        if regression is not None:
+            phase = "regression"
+            state = completed_state(regression, summaries["regression"])
+        else:
+            newer = any(r["round_no"] > round_no for r in detail["rounds"])
+            phase = "regression_selection"
+            if not newer and detail["status"] in ("summarizing", "resolved"):
+                reason = "no_regression_candidates"
+            elif newer or detail["status"] not in ("verifying", "regressing"):
+                state, reason = "attention", "cannot_confirm_regression_selection"
+            else:
+                state = "running"
+    return dict(issue_id=issue_id, round_no=round_no, issue_status=detail["status"],
+                state=state, phase=phase, reason=reason, verification=summaries["verification"],
+                regression=summaries["regression"], failures=failures[:20], failure_count=len(failures),
+                failures_truncated=len(failures) > 20, timed_out=False,
+                next_action="wait" if state == "running" else "review_summary" if state == "passed" else "inspect")
+
+
+def verify_check(c, issue_id, round_no, *, wait=False, timeout=None):
+    validate_issue_id(issue_id)
+    workflow_common.require(type(round_no) is int and 1 <= round_no <= 999999, "invalid round number")
+    workflow_common.require(type(wait) is bool, "wait must be boolean")
+    workflow_common.require(timeout is None or (wait and isinstance(timeout, (int, float)) and not isinstance(timeout, bool)
+                            and math.isfinite(timeout) and 0 < timeout <= 50), "timeout requires wait and must be in (0, 50]")
+    deadline = time.monotonic() + (timeout if timeout is not None else 30)
+    while True:
+        result = verify_check_once(c, issue_id, round_no)
+        if not wait or result["state"] != "running":
+            return result
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            result["timed_out"] = True
+            return result
+        time.sleep(min(5, remaining))

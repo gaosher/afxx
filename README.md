@@ -5,6 +5,7 @@ AFXX 是适配 AFX 的开发与问题修复工具包，从本地工作区同步�
 安装后使用 `afxx` 命令；`afxx mcp` 提供 stdio MCP 接口。命令和远端任务共用同一套业务模块，上传文件从已安装的 wheel 中取得，无需保留本工具源码。源码仓库由配置指定，命令可在任意目录执行。
 
 - [命令参考与参数矩阵](docs/afxx-commands.md)
+- [CLI / MCP / 平台 API 实现对照](docs/PLATFORM_API_MAPPING.md)
 - [配置说明与默认值](docs/CONFIGURATION.md) · [YAML 模板](afxx/resources/config.example.yaml)
 - [Agent 调用约定](docs/AGENT_USAGE.md) · [问题修复 Skill](skills/afx-issue-repair/SKILL.md) · [修复总结 Skill](skills/afx-issue-summary/SKILL.md)
 - [设计与模块边界](docs/DESIGN.md)
@@ -157,13 +158,13 @@ afxx issue verify --issue-id F152 --job-id <deploy-job-id>
 
 ### 平台分配与结果查询
 
-省略 `--issue-id` 时，平台分配一个待修复问题；没有任务时返回 `data=null`。
+领取必须显式指定 `--issue-id`；可先用 `issue list` 查找待修复问题。
 
 ```bash
-afxx issue claim --request-id claim-001
+afxx issue claim --issue-id F152 --request-id claim-001
 # 使用 verify 返回的 round_no
 afxx issue status --issue-id F152 --round-no 1
-afxx issue wait --issue-id F152 --round-no 1 --timeout 3600
+afxx issue verify-check --issue-id F152 --round-no 1 --wait --timeout 30
 ```
 
 verify 在远端核对部署记录与实际加载的 AF，确认官方客户端已启动后向 `/api/issues/{id}/verify` 提交 lease_id、fix_version、fix_sha256 和 request_key。job 的 platform.json 保存固定请求和回执。网络失败后重试同一部署会复用请求键；不同修复使用新的部署 job。
@@ -181,7 +182,7 @@ afxx issue regression-preview --issue-id F152
 afxx execution show --exec-uuid <exec_uuid>
 ```
 
-`detail` 返回生命周期、租约、轮次和事件；`tasks` 查询实际验证或回归轮次，返回 issue_id、round_no 和 tasks。回归候选预览不等于最终执行集。`execution show` 使用执行 UUID（不是数值 exec_id），返回环境、Shape、日志及平台的 log_truncated/log_missing 标记；不将截断日志标为完整。修复总结先在本地整理、人工检视，再通过独立的 `issue summarize` 显式发布。
+`detail` 返回生命周期、租约、轮次和事件；`tasks` 查询实际验证或回归轮次，返回 issue_id、round_no 和 tasks。回归候选预览不等于最终执行集。`execution show` 使用执行 UUID（不是数值 exec_id），返回环境、Shape、日志及平台的 log_truncated/log_missing 标记；不将截断日志标为完整。修复总结先在本地整理、人工检视，再通过独立的 `issue submit-summary` 显式发布。
 
 ### 检视后提交修复总结
 
@@ -197,7 +198,7 @@ fix_ref: "实际修复 commit SHA"
 ```
 
 ```bash
-afxx issue summarize --issue-id F152 \
+afxx issue submit-summary --issue-id F152 \
   --summary-file /absolute/path/summary.yaml --request-id summary-F152-001
 ```
 
@@ -333,7 +334,7 @@ python3 -m pytest tests -q
 
 测试使用临时目录、Git/rsync 和构建、平台、设备接口夹具，覆盖同步、幂等、更新回滚、环境冻结、结果判定和平台验证轮次。真实编包、NPU 执行及平台联调需在配置的目标环境验证。
 
-测试分层：业务规则和边界在所属模块测试；deploy/replay 编排覆盖成功路由与各阶段失败，不对无关开关做全组合；CLI 验证公开路由和响应；MCP 只验证 stdio 握手、帮助、命令执行及错误封装。各命令共用的远端 bundle 只做一次独立导入验证。幂等、并发、回滚、源码保护和结果判定仍保留故障场景覆盖。
+测试分层：业务规则和边界在所属模块测试；deploy/replay 编排覆盖成功路由与各阶段失败，不对无关开关做全组合；CLI 验证公开路由和响应；MCP 验证参数 schema、配置冲突、CLI 转发一致性、调用去重以及 stdio 断开重连后的结果查询。各命令共用的远端 bundle 只做一次独立导入验证。幂等、并发、回滚、源码保护和结果判定仍保留故障场景覆盖。
 
 发布前必须指定 AFX 源码运行完整测试及真实契约测试：
 
@@ -395,9 +396,10 @@ codex mcp add afxx -- /absolute/path/to/afxx mcp --config /absolute/path/config.
 
 如需指定其他配置，将 args 改为 `["mcp", "--config", "/absolute/path/config.yaml"]`。无需手动在终端常驻运行 afxx mcp，客户端负责启动它。
 
-提供两个工具：`afxx_help(command)` 查询命令参数；`afxx_run(command, arguments, config)` 执行命令并返回原有 JSON 响应，失败同时标记 MCP `isError`。例如 `{"command":"deploy","arguments":["--request-id","fix-001"]}`，随后用 `{"command":"status","arguments":["--job-id","<job-id>"]}` 查询。`arguments` 是参数数组，不经过 shell。
+常用操作提供结构化工具：`afxx_deploy`、`afxx_replay`、`afxx_job_status`、`afxx_client`、`afxx_issue`、`afxx_issue_status`。其他命令仍可用 `afxx_run`，帮助用 `afxx_help`。业务逻辑继续通过同一 CLI 执行。
 
-`init/update` 通过 MCP 自动使用 `--detach`，不会占住会话等待远端安装；其他命令保持 CLI 行为。取消 MCP 调用停止本地 CLI 子进程，已提交的远端任务仍可通过 job ID 查询。标准输出仅用于 MCP 协议，诊断日志写到标准错误。只有公开命令可通过 MCP 调用；内部 worker 入口不开放。MCP 不额外增加平台行为或自动提交 verify。
+长命令必须提供 request_id，并先返回本机调用记录；使用 `afxx_operation_status(request_id)` 获取原 CLI 结果。记录可跨 MCP 重连查询，断开不会自动停止远端操作。CLI 返回 job_id 或 round_no 后仍需继续查询 job/平台状态。不同来源的显式 config 冲突会报错，不静默覆盖。完整字段、长命令清单与恢复规则见 [MCP 调用](docs/afxx-commands.md#11-mcp-调用)。
+
 
 ## 构建 wheel
 
@@ -446,3 +448,9 @@ afxx skills install --agent codex
 replay 到达 success/failed 后，本地 `status` 或 `status --wait` 自动将完整 dump、日志、报告、结果数据库和清单下载到 `/tmp/afxx-evidence-<uid>/<job-id>-<环境标识>/`。返回仅包含 job_id、state、evidence_path 和 failures（attempt_id、seed、backend、shape_indices、stage、简短 error）；失败超过 20 项时附数量和截断标记。异步提交后仍需调用 status/wait，远端不会主动推送文件。重复查询校验并复用本地文件，不重复下载。 单个执行可用 `status --attempt <id> --fields ...` 按字段查询。详见 [证据读取说明](docs/AGENT_USAGE.md#status-概要字段查询与等待)。
 
 定位复现可使用 `afxx replay --dump --job-id <deploy-job-id> --seed <seed>`；`--dump` 仅覆盖本次任务并保存到 job 配置，原配置文件不变。
+
+平台补充接口已支持 CLI/MCP：`issue release`、`case spec/history`、`retest list`。它们通过本机 HTTP 访问平台；手动复测批次与 issue verify 轮次分开查询。参数、分页及租约重试语义见 [命令文档](docs/afxx-commands.md#平台查询与释放租约)。
+
+问题发现与平台查询：`afxx issue list`、`afxx issue cases --issue-id F152`、`afxx platform me`、`afxx platform summary`。参数及分页见[命令参考](docs/afxx-commands.md#问题发现与平台身份)。
+
+用例发现：`afxx case list --backend af-mlir --status fail`，支持筛选、精确查询和分页；详见[命令参考](docs/afxx-commands.md#用例列表)。

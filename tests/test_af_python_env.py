@@ -34,12 +34,9 @@ def env_cfg(cfg, tmp_path, monkeypatch):
             "url_template": "https://packages.example.invalid/{version}/{date}/{python_tag}.tar.gz",
             "sha256": None,
         },
-        "afx": {
-            "wheel": str(tmp_path / "autofusex-0.1.2-py3-none-any.whl"),
-            "sha256": None,
-        },
+        "afx": {"version": "0.1.2"},
     }
-    wheel(Path(cfg["python_env"]["afx"]["wheel"]), "autofusex", "0.1.2")
+    wheel(tmp_path / "autofusex-0.1.2-py3-none-any.whl", "autofusex", "0.1.2")
     return cfg
 
 
@@ -80,7 +77,7 @@ def test_reject_credential_or_insecure_url(value):
 
 
 def test_checksum_and_distribution_validation(env_cfg, tmp_path):
-    path = Path(env_cfg["python_env"]["afx"]["wheel"])
+    path = tmp_path / "autofusex-0.1.2-py3-none-any.whl"
     with pytest.raises(ValueError, match="checksum"):
         e.fetch(str(path), tmp_path / "copy.whl", "0" * 64)
     with pytest.raises(ValueError, match="unexpected wheel"):
@@ -485,9 +482,9 @@ def test_config_update_selects_changed_components(
     before, job = managed(env_cfg, tmp_path)
     p = env_cfg["python_env"]
     p["torch_npu"]["date"] = "latest"
-    before["artifacts"]["afx"]["sha256"] = workflow_common.sha(p["afx"]["wheel"])
+    before["artifacts"]["afx"]["sha256"] = workflow_common.sha(tmp_path / "autofusex-0.1.2-py3-none-any.whl")
     if "afx" in targets:
-        Path(p["afx"]["wheel"]).write_bytes(b"new wheel")
+        p["afx"]["version"] = "0.2.0"
     monkeypatch.setattr(
         e,
         "selected_daily",
@@ -518,7 +515,7 @@ def test_job_yaml_restores_without_previous_job_or_dependency_resolution(
         ("afx", "autofusex", p["afx"]),
         ("torch_npu", "torch-npu", daily),
     ]:
-        path = Path(p["afx"]["wheel"]) if name == "afx" else tmp_path / "daily.whl"
+        path = (tmp_path / "autofusex-0.1.2-py3-none-any.whl") if name == "afx" else tmp_path / "daily.whl"
         if name == "torch_npu":
             path.write_bytes(b"daily wheel")
         digest = workflow_common.sha(path)
@@ -566,10 +563,13 @@ def test_job_yaml_restores_without_previous_job_or_dependency_resolution(
     workflow_common.write(e.state_path(env_cfg), manifest)
     job = tmp_path / "replay"
     job.mkdir()
+    env_cfg["python_env"]["afx"] = {"version": "latest"}
     workflow_execution.save_frozen_config(env_cfg, job, manifest)
     assert [path.name for path in job.glob("config.*")] == ["config.yaml"]
     frozen = workflow_config.config(job / "config.yaml")
     assert frozen["python_env"]["torch_npu"] == daily
+    assert frozen["python_env"]["afx"] == {"version": "0.1.2"}
+    assert frozen["environment_lock"]["wheels"]["afx"] == artifacts["afx"]["sha256"]
     assert frozen["cann"]["date"] == "20261112"
     versions["autofusex"] = "0.1.2"
     locked.unlink()
@@ -607,7 +607,7 @@ def test_afx_version_download_freeze_and_update(
 ):
     p = env_cfg["python_env"]
     before, job = managed(env_cfg, tmp_path)
-    p["afx"] = {"version": requested, "wheel": None, "sha256": None}
+    p["afx"] = {"version": requested}
     e.validate(env_cfg, "update", "afx")
 
     def download(argv, **kwargs):
@@ -631,9 +631,6 @@ def test_afx_version_download_freeze_and_update(
     assert record["sha256"] == workflow_common.sha(record["path"])
     before["artifacts"]["afx"] = record
     assert e.planned_components(env_cfg, before, job) == []
-    p["afx"]["sha256"] = "0" * 64
-    with pytest.raises(ValueError, match="checksum mismatch"):
-        e.artifact(env_cfg, "afx", job)
     p["afx"]["wheel"] = record["path"]
-    with pytest.raises(ValueError, match="exactly one"):
+    with pytest.raises(ValueError, match="invalid AFX configuration"):
         e.validate(env_cfg, "update", "afx")

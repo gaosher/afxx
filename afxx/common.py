@@ -5,10 +5,21 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import subprocess
 import uuid
+
+
+# Safe single directory component; requests is the local idempotency-record directory.
+JOB_ID_PATTERN = r"^(?!\.{1,2}$)(?!requests$)[A-Za-z0-9_.-]{1,128}$"
+
+
+def validate_job_id(value):
+    require_code(isinstance(value, str) and re.fullmatch(JOB_ID_PATTERN, value),
+                 "INVALID_ARGUMENT", "job/request ID must be 1–128 letters, digits, _, . or -; '.', '..' and 'requests' are reserved")
+    return value
 
 
 PROTECTED = {

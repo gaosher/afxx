@@ -68,11 +68,10 @@ Python 环境锁包含 `nnsmith-autofusex==0.1.2.post1`，venv 内使用 uv 0.11
 | `torch_version` | 精确版本，默认 `2.10.0+cpu`；torch_npu 系列由此推导 |
 | `torch_npu.date` | latest 或 YYYYMMDD；latest 从 UTC 当天回查最多 31 天 |
 | `afx.version` | 默认 `latest`，从 PyPI 获取最新兼容正式版；可指定精确发布版本 |
-| `afx.wheel` | 未发布 wheel 的远端绝对路径或 HTTPS URL，与 version 二选一 |
 | `index_url` | 普通 Python 包索引，null 使用 uv 默认索引 |
 | `torch_index_url` | torch 索引覆盖；带 +cpu 的版本默认使用 PyTorch CPU 索引 |
 | `torch_npu.url_template` | Daily 下载源覆盖，默认来自 package_sources.json |
-| `torch_npu.sha256` / `afx.sha256` | 可选预期哈希，分别校验 Daily 压缩包和 AFX wheel |
+| `torch_npu.sha256` | 可选预期哈希，校验 Daily 压缩包 |
 | `stable_requirements` | 完整稳定依赖覆盖，与 torch_version 二选一 |
 
 修改 Daily 日期或 AFX 版本后执行 update。AFX 配置为 `latest` 时，每次 update 查询并下载当前最新兼容正式版，包哈希未变化则跳过更新；环境清单记录实际版本和哈希，冻结配置使用实际版本。它比较配置和当前环境清单，更新发生变化的 torch_npu/AFX，校验其余依赖的版本和来源。更新失败时尝试用原锁恢复，恢复失败则标记 invalid。torch 和稳定依赖变化需要在新目录 init。
@@ -182,3 +181,5 @@ init 提交前复用本地 token；文件不存在时仅在交互终端隐藏输
 `upload.enabled: true` 或 replay 的 `--upload` 使用 `afx platform client once`，读取本次 `results.sqlite`，将上传游标保存在同目录的 `platform-sync.sqlite`。凭据使用远端 `platform.client_token_file`，未指定时回退到 `platform.remote_token_file`；本地 `platform.token_file` 不作为远端凭据。token 需具备上传和心跳权限。`--no-upload` 覆盖默认配置。
 
 移除配置中旧的 `upload.sync_config_path`，不再使用 sync.json。此操作不启动常驻进程、不执行复测或自动更新。上传命令失败会使 replay job 失败，完整复现证据仍保留。`upload=completed` 仅表示官方命令及回执检查完成，回执 uploaded 计数不保证所有记录被平台接收。
+
+AFX 仅接受 `python_env.afx.version`（默认 `latest`），不再接受 wheel 路径、URL 或用户配置的 sha256。下载包的实际哈希仍自动记录在环境清单与 environment_lock 中，用于缓存校验和冻结恢复；冻结配置将 latest 展开为实际版本。

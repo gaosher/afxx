@@ -39,7 +39,7 @@ AFXX 的 verify 使用配置 venv/CANN 调用 AFX managed 接口，client 目录
 
 ## 检视后的独立总结提交
 
-仅在总结经过人工检视且用户明确要求提交时，使用 `afxx issue summarize --issue-id <issue-id> --summary-file <本地summary.yaml> --request-id <本次总结请求ID>`；不是修复循环的自动步骤。直接使用修复流程生成并检视过的 summary.yaml，无需再转换格式。YAML 是 AFXX 的本地输入约定，平台实际接收 JSON。YAML 直接包含 kind、title、symptom、root_cause、solution，可用 fix_ref 记录真实修复 commit，用 body_md 保存多行正文。 使用 [总结模板](../../afx-issue-summary/assets/summary.yaml) 保留本次 verify 和关联回归的结论与精确轮次引用；平台自动关联 issue 不替代对当前修复证据的核对。正文摘录最小实际错误片段，展开根因与修复分析、人工检视重点及同类定位方法；不以 job 引用代替技术解释，不复制整份报告或部署流水账。
+仅在总结经过人工检视且用户明确要求提交时，使用 `afxx issue submit-summary --issue-id <issue-id> --summary-file <本地summary.yaml> --request-id <本次总结请求ID>`；不是修复循环的自动步骤。直接使用修复流程生成并检视过的 summary.yaml，无需再转换格式。YAML 是 AFXX 的本地输入约定，平台实际接收 JSON。YAML 直接包含 kind、title、symptom、root_cause、solution，可用 fix_ref 记录真实修复 commit，用 body_md 保存多行正文。 使用 [总结模板](../../afx-issue-summary/assets/summary.yaml) 保留本次 verify 和关联回归的结论与精确轮次引用；平台自动关联 issue 不替代对当前修复证据的核对。正文摘录最小实际错误片段，展开根因与修复分析、人工检视重点及同类定位方法；不以 job 引用代替技术解释，不复制整份报告或部署流水账。
 
 需要本地领取记录、有效租约、knowledge 权限及平台 summarizing 状态。网络重试复用原文件和 request-id；内容或租约改变不能复用旧键。只有返回 status=resolved 和 knowledge_id 才报告平台归档完成。此命令会发布知识，而非保存待审草稿。
 

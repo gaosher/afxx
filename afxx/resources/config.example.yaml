@@ -18,7 +18,7 @@ python_env:
   torch_npu:
     date: "latest"     # 自动选最新 Daily；也可填带引号的 YYYYMMDD
   afx:
-    version: "latest"  # 默认从 PyPI 获取最新兼容正式版，也可指定精确版本；使用未发布包时删除 version，改填 wheel: "/远端路径/包.whl" 或 HTTPS URL
+    version: "latest"  # 默认从 PyPI 获取最新兼容正式版，也可指定精确版本
 
 # init 在 CANN 安装根目录为空时自动安装；完整环境直接复用。
 cann:

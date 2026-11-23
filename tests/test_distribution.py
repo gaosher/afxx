@@ -42,9 +42,9 @@ def test_mcp_stdio(tmp_path):
         ):
             await session.initialize()
             listed = await session.list_tools()
-            assert {tool.name for tool in listed.tools} == {
-                "afxx_help",
-                "afxx_run",
+            assert {"afxx_help", "afxx_run", "afxx_deploy", "afxx_replay",
+                    "afxx_client", "afxx_issue", "afxx_operation_status"} <= {
+                tool.name for tool in listed.tools
             }
             help_result = await session.call_tool(
                 "afxx_help", {"command": "deploy"}
@@ -58,7 +58,7 @@ def test_mcp_stdio(tmp_path):
             leaf_help = await session.call_tool("afxx_help", {"command": "issue verify"})
             assert "--job-id" in leaf_help.content[0].text
             grouped = await session.call_tool("afxx_run", {
-                "command": "issue claim", "config": str(tmp_path / "missing.yaml"),
+                "command": "issue claim", "arguments": ["--issue-id", "F152"], "config": str(tmp_path / "missing.yaml"),
             })
             assert grouped.isError
             assert grouped.structuredContent["command"] == "issue claim"
