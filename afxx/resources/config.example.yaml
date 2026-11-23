@@ -26,7 +26,7 @@ cann:
   ops: null  # 留空按设备型号查映射(package_sources.json)；指定包系列如 "A3"、"910b"、"950"，或用 "none" 跳过 OPS
   date: "latest"  # 最新完整发布，或指定日期如 "20261116"；仅在安装缺失的 CANN 时使用
   nnal: false          # 需要 ATB/SiP 时开启
-  driver_library_dirs: [] # 仅在 npu-smi 找不到驱动动态库时填写库目录
+  # 驱动库目录自动探测；非标准安装且探测失败时可用 driver_library_dirs: ["/绝对路径"] 覆盖。
 
 # 默认 replay.devices / workers 为 auto：使用可见逻辑 NPU，每卡一个 worker。
 # 批量 seed 分配到多卡；单 seed 使用第一张可见卡。

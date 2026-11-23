@@ -109,7 +109,7 @@ init 在创建 venv 前检查安装根目录。存在 `cann/set_env.sh` 和 `can
 | `ops` | null/auto 根据 npu-smi 完整型号查映射；指定系列直接选包；none 跳过 OPS |
 | `ops_compatibility` | 扩展 package_sources.json 中的型号映射；未知型号需要核实后补充 |
 | `nnal` | 默认 false，需要 ATB/SiP 时启用 |
-| `driver_library_dirs` | npu-smi 所需驱动库目录 |
+| `driver_library_dirs` | 可选覆盖；省略或空列表时，从 npu-smi 实际位置、/etc/ascend_install.info 和 /usr/local/Ascend/driver 自动探测已有驱动库，保留继承的 LD_LIBRARY_PATH，仅用于 npu-smi 子进程，不安装驱动 |
 | `repository_url` | CANN 包源覆盖 |
 | `auto_install` | 默认 true，允许空目录安装 |
 

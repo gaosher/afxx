@@ -247,3 +247,42 @@ def test_explicit_ops_bypasses_detection(ops, family, monkeypatch):
 def test_invalid_ops_override(ops):
     with pytest.raises(ValueError, match="cann.ops"):
         e.select_ops({"ops": ops})
+
+
+@pytest.mark.parametrize('source', ['executable', 'install-info', 'default'])
+def test_driver_library_discovery(tmp_path, monkeypatch, source):
+    from pathlib import Path
+    root = tmp_path / 'driver'
+    for relative in ('lib64/common', 'lib64/driver'):
+        directory = root / relative
+        directory.mkdir(parents=True)
+        (directory / 'libtest.so').touch()
+    (root / 'bin').mkdir()
+    (root / 'bin/npu-smi').touch()
+    info = tmp_path / 'ascend_install.info'
+    info.write_text(f"Driver_Install_Path_Param='{tmp_path}'\n" if source == 'install-info' else '')
+    def path(value):
+        if value == '/etc/ascend_install.info':
+            return info
+        if value == '/usr/local/Ascend/driver':
+            return root if source == 'default' else tmp_path / 'missing'
+        return Path(value)
+    monkeypatch.setattr(e, 'Path', path)
+    monkeypatch.setattr(e.shutil, 'which', lambda _: str(root / 'bin/npu-smi') if source == 'executable' else None)
+    assert e.driver_library_dirs() == [str(root / 'lib64/common'), str(root / 'lib64/driver')]
+
+
+def test_driver_environment_override_and_inheritance(monkeypatch):
+    monkeypatch.setenv('LD_LIBRARY_PATH', '/inherited')
+    monkeypatch.setattr(e, 'driver_library_dirs', lambda: ['/detected'])
+    assert e.npu_smi_environment({})['LD_LIBRARY_PATH'] == '/detected:/inherited'
+    assert e.npu_smi_environment({'driver_library_dirs': []})['LD_LIBRARY_PATH'] == '/detected:/inherited'
+    monkeypatch.setattr(e, 'driver_library_dirs', lambda: pytest.fail('explicit override must bypass detection'))
+    assert e.npu_smi_environment({'driver_library_dirs': ['/explicit']})['LD_LIBRARY_PATH'] == '/explicit:/inherited'
+    assert e.os.environ['LD_LIBRARY_PATH'] == '/inherited'
+
+
+def test_no_driver_detected_preserves_environment(monkeypatch):
+    monkeypatch.setattr(e, 'driver_library_dirs', lambda: [])
+    monkeypatch.delenv('LD_LIBRARY_PATH', raising=False)
+    assert e.npu_smi_environment({})['LD_LIBRARY_PATH'] == ''

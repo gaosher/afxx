@@ -57,11 +57,44 @@ def fields(text):
     }
 
 
-def detect_ops(cfg):
+def driver_library_dirs():
+    """Find installed driver libraries without scanning unrelated filesystems."""
+    roots = []
+    smi = shutil.which("npu-smi")
+    if smi:
+        roots.append(Path(smi).resolve().parent.parent)
+    info = Path("/etc/ascend_install.info")
+    try:
+        for line in info.read_text().splitlines():
+            key, separator, value = line.partition("=")
+            if separator and key.strip() == "Driver_Install_Path_Param":
+                root = Path(value.strip().strip("\"'"))
+                if root.is_absolute():
+                    roots.extend((root / "driver", root))
+    except OSError:
+        pass
+    roots.append(Path("/usr/local/Ascend/driver"))
+    directories = []
+    for root in roots:
+        for relative in ("lib64/common", "lib64/driver", "lib64"):
+            directory = root / relative
+            if directory.is_dir() and any(directory.glob("*.so*")):
+                value = str(directory.resolve())
+                if value not in directories:
+                    directories.append(value)
+    return directories
+
+
+def npu_smi_environment(cfg):
     env = dict(os.environ)
-    env["LD_LIBRARY_PATH"] = os.pathsep.join(
-        [*cfg["driver_library_dirs"], env.get("LD_LIBRARY_PATH", "")]
-    )
+    directories = cfg.get("driver_library_dirs") or driver_library_dirs()
+    inherited = env.get("LD_LIBRARY_PATH", "")
+    env["LD_LIBRARY_PATH"] = os.pathsep.join([*directories, *([inherited] if inherited else [])])
+    return env
+
+
+def detect_ops(cfg):
+    env = npu_smi_environment(cfg)
     mapping = workflow_common.capture(["npu-smi", "info", "-m"], env=env)
     chips = set()
     for line in mapping.splitlines():
