@@ -520,7 +520,7 @@ def query_evidence(c, job_id, action, *, path=None, offset=0, limit=8192, sha256
     workflow_common.require_code(offset >= 0 and 1 <= limit <= 65536,
                                  "INVALID_ARGUMENT", "offset >= 0; limit must be 1..65536")
     code = "import json,os,re,sys\nfrom pathlib import Path\n"
-    for function in (replay.collect_evidence, replay.failure_index, replay.associate_evidence, replay.read_evidence):
+    for function in (replay.shared_dump_roots, replay.collect_evidence, replay.failure_index, replay.associate_evidence, replay.read_evidence):
         code += inspect.getsource(function) + "\n"
     code += """
 job = Path(sys.argv[1])
@@ -530,7 +530,7 @@ try:
   value = read_evidence(job, options['path'], options['offset'], options['limit'], options['sha256'])
  else:
   report = json.loads((job/'result.json').read_text())
-  value = collect_evidence(job, Path(report['results_dir']), report.get('resources',{}).get('dump', False), options['offset'])
+  value = collect_evidence(job, Path(report['results_dir']), report.get('dump_enabled', report.get('resources',{}).get('dump', False)), options['offset'])
   associate_evidence(value, report.get('attempts', []))
  print(json.dumps({'state':'success','evidence':value}))
 except (OSError, ValueError, KeyError) as error:

@@ -1,4 +1,4 @@
-"""Delegate resident client lifecycle to AFX 0.2.3 managed commands."""
+"""Delegate resident client lifecycle to AFX 0.4.1 managed commands."""
 
 import contextlib
 import os
@@ -29,14 +29,14 @@ def process_identity(pid):
 
 def client_home(c):
     """Resolve the remote AFX home without overriding its environment or pointer."""
-    code = "import json; from autofusex.fuzz.client.config import data_home; print(json.dumps(str(data_home())))"
+    code = "import json; from autofusex.client.paths import data_home; print(json.dumps(str(data_home())))"
     try:
         return Path(json.loads(w.capture([runtime.python(c), "-c", code], timeout=30)))
     except Exception as error:
         raise w.WorkflowError("PLATFORM_CLIENT_CONTROL_FAILED", "cannot resolve AFX client home using configured Python") from error
 
 
-def control(c, action, timeout=300):
+def control(c, action, timeout=300, *, home=None, lock_held=False, daemon_only=False, inspect=False):
     """Control the one selected AFX home without replacing its identity."""
     w.require_code(action in ("status", "start", "stop", "restart"), "INVALID_ARGUMENT", "invalid client action")
     try:
@@ -47,13 +47,18 @@ def control(c, action, timeout=300):
         raise w.WorkflowError("PLATFORM_CLIENT_NOT_RUNNING", "no live client to restart; use client start")
     if not selected and action in ("status", "stop"):
         return dict(state="stopped", daemon_running=False, home=None, runs=[], conflicts=[], retest_readiness="not_checked")
-    home = Path(selected["home"]) if selected else client_home(c)
+    if home is not None:
+        home = Path(home)
+        w.require_code(not selected or Path(selected["home"]).resolve() == home.resolve(),
+                       "PLATFORM_CLIENT_CONFLICT", "client home changed during deployment")
+    else:
+        home = Path(selected["home"]) if selected else client_home(c)
     initialize = action == "start" and not (home / "client.json").exists()
     settings = config.platform_settings(c) if initialize else {}
     token = settings.get("client_token_file")
     if action != "status":
         home.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with contextlib.nullcontext() if action == "status" else w.lock(home / "launch.lock"):
+    with contextlib.nullcontext() if action == "status" or lock_held else w.lock(home / "launch.lock"):
         # Migration guard only: managed process ownership belongs entirely to AFX.
         if action in ("start", "restart") and not (home / "client.json").exists():
             for name in ("launch.json", "platform-client.json"):
@@ -72,7 +77,7 @@ def control(c, action, timeout=300):
                 w.capture(replay.device_command(runtime.python(c)), env=env, timeout=60)
             )
             devices = [f"npu:{i}" for i in range(count)]
-        request = dict(home=str(home), token_file=token, endpoint=settings.get("url"), devices=devices, action=action, timeout=timeout)
+        request = dict(home=str(home), token_file=token, endpoint=settings.get("url"), devices=devices, action=action, timeout=timeout, daemon_only=daemon_only, inspect=inspect)
         log_path = home / "client.log"
         try:
             with contextlib.nullcontext(sys.stderr) if action == "status" else log_path.open("ab") as log:

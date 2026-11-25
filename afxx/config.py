@@ -191,7 +191,7 @@ def normalize_config(raw):
             "batch_timeout_seconds": 300,
             "dump": False,
         },
-        "upload": {"enabled": False},
+        "upload": {"enabled": True},
     }
     if "platform" in raw:
         defaults["platform"] = {

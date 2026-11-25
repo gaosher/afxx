@@ -106,13 +106,44 @@ def test_missing_seed_rejected_before_loading_config(monkeypatch):
         cli.main()
 
 
-def test_managed_view_distinguishes_submission_and_execution(cfg, monkeypatch):
+def test_replay_view_distinguishes_submission_and_execution(cfg, monkeypatch):
     monkeypatch.setattr(jobs, 'submit', lambda *a: {'state': 'queued'})
     runs.submit(cfg, {'seeds': ['ABC']}, 'repair')
     monkeypatch.setattr(jobs, 'query_job', lambda *a: {
-        'state': 'success', 'result.json': {'execution_mode': 'managed', 'passed': True,
+        'state': 'success', 'result.json': {'execution_mode': 'fuzz_replay', 'passed': True,
             'execution_environments': {'attempt': {'autofuse_binary': 'actual'}}},
         'environment.json': {'af': 'submitter'}})
     result = runs.show(cfg, 'repair', download=False)
     assert result['environment'] == {'attempt': {'autofuse_binary': 'actual'}}
     assert result['submission_environment'] == {'af': 'submitter'}
+
+
+@pytest.mark.parametrize('action', ['list', 'read'])
+def test_evidence_selects_run_and_pins_latest(cfg,monkeypatch,action):
+    monkeypatch.setattr(jobs,'submit',lambda *a:{'state':'queued'})
+    runs.submit(cfg,{'seeds':['A']},'repair')
+    runs.submit(cfg,{'seeds':['B']},'repair')
+    entries=runs._load(cfg,'repair')['runs']
+    calls=[]
+    def query(c,execution,act,**options):
+        calls.append((execution,act,options))
+        return {'files':[], 'next_offset':3}
+    monkeypatch.setattr(jobs,'query_evidence',query)
+    monkeypatch.setattr(jobs,'localize_replay',lambda *a:pytest.fail('must not download'))
+    latest=runs.evidence(cfg,'repair',None,action,offset=0)
+    assert latest['request_id']=='repair' and latest['run']==2
+    runs.submit(cfg,{'seeds':['C']},'repair')
+    runs.evidence(cfg,'repair',latest['run'],action,offset=3)
+    runs.evidence(cfg,'repair',1,action,path='/remote/kernel.cpp',sha256='a'*64)
+    assert [row[0] for row in calls]==[entries[1]['execution'],entries[1]['execution'],entries[0]['execution']]
+    assert calls[-1][2]['sha256']=='a'*64
+
+
+@pytest.mark.parametrize('problem', ['missing','run','dry','conflict'])
+def test_evidence_rejects_invalid_group_before_remote(cfg,monkeypatch,problem):
+    monkeypatch.setattr(jobs,'submit',lambda *a:{'state':'prepared'})
+    runs.submit(cfg,{'seeds':['A']},'repair',problem=='dry')
+    monkeypatch.setattr(jobs,'query_evidence',lambda *a,**k:pytest.fail('must not query remote'))
+    if problem=='conflict':cfg['connection']['environment']='other'
+    with pytest.raises(common.WorkflowError):
+        runs.evidence(cfg,'missing' if problem=='missing' else 'repair',0 if problem=='run' else None,'list')

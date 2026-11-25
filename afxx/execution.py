@@ -58,67 +58,82 @@ def deploy(c, job):
         package = packages[0]
         workflow_common.run(["bash", package, "--check"], env=env, cwd=job)
         package_hash = workflow_common.sha(package)
-        workflow_runtime.check_idle(
-            c["runtime"]["install_root"],
-            library_names=workflow_runtime.packaged_libraries(source / "build"),
-        )
-        workflow_common.phase(job, "install")
-        current = workflow_runtime.registry(c).with_suffix(".json")
-        workflow_common.write(current, {"state": "installing", "job": job.name})
+        from afxx.deploy_client import coordinate
+        coordination = None
         try:
-            workflow_common.run(
-                [
-                    "bash",
-                    package,
-                    "--upgrade",
-                    "--install-path=" + c["runtime"]["install_root"],
-                    "--pylocal",
-                    "--quiet",
-                ],
-                env=env,
-                cwd=job,
-            )
-            workflow_common.phase(job, "verify_install")
-            evidence = workflow_runtime.probe(c, workflow_runtime.environment(c), job)
-            for key in ("pyautofuse", "adapter", "codegen"):
-                candidates = [
-                    p
-                    for p in (source / "build").rglob(Path(evidence[key]["path"]).name)
-                    if p.is_file()
-                ]
-                workflow_common.require(
-                    any(
-                        workflow_common.sha(p) == evidence[key]["sha256"]
-                        for p in candidates
-                    ),
-                    "installed file does not match build: " + key,
+            with coordinate(c, job) as coordination:
+                workflow_runtime.check_idle(
+                    c["runtime"]["install_root"],
+                    library_names=workflow_runtime.packaged_libraries(source / "build"),
                 )
-            record = {
-                "state": "success",
-                "job": job.name,
-                "environment": c["connection"]["environment"],
-                "install_root": str(Path(c["runtime"]["install_root"]).resolve()),
-                "source": {
-                    "path": str((job / "source.json").resolve()),
-                    "sha256": workflow_common.sha(job / "source.json"),
-                    "snapshot_sha256": manifest["sha256"],
-                    "base_commit": manifest["base_commit"],
-                },
-                "package": str(package),
-                "package_sha256": package_hash,
-                "runtime": evidence,
-                "config_sha256": workflow_common.digest(c),
-                "installed_at": datetime.datetime.now(
-                    datetime.timezone.utc
-                ).isoformat(),
-            }
-            workflow_common.write(job / "result.json", record)
-            workflow_common.write(
-                current, workflow_runtime.deployment_reference(job / "result.json")
-            )
-        except BaseException:
-            workflow_common.write(current, {"state": "invalid", "job": job.name})
-            raise
+                workflow_common.phase(job, "install")
+                if coordination is not None:
+                    coordination.install_started = True
+                current = workflow_runtime.registry(c).with_suffix(".json")
+                workflow_common.write(current, {"state": "installing", "job": job.name})
+                try:
+                    workflow_common.run(
+                        [
+                            "bash",
+                            package,
+                            "--upgrade",
+                            "--install-path=" + c["runtime"]["install_root"],
+                            "--pylocal",
+                            "--quiet",
+                        ],
+                        env=env,
+                        cwd=job,
+                    )
+                    workflow_common.phase(job, "verify_install")
+                    evidence = workflow_runtime.probe(c, workflow_runtime.environment(c), job)
+                    for key in ("pyautofuse", "adapter", "codegen"):
+                        candidates = [
+                            p
+                            for p in (source / "build").rglob(Path(evidence[key]["path"]).name)
+                            if p.is_file()
+                        ]
+                        workflow_common.require(
+                            any(
+                                workflow_common.sha(p) == evidence[key]["sha256"]
+                                for p in candidates
+                            ),
+                            "installed file does not match build: " + key,
+                        )
+                    record = {
+                        "state": "success",
+                        "job": job.name,
+                        "environment": c["connection"]["environment"],
+                        "install_root": str(Path(c["runtime"]["install_root"]).resolve()),
+                        "source": {
+                            "path": str((job / "source.json").resolve()),
+                            "sha256": workflow_common.sha(job / "source.json"),
+                            "snapshot_sha256": manifest["sha256"],
+                            "base_commit": manifest["base_commit"],
+                        },
+                        "package": str(package),
+                        "package_sha256": package_hash,
+                        "runtime": evidence,
+                        "config_sha256": workflow_common.digest(c),
+                        "installed_at": datetime.datetime.now(
+                            datetime.timezone.utc
+                        ).isoformat(),
+                    }
+                    if coordination is not None:
+                        record["client_coordination"] = coordination.record
+                    workflow_common.write(job / "result.json", record)
+                    workflow_common.write(
+                        current, workflow_runtime.deployment_reference(job / "result.json")
+                    )
+                    if coordination is not None:
+                        coordination.installed = True
+                except BaseException:
+                    workflow_common.write(current, {"state": "invalid", "job": job.name})
+                    raise
+        finally:
+            if coordination is not None and coordination.installed:
+                # Coordination adds its receipt after installation; refresh the report hash.
+                workflow_common.write(workflow_runtime.registry(c).with_suffix(".json"),
+                    workflow_runtime.deployment_reference(job / "result.json"))
 
 
 def record_environment(c, job):
@@ -180,8 +195,8 @@ def frozen_config(c, manifest):
 
 
 def replay(c, job, request):
-    from afxx.afx import managed_replay
-    managed_replay.validate_options(c, request)
+    from afxx.afx import fuzz_replay
+    fuzz_replay.validate_options(c, request)
     results = Path(c["replay"]["results_dir"]) / job.name
     results.mkdir(parents=True, exist_ok=True)
     try:
@@ -192,21 +207,21 @@ def replay(c, job, request):
             snapshot = record_environment(c, job)
             workflow_common.update_record(job / "result.json", state="running", passed=False,
                 request_id=request.get("request_id"), run=request.get("run"),
-                submitter_runtime=snapshot.get("af"), execution_mode="managed")
+                submitter_runtime=snapshot.get("af"), execution_mode="fuzz_replay")
             completed = workflow_common.run(
-                [workflow_runtime.python(c), "-m", "afxx.afx.managed_replay", str(job)],
+                [workflow_runtime.python(c), "-m", "afxx.afx.fuzz_replay", str(job)],
                 env=workflow_runtime.environment(c), cwd=job, check=False,
             )
             report = workflow_common.read(job / "result.json")
             workflow_common.require_code(completed.returncode == 0 and report.get("passed"),
-                report.get("error_code", "AFX_REPLAY_FAILED"), report.get("error", "managed replay did not complete"))
+                report.get("error_code", "AFX_REPLAY_FAILED"), report.get("error", "fuzz replay did not complete"))
             workflow_common.update_record(job / "result.json", state="success")
     except BaseException as error:
         workflow_common.update_record(job / "result.json", state="failed", error=str(error))
         raise
     finally:
         try:
-            evidence = replay_adapter.collect_evidence(job, results, False)
+            evidence = replay_adapter.collect_evidence(job, results, c["replay"]["dump"])
             replay_adapter.associate_evidence(evidence, workflow_common.read(job / "result.json").get("attempts", []))
         except OSError as error:
             evidence = {"errors": [{"error": str(error)}], "files": []}

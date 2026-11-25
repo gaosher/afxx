@@ -188,3 +188,49 @@ def test_unknown_or_legacy_client_fails_closed(monkeypatch):
         with pytest.raises(m.ClientError) as error:
             m.selected_client()
         assert error.value.code == 'PLATFORM_CLIENT_UNTRACKED'
+
+
+def test_modern_process_discovery_includes_bootstrap_excludes_workers(tmp_path,monkeypatch):
+    root=tmp_path/'proc';root.mkdir()
+    bootstrap=('import sys; sys.path.insert(0, sys.argv[1]); '
+               'from autofusex.client.supervisor import run; raise SystemExit(run(sys.argv[2], sys.argv[3]))')
+    def process(pid,parent,args):
+        p=root/str(pid);p.mkdir()
+        (p/'cmdline').write_bytes(('\0'.join(args)+'\0').encode())
+        (p/'stat').write_text(f'{pid} (python) S {parent} 0 0')
+        (p/'environ').write_text('')
+    process(10,1,['python','-I','-c',bootstrap,'/live/supervisor/v2','/live','/venv/bin/python'])
+    process(11,10,['python','-m','autofusex.client','daemon','run','--data-dir','/live'])
+    for pid,module in [(12,'autofusex.client.task_worker'),(13,'autofusex.workloads.fuzz.scheduling.stage_worker')]:
+        process(pid,11,['python','-m',module,'/live/spec.json','8'])
+    process(14,1,['python','-m','autofusex.client','daemon','status','--data-dir','/live'])
+    monkeypatch.setattr(m,'Path',lambda value:root if value=='/proc' else Path(value))
+    monkeypatch.setattr(m,'alive',lambda pid:True)
+    assert [c['pid'] for c in m.live_clients()]==[11]
+    assert m.selected_client()['home']=='/live'
+    monkeypatch.setattr(m,'alive',lambda pid:int(pid)!=11)
+    assert [c['pid'] for c in m.live_clients()]==[10]  # supervised restart gap is not stopped
+    monkeypatch.setattr(m,'alive',lambda pid:True)
+    process(15,1,['python','-m','autofusex.client','daemon','run','--data-dir','/live'])
+    with pytest.raises(m.ClientError,match='multiple live'):m.selected_client()
+
+
+def test_supervisor_recognition_is_exact():
+    assert m.client_command(['python','-c','print("autofusex.client.supervisor")']) is None
+    assert m.client_command(['python','-m','autofusex.client.task_worker','daemon','run']) is None
+    assert m.client_command(['python','-m','autofusex.client','daemon','stop']) is None
+    assert m.client_command(['python','-m']) is None
+
+
+def test_daemon_only_restore_does_not_start_fuzz(client):
+    d = Daemon()
+    original = d.legacy
+    def legacy(argv):
+        if argv[:2] == ['daemon', 'start']:
+            d.calls.append('daemon-start')
+            d.state = 'idle'
+            return {}
+        return original(argv)
+    result = m.execute(dict(client, action='start', daemon_only=True), d.run, legacy)
+    assert result['state'] == 'idle'
+    assert 'start' not in d.calls

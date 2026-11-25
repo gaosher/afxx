@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import signal
+import uuid
 import sys
 from typing import Annotated, Literal
 from pathlib import Path
@@ -143,19 +144,24 @@ def prepare(command, arguments, config, default_config):
 def create_server(default_config=None):
     server = FastMCP("AFXX", instructions=(
         "Prefer typed tools; afxx_run is for commands without a typed tool. env update accepts explicit --afx VERSION|latest, --torch-npu DATE|latest, --torch VERSION and --cann DATE|latest [--ops]; no selectors only reports installed versions. --ops requires --cann. Optional --save-config writes resolved versions to the submitted config on successful status completion. Read afxx_help before constructing unfamiliar CLI arguments. Long commands return a local "
-        "invocation receipt: query afxx_operation_status with the same request_id for the CLI result. "
+        "invocation receipt: query afxx_operation_status with the returned request_id for the CLI result. env commands allocate IDs automatically; do not supply request_id. "
         "A completed invocation is not necessarily a completed remote job. Use afxx_job_status or "
         "afxx_issue_status next. Replay returns request_id/run directly; query replay show, not operation_status. Disconnecting does not cancel a submitted invocation. "
         "Restart and verify remain separate explicit actions."))
 
     async def dispatch(command, arguments=None, config=None, request_id=None):
+        environment_command = command in ("env init", "env update", "env check")
+        if environment_command:
+            if request_id is not None or any(arg == "--request-id" or arg.startswith("--request-id=") for arg in (arguments or [])):
+                return tool_result(envelope(command, "INVALID_ARGUMENT", "env commands allocate their own ENV ID; do not specify request_id"))
+            request_id = "ENV" + uuid.uuid4().hex
         try:
             args, path = prepare(command, arguments, config, default_config)
         except ValueError as error:
             return tool_result(envelope(command, "CONFIG_CONFLICT", str(error)))
         if command in LONG_COMMANDS and (request_id is None or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id)):
             return tool_result(envelope(command, "INVALID_ARGUMENT", "long MCP commands require request_id for recovery"))
-        forwarded = {"env init", "env update", "env check", "deploy", "fuzz run",
+        forwarded = {"deploy", "fuzz run",
                      "replay", "replay list", "replay show", "replay compare", "status"}
         if command in forwarded and request_id is not None:
             keys = [args[i + 1] if i + 1 < len(args) else "" for i, arg in enumerate(args) if arg == "--request-id"]
@@ -191,7 +197,8 @@ def create_server(default_config=None):
         """Fallback for commands without a dedicated typed tool; use afxx_help for arguments.
         Arguments are tokens, never shell code. Short commands return the CLI envelope directly.
         Long commands: env init/update/check, deploy, fuzz run, client start/stop/restart, issue verify.
-        Long commands require request_id and return an invocation receipt; query afxx_operation_status.
+        Long commands return an invocation receipt; query afxx_operation_status.
+        env init/update/check allocate IDs automatically and reject request_id; other long commands require it.
         Conflicting explicit config paths are rejected; server config is only a default.
         """
         return await dispatch(command, arguments, config, request_id)
@@ -206,18 +213,20 @@ def create_server(default_config=None):
 
     @server.tool()
     async def afxx_deploy(request_id: RequestId, issue_id: str | None = None,
-                          config: str | None = None, dry_run: bool = False) -> CallToolResult:
+                          config: str | None = None, dry_run: bool = False, coordinate_client: bool = False) -> CallToolResult:
         """Sync, build and install through CLI; return a queryable invocation receipt."""
         args = (["--issue-id",issue_id] if issue_id else []) + (["--dry-run"] if dry_run else [])
+        if coordinate_client:
+            args += ["--coordinate-client"]
         return await dispatch("deploy",args,config,request_id)
 
     @server.tool()
     async def afxx_replay(request_id: RequestId, seed: str | None = None,
                          seeds_file: str | None = None, dump: bool = False,
                          upload: bool | None = None, config: str | None = None) -> CallToolResult:
-        """Submit to the existing AFX managed client; specify exactly one of seed or local seeds_file.
+        """Run afx fuzz replay using the current AFX queue; specify exactly one of seed or local seeds_file.
         Every call starts a new AFXX run in request_id, without a deployment reference.
-        AFX owns execution resources and environment. dump=True and upload overrides are unsupported.
+        Uses the configured Python/CANN environment and replay devices/compile threads. dump=True enables task diagnostics; upload defaults to true and can be disabled.
         Query with afxx_run replay list/show/compare and --request-id, optionally --run/--runs.
         Returns request_id, run and submission state; not an MCP operation receipt.
         """
@@ -331,26 +340,33 @@ def create_server(default_config=None):
         return await dispatch("execution show", ["--exec-uuid", exec_uuid], config)
 
     @server.tool()
-    async def afxx_evidence_list(job_id: JobId, offset: Annotated[int, Field(ge=0)] = 0,
+    async def afxx_evidence_list(request_id: RequestId, offset: Annotated[int, Field(ge=0)] = 0,
+                                 run: Annotated[int, Field(ge=1)] | None = None,
                                  config: str | None = None) -> CallToolResult:
         """List remote replay evidence and failure associations. offset is a file-list cursor.
+        Select by request_id/run; omitted run means latest. Pin the returned run for pagination.
         Requires the configured NPU connection; does not start replay or generate missing dumps.
         """
-        return await dispatch("evidence list", ["--job-id", job_id, "--offset", str(offset)], config)
+        args = ["--request-id", request_id, "--offset", str(offset)]
+        if run is not None: args += ["--run", str(run)]
+        return await dispatch("evidence list", args, config)
 
     @server.tool()
-    async def afxx_evidence_read(job_id: JobId, path: str,
+    async def afxx_evidence_read(request_id: RequestId, path: str,
                                  offset: Annotated[int, Field(ge=0)] = 0,
                                  limit: Annotated[int, Field(ge=1, le=65536)] = 8192,
                                  sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None,
+                                 run: Annotated[int, Field(ge=1)] | None = None,
                                  config: str | None = None) -> CallToolResult:
         """Read a remote artifact from evidence list in byte-sized pages.
+        Select by request_id/run; omitted run means latest. Reuse the run returned by evidence list.
         path is the absolute remote path, never a local path. Reuse sha256 from a previous
         read to reject changed content. CLI enforces allowed evidence roots and symlink restrictions.
         """
         if not path.startswith("/") or ".." in path.split("/"):
             return tool_result(envelope("evidence read", "INVALID_ARGUMENT", "path must be absolute without parent traversal"))
-        args = ["--job-id", job_id, "--path", path, "--offset", str(offset), "--limit", str(limit)]
+        args = ["--request-id", request_id, "--path", path, "--offset", str(offset), "--limit", str(limit)]
+        if run is not None: args += ["--run", str(run)]
         if sha256 is not None:
             args += ["--sha256", sha256]
         return await dispatch("evidence read", args, config)

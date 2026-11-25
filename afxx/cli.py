@@ -132,7 +132,7 @@ def parse_arguments():
         "update": "远端环境：显式更新指定组件；无组件时查询当前版本",
         "check": "远端环境：检查运行环境及 Python 依赖",
         "deploy": "远端工作流：同步本地源码，编包并安装 AF",
-        "replay": "远端工作流：通过现有 AFX managed client 复跑 seed，按 request_id 归组",
+        "replay": "远端工作流：通过 afx fuzz replay 复跑 seed，按 request_id 归组",
         "fuzz-run": "随机测试：调用远端 AFX fuzz run 并保存结果",
         "fuzz-status": "随机测试：查询 AFX 队列与运行进度",
         "fuzz-stop": "随机测试：请求 AFX 停止本次随机测试",
@@ -188,18 +188,20 @@ def parse_arguments():
         )
         if name in (*env_jobs, *jobs) or name == "doctor":
             cmd.add_argument("--dry-run", action="store_true")
-        if name in (*env_jobs, *jobs) or name in ("issue-claim", "issue-submit-summary", "issue-release"):
+        if name in jobs or name in ("issue-claim", "issue-submit-summary", "issue-release"):
             cmd.add_argument("--request-id", required=name in ("issue-submit-summary", "issue-release"))
         if name in clients:
             cmd.add_argument("--timeout", type=float, default=300, help="等待生命周期完成的秒数，默认 300；超时不强杀")
         if name in ("init", "update", "deploy"):
             cmd.add_argument("--detach", action="store_true", help="提交后立即返回，不跟随远端日志")
+        if name == "deploy":
+            cmd.add_argument("--coordinate-client", action="store_true", help="安装前停止目标 AFX client，成功后恢复运行或空闲状态；不恢复原队列")
         if name == "update":
             cmd.add_argument("--save-config", action="store_true", help="成功后将实际版本回写本次配置，保留其他字段及注释")
             cmd.add_argument("--torch", help="目标 torch 版本；变更版本时必须同时指定 --torch-npu")
-            cmd.add_argument("--torch-npu", help="Daily 日期 YYYYMMDD 或 latest，匹配当前/目标 torch")
-            cmd.add_argument("--afx", help="AFX 版本或 latest")
-            cmd.add_argument("--cann", help="Toolkit 发布日期 YYYYMMDD 或 latest")
+            cmd.add_argument("--torch-npu", nargs="?", const="latest", help="Daily 日期 YYYYMMDD 或 latest；省略值默认 latest，匹配当前/目标 torch")
+            cmd.add_argument("--afx", nargs="?", const="latest", help="AFX 版本或 latest；省略值默认 latest")
+            cmd.add_argument("--cann", nargs="?", const="latest", help="Toolkit 发布日期 YYYYMMDD 或 latest；省略值默认 latest")
             cmd.add_argument("--ops", action="store_true", help="同时更新同批次 OPS，必须与 --cann 一起使用")
         if name == "issue-preview":
             cmd.add_argument(
@@ -244,9 +246,11 @@ def parse_arguments():
             cmd.add_argument("--exec-uuid", required=True, help="AFX execution UUID, not numeric exec_id")
         if name == "issue-wait":
             cmd.add_argument("--timeout", type=float, default=3600)
-        if name in ("issue-verify", "evidence-list", "evidence-read", "fuzz-status", "fuzz-stop"):
+        if name in ("issue-verify", "fuzz-status", "fuzz-stop"):
             cmd.add_argument("--job-id", "--job", dest="job", required=True)
         if name in ("evidence-list", "evidence-read"):
+            cmd.add_argument("--request-id", required=True)
+            cmd.add_argument("--run", type=int, help="replay run; defaults to latest")
             cmd.add_argument("--offset", type=int, default=0)
         if name == "evidence-read":
             cmd.add_argument("--path", required=True, help="absolute remote artifact path")
@@ -268,7 +272,7 @@ def parse_arguments():
             cmd.add_argument("--ops", help="AFX 算子过滤，如 add,sum,reshape")
             cmd.add_argument("--backend", action="append", help="增加 AFX 测试后端；可重复，默认 CPU 和 AF-MLIR")
         if name == "replay":
-            cmd.add_argument("--dump", action="store_true", help="当前 managed AFX 接口未支持；指定后明确报错")
+            cmd.add_argument("--dump", action="store_true", help="开启 AFX 逐任务 dump，产物通过 evidence list/read 读取")
             seeds = cmd.add_mutually_exclusive_group()
             seeds.add_argument("--seed")
             seeds.add_argument("--seeds-file")
@@ -460,7 +464,7 @@ def main():
             },
         }
     if args.command in ("evidence-list", "evidence-read"):
-        return workflow_jobs.query_evidence(c, args.job, args.command.split("-", 1)[1],
+        return replay_runs.evidence(c, args.request_id, args.run, args.command.split("-", 1)[1],
             path=getattr(args, "path", None), offset=args.offset,
             limit=getattr(args, "limit", 8192), sha256=getattr(args, "sha256", None))
     if args.command == "status":
@@ -511,6 +515,8 @@ def main():
             workflow_common.require_code(value is None or value > 0, "INVALID_ARGUMENT", f"--{name.replace('_', '-')} must be positive")
         request["fuzz"] = {key: getattr(args, key) for key in
                            ("count", "workers", "compile_threads", "device", "backend", "ops")}
+    if args.command == "deploy" and args.coordinate_client:
+        request["coordinate_client"] = True
     if args.command == "deploy" and args.issue_id:
         lease = platform.claimed(c, args.issue_id)
         request["issue"] = {key: lease[key] for key in ("id", "lease_id")}
@@ -524,13 +530,14 @@ def main():
     if args.command == "init" and not args.dry_run:
         credentials.prepare(c)
     data = workflow_jobs.submit(
-        c, request, args.request_id or uuid.uuid4().hex, args.dry_run
+        c, request, ("ENV" + uuid.uuid4().hex if args.command in ("init", "update", "check")
+                     else args.request_id or uuid.uuid4().hex), args.dry_run
     )
     if (
         args.command
-        in ("init", "update", "deploy")
+        in ("init", "update", "deploy", "check")
         and not args.dry_run
-        and not args.detach
+        and not getattr(args, "detach", False)
     ):
         print(
             f"{args.command} job {data['job']} (Ctrl+C stops viewing)",
@@ -595,14 +602,9 @@ def cli():
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()
+    indent = 2 if sys.stdout.isatty() else None
     try:
         data = main()
-        indent = (
-            2
-            if command == "issue-preview"
-            or (command == "issue-claim" and sys.stdout.isatty())
-            else None
-        )
         print(
             json.dumps(response(command, data), ensure_ascii=False, indent=indent),
             flush=True,
@@ -610,7 +612,7 @@ def cli():
         return 0
     except workflow_common.WorkflowError as error:
         print(
-            json.dumps(response(command, error.data, error), ensure_ascii=False),
+            json.dumps(response(command, error.data, error), ensure_ascii=False, indent=indent),
             flush=True,
         )
     except ValueError as error:
@@ -621,6 +623,7 @@ def cli():
                     error=workflow_common.WorkflowError("INVALID_ARGUMENT", str(error)),
                 ),
                 ensure_ascii=False,
+                indent=indent,
             ),
             flush=True,
         )
@@ -632,6 +635,7 @@ def cli():
                     error=workflow_common.WorkflowError("INTERNAL_ERROR", str(error)),
                 ),
                 ensure_ascii=False,
+                indent=indent,
             ),
             flush=True,
         )

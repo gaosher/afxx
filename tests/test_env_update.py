@@ -139,8 +139,8 @@ def test_mcp_forwards_explicit_update_selection(monkeypatch):
     seen=[]
     monkeypatch.setattr(mcp_operations, 'submit', lambda command,args,path,key: seen.append(args) or {'ok': True})
     call(mcp_server.create_server('/config'), 'afxx_run', {
-        'command': 'env update', 'arguments': ['--torch', '2.11.0', '--torch-npu', 'latest'], 'request_id': 'update-1'})
-    assert seen == [['env', 'update', '--config', '/config', '--torch', '2.11.0', '--torch-npu', 'latest', '--detach', '--request-id', 'update-1']]
+        'command': 'env update', 'arguments': ['--torch', '2.11.0', '--torch-npu', 'latest']})
+    assert seen == [['env', 'update', '--config', '/config', '--torch', '2.11.0', '--torch-npu', 'latest', '--detach']]
 
 
 def test_version_query_does_not_wait_for_fuzz_execution_locks(env_cfg, tmp_path, monkeypatch):
@@ -234,3 +234,87 @@ def test_save_resolves_actual_versions_and_blocks_mixed_cann(env_cfg, tmp_path, 
     with pytest.raises(ValueError, match='mixed CANN'):
         env.update(env_cfg, job, {'cann': 'latest'})
     assert common.read(env.state_path(env_cfg)) == before
+
+
+@pytest.mark.parametrize('arguments,expected', [
+    ([], {}),
+    (['--afx'], {'afx': 'latest'}),
+    (['--torch-npu'], {'torch_npu': 'latest'}),
+    (['--cann', '--ops'], {'cann': 'latest', 'ops': True}),
+    (['--afx', '--torch-npu', '--cann'], {'afx': 'latest', 'torch_npu': 'latest', 'cann': 'latest'}),
+    (['--afx', '0.4.1', '--torch-npu', '20261123', '--cann', '20261123'],
+     {'afx': '0.4.1', 'torch_npu': '20261123', 'cann': '20261123'}),
+    (['--torch', '2.10.0+cpu', '--torch-npu'], {'torch': '2.10.0+cpu', 'torch_npu': 'latest'}),
+])
+def test_cli_update_optional_values(env_cfg, monkeypatch, arguments, expected):
+    import sys
+    from afxx import jobs
+    monkeypatch.setattr(cli.workflow_config, 'config', lambda path: env_cfg)
+    monkeypatch.setattr(jobs, 'local_preflight', lambda *args: None)
+    seen = []
+    monkeypatch.setattr(jobs, 'submit', lambda c,r,k,d: seen.append(r) or {'job': 'test', 'dry_run': True})
+    monkeypatch.setattr(sys, 'argv', ['afxx', 'env', 'update', '--dry-run', *arguments])
+    cli.main()
+    assert seen[0]['updates'] == expected
+
+
+@pytest.mark.parametrize('arguments', [['--torch'], ['--torch', '--afx'], ['--torch', 'latest']])
+def test_cli_update_torch_requires_exact_value(env_cfg, monkeypatch, capsys, arguments):
+    import sys
+    import json
+    from afxx import jobs
+    monkeypatch.setattr(cli.workflow_config, 'config', lambda path: env_cfg)
+    monkeypatch.setattr(jobs, 'local_preflight', lambda *args: None)
+    monkeypatch.setattr(jobs, 'submit', lambda *args: pytest.fail('must not submit'))
+    monkeypatch.setattr(sys, 'argv', ['afxx', 'env', 'update', *arguments])
+    assert cli.cli() == 2
+    assert json.loads(capsys.readouterr().out)['error']['code'] == 'INVALID_ARGUMENT'
+
+
+@pytest.mark.parametrize('action', ['init', 'update', 'check'])
+def test_environment_ids_are_automatic(env_cfg, monkeypatch, action):
+    import sys
+    from afxx import jobs
+    monkeypatch.setattr(cli.workflow_config, 'config', lambda path: env_cfg)
+    monkeypatch.setattr(jobs, 'local_preflight', lambda *args: None)
+    keys = []
+    monkeypatch.setattr(jobs, 'submit', lambda c,r,k,d: keys.append(k) or {'job': k, 'dry_run': True})
+    monkeypatch.setattr(sys, 'argv', ['afxx', 'env', action, '--dry-run'])
+    cli.main()
+    cli.main()
+    assert keys[0] != keys[1]
+    assert all(__import__('re').fullmatch(r'ENV[0-9a-f]{32}', key) for key in keys)
+
+
+@pytest.mark.parametrize('action', ['init', 'update', 'check'])
+def test_environment_rejects_user_id(monkeypatch, capsys, action):
+    import sys, json
+    monkeypatch.setattr(sys, 'argv', ['afxx', 'env', action, '--request-id', 'custom'])
+    assert cli.cli() == 2
+    assert json.loads(capsys.readouterr().out)['error']['code'] == 'INVALID_ARGUMENT'
+
+
+@pytest.mark.parametrize('action', ['init', 'update', 'check'])
+@pytest.mark.parametrize('extra', [{'request_id': 'custom'}, {'arguments': ['--request-id=custom']}])
+def test_mcp_environment_rejects_user_id(monkeypatch, action, extra):
+    from test_mcp_tools import call
+    from afxx import mcp_server, mcp_operations
+    monkeypatch.setattr(mcp_operations, 'submit', lambda *a: pytest.fail('must not submit'))
+    result = call(mcp_server.create_server('/config'), 'afxx_run', {'command': 'env '+action, **extra})
+    assert result.structuredContent['error']['code'] == 'INVALID_ARGUMENT'
+
+
+@pytest.mark.parametrize('action', ['init', 'update', 'check'])
+def test_mcp_environment_auto_id_not_forwarded(monkeypatch, action):
+    import re
+    from test_mcp_tools import call
+    from afxx import mcp_server, mcp_operations
+    seen = []
+    monkeypatch.setattr(mcp_operations, 'submit', lambda command,args,path,key: seen.append((args,key)) or {'ok': True})
+    server = mcp_server.create_server('/config')
+    call(server, 'afxx_run', {'command': 'env '+action})
+    call(server, 'afxx_run', {'command': 'env '+action})
+    assert seen[0][1] != seen[1][1]
+    for args, key in seen:
+        assert re.fullmatch(r'ENV[0-9a-f]{32}', key)
+        assert '--request-id' not in args

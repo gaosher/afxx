@@ -347,7 +347,7 @@ def verify(c, job, lease=None):
             )
             return state
         # Capture the selected binary afresh, including retries of an uncertain POST.
-        code = "import json; from autofusex.fuzz.client.environment import collect; print(json.dumps(collect()))"
+        code = "import json; from autofusex.execution.environment import collect; print(json.dumps(collect()))"
         package = workflow_runtime.af_identity(
             json.loads(
                 workflow_common.capture(

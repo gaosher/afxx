@@ -88,32 +88,11 @@ def dependency_checks(module, scope):
         )
         checks.append((name, [sys.executable, "-c", script]))
     if scope != "deploy":
-        client = 'import importlib\nprefix="autofusex.fuzz.client"\n'
-        checks.append(
-            (
-                "fuzz-cli",
-                [
-                    sys.executable,
-                    "-c",
-                    client + "print(importlib.import_module(prefix+'.cli').__file__)",
-                ],
-            )
-        )
-        checks.append(
-            (
-                "afx-contracts",
-                [
-                    sys.executable,
-                    "-c",
-                    "from autofusex.fuzz.client.generation.sampling import SamplingConfig,decode; "
-                    "from autofusex.fuzz.client.storage import ResultRepository; "
-                    "s=SamplingConfig(dynamic_variants=8).seed(0,dynamic=True); "
-                    "assert decode(s)[0].dynamic_variants==8; "
-                    "assert all(callable(f) for f in (ResultRepository.list,ResultRepository.detail)); "
-                    'print("AFX seed/results interfaces available")',
-                ],
-            )
-        )
+        checks.append(("fuzz-cli", [sys.executable, "-m", "afx", "fuzz", "replay", "--help"]))
+        checks.append(("afx-contracts", [sys.executable, "-m", "afx", "results", "list", "--help"]))
+        checks.append(("afx>=0.4.1", [sys.executable, "-c",
+            "from importlib.metadata import version; from packaging.version import Version; "
+            "v=version('autofusex'); assert Version(v)>=Version('0.4.1'),v; print(v)"]))
     if scope in ("deploy", "full"):
         checks.append(
             (
@@ -143,7 +122,7 @@ name=prefix+'runtime'
 m=importlib.import_module(name)
 print(json.dumps(m.source_evidence()))
 """
-        checks.append(("nnsmith-source-and-z3", [sys.executable, "-c", client + gate]))
+        checks.append(("nnsmith-source-and-z3", [sys.executable, "-c", "prefix='autofusex.workloads.fuzz'\n" + gate]))
     if scope == "full":
         checks.append(("pip-check", [sys.executable, "-I", "-m", "pip", "check"]))
     return checks
@@ -238,11 +217,11 @@ def venv_preflight(c, env, job, scope):
     return report
 
 
-def probe(c, env, job):
+def probe(c, env, job, *, interpreter=None):
     code = (
-        'import json,sys,importlib\nprefix="autofusex.fuzz.client"\n'
+        'import json,sys,importlib\n'
         + """
-m=importlib.import_module(prefix+'.backends.mlir_capability')
+m=importlib.import_module('autofusex.execution.backends.mlir_capability')
 p=importlib.import_module('autofuse.pyautofuse')
 print(json.dumps({'pyautofuse':p.__file__,'adapter':m.verify_compile_adapter(),'codegen':m.verify_runtime(),
 'debugger':importlib.import_module(sys.argv[1]).__file__}))
@@ -250,7 +229,7 @@ print(json.dumps({'pyautofuse':p.__file__,'adapter':m.verify_compile_adapter(),'
     )
     paths = json.loads(
         workflow_common.capture(
-            [python(c), "-c", code, "autofusex"], env=env, cwd=job
+            [interpreter or python(c), "-c", code, "autofusex"], env=env, cwd=job
         ).splitlines()[-1]
     )
     root = Path(c["runtime"]["install_root"]).resolve()
@@ -330,6 +309,9 @@ def deployment_reference(path):
 def current_deployment(c, path):
     path = Path(path).resolve()
     deployment = workflow_common.read(path)
+    coordination = deployment.get("client_coordination")
+    workflow_common.require_code(not coordination or coordination.get("state") in ("restored", "unchanged"),
+                                 "DEPLOY_CLIENT_NOT_READY", "deployment client coordination did not complete")
     current = workflow_common.read(registry(c).with_suffix(".json"))
     if "deployment" in current:
         workflow_common.require(

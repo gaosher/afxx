@@ -6,7 +6,7 @@ import sys
 
 import pytest
 from afxx.afx import replay
-from afxx import jobs, cli, config
+from afxx import jobs, cli, config, replay_runs
 
 
 @pytest.fixture
@@ -90,16 +90,17 @@ def test_remote_evidence_protocol_runs_without_installed_forge(scene, monkeypatc
 @pytest.mark.parametrize('action', ['list', 'read'])
 def test_cli_routes_evidence_without_platform_claim(scene, monkeypatch, capsys, action):
     job, results = scene
-    args = ['afxx', 'evidence', action, '--job-id', job.name]
+    args = ['afxx', 'evidence', action, '--request-id', 'repair', '--run', '2']
     if action == 'read': args += ['--path', str(results/'dump/a.mlir'), '--offset', '4']
     monkeypatch.setattr(sys, 'argv', args)
     monkeypatch.setattr(config, 'config', lambda _: {})
     monkeypatch.setattr(jobs, 'local_preflight', lambda command, *_: None)
-    monkeypatch.setattr(jobs, 'query_evidence', lambda c, jid, act, **kw: dict(job=jid, action=act, **kw))
+    monkeypatch.setattr(replay_runs, 'evidence', lambda c, rid, run, act, **kw: dict(request_id=rid, run=run, action=act, **kw))
     assert cli.cli() == 0
     value = json.loads(capsys.readouterr().out)
     assert value['command'] == 'evidence ' + action
     assert value['data']['action'] == action
+    assert value['data']['request_id'] == 'repair' and value['data']['run'] == 2
 
 
 def test_explicit_directory_reference_does_not_infer_shape(scene):
@@ -118,3 +119,28 @@ def test_explicit_directory_reference_does_not_infer_shape(scene):
     assert link['basis'] == 'explicit_directory_in_afx_diagnostics'
     assert link['shape_indices'] == [] and link['reference_path'] == str(folder)
     assert rows[str(other / 'pass.mlir')]['association_state'] == 'unassociated'
+
+
+def test_shared_dump_is_readable_without_copy_and_symlinks_rejected(scene):
+    from afxx.afx import replay
+    job, results = scene
+    home = job.parent/'client'
+    worker = home/'debug/autofuse_compile/worker-test'
+    worker.mkdir(parents=True)
+    artifact = worker/'kernel.cpp'; artifact.write_text('kernel evidence')
+    record=json.loads((job/'result.json').read_text())
+    record.update(client_home=str(home),dump_roots=[str(worker)])
+    (job/'result.json').write_text(json.dumps(record))
+    evidence=replay.collect_evidence(job,results,True)
+    assert any(row['path']==str(artifact) for row in evidence['files'])
+    assert replay.read_evidence(job,str(artifact),0,128)['content']=='kernel evidence'
+    link=worker/'other.cpp';link.symlink_to(artifact)
+    with pytest.raises(ValueError,match='symlink'):
+        replay.read_evidence(job,str(link),0,128)
+
+
+@pytest.mark.parametrize('args', [[],['--job-id','old'],['--request-id','repair','--job-id','old']])
+def test_evidence_cli_rejects_missing_request_or_old_job_id(monkeypatch,capsys,args):
+    monkeypatch.setattr(sys,'argv',['afxx','evidence','list',*args])
+    assert cli.cli()==2
+    assert json.loads(capsys.readouterr().out)['error']['code']=='INVALID_ARGUMENT'

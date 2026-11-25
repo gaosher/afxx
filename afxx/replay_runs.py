@@ -35,7 +35,7 @@ def _update(c, request_id, run, **fields):
 
 
 def submit(c, request, request_id, dry_run=False):
-    from afxx.afx.managed_replay import validate_options
+    from afxx.afx.fuzz_replay import validate_options
     validate_options(c, request)
     path = _path(c, request_id)
     with common.lock(path.with_suffix(".lock")):
@@ -84,7 +84,7 @@ def _view(c, entry, full=False, download=True):
     out["passed"] = report.get("passed")
     if full:
         out["result"] = report
-        if report.get("execution_mode") == "managed":
+        if "execution_environments" in report:
             out["environment"] = report.get("execution_environments", {})
             out["submission_environment"] = raw.get("environment.json", {})
         else:
@@ -102,6 +102,15 @@ def list_runs(c, request_id):
 
 def show(c, request_id, run=None, *, download=True):
     return {"request_id": request_id, **_view(c, _select(c, request_id, run), full=True, download=download)}
+
+
+def evidence(c, request_id, run, action, **options):
+    """Resolve once so pagination can remain pinned to the returned run."""
+    entry = _select(c, request_id, run)
+    common.require_code(not entry["dry_run"], "EVIDENCE_UNAVAILABLE",
+                        "dry-run replay has no remote evidence")
+    value = jobs.query_evidence(c, entry["execution"], action, **options)
+    return {**value, "request_id": request_id, "run": entry["run"]}
 
 
 def _rows(report):

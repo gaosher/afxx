@@ -1,5 +1,6 @@
 """Portable AFX lifecycle adapter, executed in the remote Python environment."""
 import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,39 @@ def alive(pid):
         return False
 
 
+def client_command(argv):
+    """Identify resident entrypoints, excluding task/stage workers and CLI callers."""
+    if '-c' in argv:
+        index = argv.index('-c')
+        bootstrap = ('import sys; sys.path.insert(0, sys.argv[1]); '
+                     'from autofusex.client.supervisor import run; '
+                     'raise SystemExit(run(sys.argv[2], sys.argv[3]))')
+        if index + 1 >= len(argv) or ' '.join(argv[index + 1].split()) != bootstrap:
+            return None
+        return dict(legacy=False, supervisor=True,
+                    directory=argv[index + 3] if len(argv) == index + 5 else None)
+    if '-m' in argv:
+        index = argv.index('-m')
+        if index + 1 >= len(argv) or argv[index + 1] not in ('afx', 'autofusex', 'autofusex.client'):
+            return None
+        args = argv[index + 2:]
+    elif len(argv) >= 1 and Path(argv[0]).name in ('afx', 'autofusex'):
+        args = argv[1:]
+    elif len(argv) >= 2 and Path(argv[1]).name in ('afx', 'autofusex'):
+        args = argv[2:]
+    else:
+        return None
+    legacy = args[:3] == ['platform', 'client', 'run']
+    daemon = args[:2] in (['daemon', 'run'], ['daemon', 'supervise'])
+    if not (legacy or daemon):
+        return None
+    directory = None
+    if '--data-dir' in args:
+        index = args.index('--data-dir')
+        directory = args[index + 1] if index + 1 < len(args) else None
+    return dict(legacy=legacy, supervisor=daemon and args[1] == 'supervise', directory=directory)
+
+
 def live_clients():
     """Discover current-user resident clients; a supervisor and its child count once."""
     found = []
@@ -27,24 +61,18 @@ def live_clients():
         try:
             if proc.stat().st_uid != os.getuid() or not alive(proc.name):
                 continue
-            argv = (proc / 'cmdline').read_bytes().decode().split('\0')
-            if '-m' in argv:
-                if argv[argv.index('-m') + 1] not in ('afx', 'autofusex'):
-                    continue
-            elif not any(Path(value).name in ('afx', 'autofusex') for value in argv[:2]):
+            argv = (proc / 'cmdline').read_bytes().decode().rstrip('\0').split('\0')
+            command = client_command(argv)
+            if command is None:
                 continue
-            legacy = 'platform' in argv and 'client' in argv and 'run' in argv
-            daemon = 'daemon' in argv and ('run' in argv or 'supervise' in argv)
-            if not (legacy or daemon):
-                continue
-            directory = argv[argv.index('--data-dir') + 1] if '--data-dir' in argv else None
+            directory = command['directory']
             if not directory:
                 env = dict(part.split('=', 1) for part in (proc/'environ').read_text().split('\0') if '=' in part)
                 directory = env.get('AUTOFUSEX_HOME')
             parent = int((proc/'stat').read_text().rsplit(')', 1)[1].split()[1])
             found.append({'pid': int(proc.name), 'parent': parent,
                           'home': str(Path(directory).resolve()) if directory else None,
-                          'legacy': legacy, 'supervisor': daemon and 'supervise' in argv})
+                          'legacy': command['legacy'], 'supervisor': command['supervisor']})
         except (OSError, ValueError, IndexError):
             continue
     return [item for item in found if not (item['supervisor'] and any(
@@ -99,7 +127,12 @@ def execute(settings, run, legacy):
 
     current = status()
     if action == 'status':
-        return view(current)
+        result = view(current)
+        if current and settings.get('inspect'):
+            result['execution_environment'] = legacy(['environment', 'status', 'local', '--data-dir', str(home)])
+            result['active_runs'] = [legacy(['task', 'inspect', r['id'], '--data-dir', str(home)])
+                for r in current.get('runs', []) if r['state'] in ('running','paused','preparing','pausing','draining','cancelling','needs_attention')]
+        return result
 
     if action == 'restart' and not current:
         raise ClientError('PLATFORM_CLIENT_NOT_RUNNING', 'no live client to restart; use client start')
@@ -121,7 +154,9 @@ def execute(settings, run, legacy):
         supervisor_pid = None
         try:
             parent = Path(f'/proc/{daemon_pid}/stat').read_text().rsplit(')', 1)[1].split()[1]
-            if b'daemon\x00supervise' in Path(f'/proc/{parent}/cmdline').read_bytes():
+            argv = Path(f'/proc/{parent}/cmdline').read_bytes().decode().rstrip('\0').split('\0')
+            command = client_command(argv)
+            if command and command['supervisor']:
                 supervisor_pid = int(parent)
         except OSError:
             pass
@@ -144,6 +179,13 @@ def execute(settings, run, legacy):
     if action == 'stop':
         return view(None)
 
+    if settings.get('daemon_only'):
+        legacy(['daemon', 'start', '--data-dir', str(home)])
+        result = view(status())
+        if result['state'] != 'idle':
+            raise ClientError('PLATFORM_CLIENT_START_FAILED', 'expected an idle daemon without an execution session')
+        return result
+
     session = run(prefix + ['start'])
     ids = session.get('run_ids') or [session.get('run_id')]
     while True:
@@ -156,16 +198,34 @@ def execute(settings, run, legacy):
         wait()
 
 
+def public_command(argv):
+    """Use the public router in-process so init tokens never enter process argv."""
+    from autofusex.cli import main as afx_main
+    if argv[:1] == ['--data-dir']:
+        argv = argv[2:] + argv[:2]
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        code = afx_main(argv)
+    try:
+        body = json.loads(output.getvalue())
+    except ValueError:
+        raise ClientError('AFX_PROTOCOL_ERROR', 'AFX returned an invalid response') from None
+    if not body.get('ok'):
+        error = body.get('error') or {}
+        if error.get('code') in ('FileNotFoundError', 'ConnectionRefusedError'):
+            raise FileNotFoundError()
+        raise ValueError('AFX command failed: ' + str(error.get('code', code)))
+    return body['data']
+
+
 def main():
     settings = json.loads(sys.argv[1])
     try:
-        from autofusex.fuzz.daemon.management.modern_cli import run, _legacy
         with contextlib.redirect_stdout(sys.stderr):
-            result = execute(settings, run, _legacy)
+            result = execute(settings, public_command, public_command)
     except ClientError as error:
         result = {'error': error.code, 'message': str(error)}
     except Exception as error:
-        # Do not forward upstream exceptions that may include credentials.
         print('AFX client failed: ' + type(error).__name__, file=sys.stderr)
         result = {'error': 'PLATFORM_CLIENT_CONTROL_FAILED', 'message': 'AFX lifecycle operation failed; inspect client.log'}
     print(json.dumps(result))

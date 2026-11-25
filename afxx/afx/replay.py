@@ -27,8 +27,8 @@ def requested_seeds(seed, seeds_file):
 
 def seed_command(interpreter, seeds):
     code = """import json,sys
-from autofusex.fuzz.client.contracts import Seed
-from autofusex.fuzz.client.generation.sampling import decode
+from autofusex.workloads.fuzz.contracts import Seed
+from autofusex.workloads.fuzz.generation.sampling import decode
 out=[]
 for value in json.loads(sys.argv[1]):
  s=Seed.parse(value)
@@ -114,6 +114,23 @@ def visible_device_count(output):
     return count
 
 
+def shared_dump_roots(job):
+    """Only recorded worker diagnostic directories inside the resolved client home."""
+    record = job / "result.json"
+    if not record.is_file():
+        return []
+    report = json.loads(record.read_text())
+    home = Path(report.get("client_home", "/nonexistent"))
+    roots = []
+    for value in report.get("dump_roots", []):
+        path = Path(value)
+        if (path.is_absolute() and home in path.parents and "debug" in path.parts
+                and path.name.startswith("worker-")
+                and not any(p.is_symlink() for p in (path, *path.parents))):
+            roots.append(path)
+    return roots
+
+
 def collect_evidence(job, results, dump, offset=0):
     """Return bounded, local diagnostic evidence without following symlinks."""
     roots = {
@@ -155,9 +172,12 @@ def collect_evidence(job, results, dump, offset=0):
 
     # Logs first so a large compiler dump cannot crowd out the failure message.
     add(job / "job.log", "job_log")
+    for log in sorted(job.glob("replay-*.log")):
+        add(log, "replay_log")
     add(results / "results.sqlite", "results_database")
     for category, root in {"af_dump": roots["af_dump"], "torch_debug": roots["torch_debug"],
-                           "results": results}.items():
+                           "results": results,
+                           **{f"afx_dump_candidate_{i}": root for i, root in enumerate(shared_dump_roots(job))}}.items():
         info = {"path": str(root.absolute()), "exists": root.is_dir(), "files_returned": 0}
         evidence["directories"][category] = info
         if evidence["truncated"] or root.is_symlink() or not root.is_dir():
@@ -246,8 +266,9 @@ def read_evidence(job, path, offset, limit, expected_sha256=None):
     path = Path(path)
     if offset < 0 or not 1 <= limit <= 65536 or not path.is_absolute() or ".." in path.parts:
         raise ValueError("invalid path, byte offset or limit (1..65536)")
-    roots = [job / "torch_compile_debug", results / "dump", results / "cache"]
-    allowed = path == job / "job.log" or any(root in path.parents for root in roots)
+    roots = [job / "torch_compile_debug", results / "dump", results / "cache", *shared_dump_roots(job)]
+    allowed = (path == job / "job.log" or (path.parent == job and path.name.startswith("replay-") and path.suffix == ".log")
+               or any(root in path.parents for root in roots))
     # Other result files are restricted to worker logs, not arbitrary JSON/config.
     allowed = allowed or (results in path.parents and path.suffix == ".log")
     if not allowed or path.name == "sync.json" or path.suffix not in {".log", ".txt", ".mlir", ".py", ".cpp", ".cc", ".h", ".json"}:

@@ -409,7 +409,7 @@ def test_replay_managed_worker_routing(cfg, tmp_path, monkeypatch, failure):
     monkeypatch.setattr(workflow_execution, "record_environment", lambda *a: {"af": {"sha": "submitter"}})
     monkeypatch.setattr(workflow_runtime, "environment", lambda *a: {"EXISTING_HOME": "retained"})
     def run(argv, **kwargs):
-        assert argv == [workflow_runtime.python(cfg), "-m", "afxx.afx.managed_replay", str(job)]
+        assert argv == [workflow_runtime.python(cfg), "-m", "afxx.afx.fuzz_replay", str(job)]
         assert kwargs["env"] == {"EXISTING_HOME": "retained"}
         if failure == "launch":
             raise OSError("launch failed")
@@ -424,7 +424,7 @@ def test_replay_managed_worker_routing(cfg, tmp_path, monkeypatch, failure):
         workflow_execution.replay(cfg, job, {})
     report = workflow_common.read(job / "result.json")
     assert report["state"] == ("failed" if failure else "success")
-    assert report["execution_mode"] == "managed"
+    assert report["execution_mode"] == "fuzz_replay"
     assert "runtime" not in report  # submitting interpreter is not the execution identity
     assert "evidence" in report
 
@@ -1027,14 +1027,10 @@ def test_replay_dump_override_is_frozen_without_editing_config(cfg, tmp_path, co
          "--request-id", "repair", "--seed", "F0SQR0HF7D3QEYXA8AE8QS7927Z", "--dry-run",
          *(["--dump"] if flag else [])], capture_output=True, text=True,
     )
-    if expected:
-        assert result.returncode == 2
-        assert json.loads(result.stdout)["error"]["code"] == "MANAGED_REPLAY_UNSUPPORTED"
-    else:
-        assert result.returncode == 0, result.stdout + result.stderr
-        data = json.loads(result.stdout)["data"]
-        frozen = yaml.safe_load((Path(data["local"]) / "config.yaml").read_text())
-        assert frozen["replay"]["dump"] is False
+    assert result.returncode == 0, result.stdout + result.stderr
+    data = json.loads(result.stdout)["data"]
+    frozen = yaml.safe_load((Path(data["local"]) / "config.yaml").read_text())
+    assert frozen["replay"]["dump"] is expected
     assert path.read_text() == original
 
 

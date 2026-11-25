@@ -202,6 +202,8 @@ print(o.submit('deploy',['deploy'],None,'outlive')['data']['state'],flush=True)
     ('afxx_issue', {'action':'release','issue_id':'F152','request_id':'release-1'}, ['issue','release','--config','/config','--issue-id','F152','--request-id','release-1']),
     ('afxx_case', {'action':'spec','case_key':'seed'}, ['case','spec','--config','/config','--case-key','seed']),
     ('afxx_case', {'action':'history','case_key':'seed','after':42,'limit':2}, ['case','history','--config','/config','--case-key','seed','--limit','2','--after','42']),
+    ('afxx_evidence_list', {'request_id':'repair','run':2}, ['evidence','list','--config','/config','--request-id','repair','--offset','0','--run','2']),
+    ('afxx_evidence_read', {'request_id':'repair','run':2,'path':'/remote/a'}, ['evidence','read','--config','/config','--request-id','repair','--path','/remote/a','--offset','0','--limit','8192','--run','2']),
 ])
 def test_platform_tools_share_cli(monkeypatch, tool, arguments, tokens):
     async def invoke(args):
@@ -225,9 +227,9 @@ def test_case_list_generic_mcp(monkeypatch):
 @pytest.mark.parametrize('tool,arguments,tokens', [
     ('afxx_execution_show', {'exec_uuid':'exec-0001'}, ['execution','show','--exec-uuid','exec-0001']),
     ('afxx_issue_status', {'issue_id':'F152','round_no':2,'include_tasks':True}, ['issue','status','--issue-id','F152','--round-no','2','--include-tasks']),
-    ('afxx_evidence_list', {'job_id':'a'*32,'offset':10}, ['evidence','list','--job-id','a'*32,'--offset','10']),
-    ('afxx_evidence_read', {'job_id':'a'*32,'path':'/remote/dump/a b.mlir'}, ['evidence','read','--job-id','a'*32,'--path','/remote/dump/a b.mlir','--offset','0','--limit','8192']),
-    ('afxx_evidence_read', {'job_id':'a'*32,'path':'/remote/a','offset':8192,'limit':1024,'sha256':'b'*64}, ['evidence','read','--job-id','a'*32,'--path','/remote/a','--offset','8192','--limit','1024','--sha256','b'*64]),
+    ('afxx_evidence_list', {'request_id':'a'*32,'offset':10}, ['evidence','list','--request-id','a'*32,'--offset','10']),
+    ('afxx_evidence_read', {'request_id':'a'*32,'path':'/remote/dump/a b.mlir'}, ['evidence','read','--request-id','a'*32,'--path','/remote/dump/a b.mlir','--offset','0','--limit','8192']),
+    ('afxx_evidence_read', {'request_id':'a'*32,'path':'/remote/a','offset':8192,'limit':1024,'sha256':'b'*64}, ['evidence','read','--request-id','a'*32,'--path','/remote/a','--offset','8192','--limit','1024','--sha256','b'*64]),
 ])
 def test_diagnostic_tools_share_cli(monkeypatch, tool, arguments, tokens):
     payload={'ok':False,'data':None,'error':{'code':'EVIDENCE_UNAVAILABLE','message':'missing'}}
@@ -243,10 +245,13 @@ def test_diagnostic_tools_share_cli(monkeypatch, tool, arguments, tokens):
     ('afxx_execution_show', {'exec_uuid':'123'}),
     ('afxx_issue_status', {'issue_id':'F152','round_no':0}),
     ('afxx_issue_status', {'issue_id':'../F152','round_no':1}),
-    ('afxx_evidence_list', {'job_id':'../bad'}),
-    ('afxx_evidence_list', {'job_id':'a'*32,'offset':-1}),
-    ('afxx_evidence_read', {'job_id':'a'*32,'path':'/remote/a','limit':65537}),
-    ('afxx_evidence_read', {'job_id':'a'*32,'path':'/remote/a','sha256':'bad'}),
+    ('afxx_evidence_list', {'request_id':'../bad'}),
+    ('afxx_evidence_list', {'request_id':'a'*32,'offset':-1}),
+    ('afxx_evidence_read', {'request_id':'a'*32,'path':'/remote/a','limit':65537}),
+    ('afxx_evidence_read', {'request_id':'a'*32,'path':'/remote/a','sha256':'bad'}),
+    ('afxx_evidence_list', {'request_id':'repair','run':0}),
+    ('afxx_evidence_read', {'request_id':'repair','run':-1,'path':'/remote/a'}),
+    ('afxx_evidence_list', {'job_id':'a'*32}),
 ])
 def test_diagnostic_tool_schema_rejects_invalid_args(monkeypatch, tool, args):
     from mcp.server.fastmcp.exceptions import ToolError
@@ -260,7 +265,7 @@ def test_diagnostic_tool_schema_rejects_invalid_args(monkeypatch, tool, args):
 def test_evidence_read_rejects_invalid_remote_path(monkeypatch,path):
     async def forbidden(*a): pytest.fail('must not execute CLI')
     monkeypatch.setattr(m,'invoke',forbidden)
-    result=call(m.create_server(),'afxx_evidence_read',{'job_id':'a'*32,'path':path})
+    result=call(m.create_server(),'afxx_evidence_read',{'request_id':'a'*32,'path':path})
     assert result.structuredContent['error']['code']=='INVALID_ARGUMENT'
 
 

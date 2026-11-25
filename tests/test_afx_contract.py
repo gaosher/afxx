@@ -30,8 +30,8 @@ def afx(monkeypatch, request):
 
 @pytest.mark.parametrize("count", range(1, 9))
 def test_real_seed_and_saved_result_cli(afx, tmp_path, count):
-    from autofusex.fuzz.client.generation.sampling import SamplingConfig
-    from autofusex.fuzz.client.storage import ResultRepository
+    from autofusex.workloads.fuzz.generation.sampling import SamplingConfig
+    from autofusex.execution.storage import ResultRepository
 
     seed = SamplingConfig(dynamic_variants=max(2, count)).seed(42, dynamic=count != 1)
 
@@ -61,9 +61,8 @@ def test_real_seed_and_saved_result_cli(afx, tmp_path, count):
                 ],
             )
         )
-    from autofusex.fuzz.client.storage.queries import ResultQueries
-    queries = ResultQueries(repo.path)
-    attempts = [queries.detail(row["id"]) for row in queries.page()["items"]]
+    from afxx.afx.fuzz_replay import read_attempt
+    attempts = [read_attempt(repo.path, row["id"]) for row in repo.list()["items"]]
     assert d.summarize(attempts, normalized)["passed"]
 
 
@@ -72,9 +71,9 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     import json
     import afxx.cli
     from afxx import jobs
-    from autofusex.platform import auth, issues, regression, retests, queries
-    from autofusex.platform.ingest import Ingestor
-    from autofusex.platform.store import Store
+    from autofusex.server import auth, issues, regression, retests, queries
+    from autofusex.server.ingest import Ingestor
+    from autofusex.server.store import Store
 
     store = Store(tmp_path / "numbered-platform")
     auth.add_user(store, "dev", "developer")
@@ -220,7 +219,7 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     assert published["status"] == "resolved" and published["knowledge_id"].startswith("K")
     assert cli("issue submit-summary", "--summary-file", str(summary), "--request-id", "summary-1") == published
     assert summary_keys == ["summary-1", "summary-1"]
-    from autofusex.platform import knowledge
+    from autofusex.server import knowledge
     with store.connect() as conn:
         saved = knowledge.get(conn, published["knowledge_id"])
     assert saved["body_md"] == summary_fields["body_md"]
@@ -230,7 +229,7 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
 def test_official_fuzz_command_contract(afx, cfg, tmp_path):
     import argparse
     from afxx.afx import fuzz
-    from autofusex.fuzz.client.scheduling.cli import register
+    from autofusex.workloads.fuzz.scheduling.cli import register
 
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command")
@@ -245,32 +244,30 @@ def test_official_fuzz_command_contract(afx, cfg, tmp_path):
         assert parser.parse_args([action, "--data-dir", str(tmp_path)]).command == action
 
 
-def test_managed_replay_command_contract(afx, tmp_path, monkeypatch, capsys):
-    from autofusex import cli
-    from autofusex.fuzz.daemon.management import modern_cli
-    from autofusex.fuzz.daemon import runtime
-    from afxx.afx.managed_replay import command
-    import json
-    calls = []
-    monkeypatch.setattr(modern_cli, "_legacy", lambda args: {})
-    def request(home, body):
-        calls.append((home, body))
-        return {"run_id": "session", "task_ids": ["task"], "state": "queued"}
-    monkeypatch.setattr(runtime, "request", request)
-    argv = command(sys.executable, ["arbitrary-seed"], tmp_path)
-    assert cli.main(argv[3:]) == 0
-    assert calls == [(tmp_path, {"action": "replay", "seeds": ["arbitrary-seed"]})]
-    assert json.loads(capsys.readouterr().out)["data"]["state"] == "queued"
+def test_fuzz_replay_command_contract(afx, tmp_path):
+    from autofusex.workloads.fuzz.cli import replay_parser
+    from afxx.afx.fuzz_replay import command
+    argv = command(sys.executable, "arbitrary-seed", "npu:1", 4, True)
+    args = replay_parser().parse_args(argv[5:])
+    assert args.seed == "arbitrary-seed" and args.save
+    assert args.scheduling == "staged" and args.backend is None
+    assert args.database is None and args.dump
+    assert args.device == "npu:1" and args.compile_threads == 4
 
 
 def test_managed_client_facade_contract(afx, tmp_path, monkeypatch, capsys):
-    from autofusex.fuzz.daemon.management import modern_cli
+    from autofusex.client import modern_cli
     from afxx.afx.launcher import MANAGED_START
     import json
     home = tmp_path / "client"
     home.mkdir()
     token = tmp_path / "token"
     token.write_text("test-secret")
+    from autofusex.client import cli as management_cli
+    def daemon_main(argv, **kwargs):
+        print(json.dumps({"ok": True, "data": modern_cli._legacy(argv)}))
+        return 0
+    monkeypatch.setattr(management_cli, "main", daemon_main)
     original = modern_cli.run
     calls = []
     def run(argv):
@@ -287,6 +284,7 @@ def test_managed_client_facade_contract(afx, tmp_path, monkeypatch, capsys):
     for _ in range(2):
         exec(compile(MANAGED_START, "managed_adapter", "exec"), {"__name__": "__main__"})
         output = capsys.readouterr().out
+        assert "status" in json.loads(output), output
         assert json.loads(output)["status"]["runs"][0]["state"] == "running"
         assert "test-secret" not in output
     assert sum(argv[2] == "init" for argv in calls) == 1
@@ -311,3 +309,37 @@ def test_managed_client_facade_contract(afx, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(modern_cli, "_legacy", lambda argv: {"runs": [{"id": "r", "state": "failed"}]})
     exec(compile(MANAGED_START, "managed_adapter", "exec"), {"__name__": "__main__"})
     assert json.loads(capsys.readouterr().out)["error"] == "PLATFORM_CLIENT_START_FAILED"
+
+
+@pytest.mark.parametrize('rejected', [False, True])
+def test_selected_upload_preserves_content_and_excludes_history(afx, tmp_path, platform_cfg, monkeypatch, rejected):
+    import sqlite3
+    from autofusex.workloads.fuzz.generation.sampling import SamplingConfig
+    from autofusex.execution.storage import ResultRepository
+    from afxx.afx import fuzz_replay
+    seed = SamplingConfig().seed(42)
+    repo = ResultRepository(tmp_path / 'shared.sqlite')
+    ids = [repo.save(dict(seed=str(seed), workload_id='a'*64, oracle_id='cpu/1', backend='af-mlir',
+                         status='ok', execution={'backend':'af-mlir', 'dump':True}, shape_results=[
+                         dict(shape_index=0, correctness='pass', performance='not_requested')])) for _ in range(2)]
+    selected = repo.detail(ids[0])
+    destinations = []
+    def sync(args):
+        database = Path(args[args.index('--results')+1]); destinations.append(database)
+        staged = ResultRepository(database)
+        assert [row['id'] for row in staged.list()['items']] == [ids[0]]
+        detail = staged.detail(ids[0])
+        assert detail['result_hash'] == selected['result_hash']
+        assert detail['created_at'] == selected['created_at']
+        with sqlite3.connect(args[args.index('--state')+1]) as db:
+            db.execute('CREATE TABLE rejected(attempt_id, reason)')
+            if rejected: db.execute('INSERT INTO rejected VALUES (?,?)',(ids[0],'rejected'))
+        return {'uploaded':1}
+    monkeypatch.setattr(fuzz_replay,'public',sync)
+    if rejected:
+        with pytest.raises(workflow_common.WorkflowError, match='did not accept'):
+            fuzz_replay.upload_results(platform_cfg,[selected])
+    else:
+        assert fuzz_replay.upload_results(platform_cfg,[selected])['attempt_ids']==[ids[0]]
+    assert not destinations[0].exists()
+    assert len(repo.list()['items'])==2

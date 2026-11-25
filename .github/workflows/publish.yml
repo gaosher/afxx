@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 20
     env:
       # Update together with AFX contract validation.
-      AFX_REVISION: f0f1ab2a266e6b52fc540b6f36d921a6d5cf263b
+      AFX_REVISION: 82460ac3d5cabcbcd4374e1ce80029cac6e75e69
     steps:
       - uses: actions/checkout@v4
 

@@ -77,7 +77,7 @@ def test_duplicate_and_unexpected_attempts():
 
 
 def test_seed_command_uses_installed_current_contract(tmp_path):
-    package = tmp_path / "autofusex/fuzz/client/generation"
+    package = tmp_path / "autofusex/workloads/fuzz/generation"
     package.mkdir(parents=True)
     for directory in (package, *list(package.parents)[:3]):
         (directory / "__init__.py").touch()

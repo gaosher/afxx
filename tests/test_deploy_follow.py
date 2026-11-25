@@ -64,3 +64,31 @@ def test_follow_interruption_does_not_cancel_deploy(submitted, monkeypatch, exce
         cli.main()
     assert caught.value.code == code
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize('state', ['success', 'failed'])
+def test_env_check_waits_for_final_result(submitted, monkeypatch, capsys, state):
+    monkeypatch.setattr(sys, 'argv', ['afxx', 'env', 'check'])
+    calls = []
+    def run(args, **kwargs):
+        assert kwargs['stdout'] is sys.stderr
+        calls.append('follow')
+        assert '/state/deploy-test follow check' in args[2]
+    def query(*args):
+        assert calls == ['follow']
+        return {'state': state, 'error_code': 'DEPENDENCIES_FAILED', 'error': 'missing torch'}
+    monkeypatch.setattr(common, 'run', run)
+    monkeypatch.setattr(jobs, 'query_job', query)
+    if state == 'success':
+        assert cli.main()['state'] == 'success'
+    else:
+        with pytest.raises(common.WorkflowError) as caught:
+            cli.main()
+        assert caught.value.code == 'DEPENDENCIES_FAILED'
+    assert not capsys.readouterr().out
+
+
+def test_env_check_dry_run_does_not_wait(submitted, monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['afxx', 'env', 'check', '--dry-run'])
+    monkeypatch.setattr(common, 'run', lambda *a, **kw: pytest.fail('must not follow'))
+    cli.main()
