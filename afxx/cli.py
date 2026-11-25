@@ -186,7 +186,7 @@ def parse_arguments():
             default=workflow_config.default_config_path(),
             help="配置文件（默认 ~/.config/afxx/config.yaml）",
         )
-        if name in (*env_jobs, *jobs) or name == "doctor":
+        if name in ("init", "update", *jobs) or name == "doctor":
             cmd.add_argument("--dry-run", action="store_true")
         if name in jobs or name in ("issue-claim", "issue-submit-summary", "issue-release"):
             cmd.add_argument("--request-id", required=name in ("issue-submit-summary", "issue-release"))
@@ -371,6 +371,8 @@ def main():
             "CONFIG_INVALID",
             "init/update requires python_env configuration",
         )
+    if args.command == "check":
+        return workflow_jobs.environment_check(c)
     if args.command.startswith("replay-"):
         workflow_jobs.local_preflight("status")
         if args.command == "replay-list":
@@ -529,13 +531,13 @@ def main():
             request["save_config"] = prepare(args.config, request["updates"])
     if args.command == "init" and not args.dry_run:
         credentials.prepare(c)
-    data = workflow_jobs.submit(
-        c, request, ("ENV" + uuid.uuid4().hex if args.command in ("init", "update", "check")
-                     else args.request_id or uuid.uuid4().hex), args.dry_run
-    )
+    if args.command in ("init", "update"):
+        data = workflow_jobs.submit_environment(c, request, args.dry_run)
+    else:
+        data = workflow_jobs.submit(c, request, args.request_id or uuid.uuid4().hex, args.dry_run)
     if (
         args.command
-        in ("init", "update", "deploy", "check")
+        in ("init", "update", "deploy")
         and not args.dry_run
         and not getattr(args, "detach", False)
     ):

@@ -597,20 +597,10 @@ def localize_replay(c, job_id, data):
 
 def client_control(c, action, timeout=300):
     """Ship the adapter only; no remote AFXX installation or workflow job required."""
-    import base64
-    import io
-    import shlex
-    import subprocess
-    import zipfile
     local_preflight("status")
-    root = Path(__file__).resolve().parent
-    buffer = io.BytesIO()
     modules = ("__init__.py", "common.py", "config.py", "environment/__init__.py",
                "environment/runtime.py", "afx/__init__.py", "afx/replay.py", "afx/launcher.py",
                "afx/managed_client.py")
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        for name in modules:
-            archive.writestr("afxx/" + name, (root / name).read_bytes())
     bootstrap = """import base64,json,sys,tempfile,zipfile,io,contextlib
 with tempfile.TemporaryDirectory(prefix='afxx-client-control-') as directory:
     zipfile.ZipFile(io.BytesIO(base64.b64decode(sys.argv[1]))).extractall(directory)
@@ -625,15 +615,67 @@ with tempfile.TemporaryDirectory(prefix='afxx-client-control-') as directory:
         result={'error':{'code':error.code,'message':str(error)}}
     print(json.dumps(result))
 """
-    argv = [workflow_runtime.python(c), "-c", bootstrap, base64.b64encode(buffer.getvalue()).decode(),
-            json.dumps(c), action, str(timeout)]
+    return adapter_call(c, modules, bootstrap, [json.dumps(c), action, str(timeout)], timeout + 120,
+                        "client response unavailable; query client status before retrying")
+
+
+def adapter_call(c, modules, bootstrap, arguments, timeout, unavailable):
+    """Run a temporary remote adapter and return its structured result."""
+    import base64
+    import io
+    import zipfile
+    root = Path(__file__).resolve().parent
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name in modules:
+            archive.writestr("afxx/" + name, (root / name).read_bytes())
+    argv = [workflow_runtime.python(c), "-c", bootstrap, base64.b64encode(buffer.getvalue()).decode(), *arguments]
     try:
-        result = json.loads(workflow_common.capture(["npussh", c["connection"]["environment"], shlex.join(argv)], timeout=timeout + 120))
+        result = json.loads(workflow_common.capture(["npussh", c["connection"]["environment"], shlex.join(argv)], timeout=timeout))
     except (OSError, ValueError, subprocess.SubprocessError) as error:
-        raise workflow_common.WorkflowError("REMOTE_UNAVAILABLE", "client response unavailable; query client status before retrying") from error
+        raise workflow_common.WorkflowError("REMOTE_UNAVAILABLE", unavailable) from error
     if result.get("error"):
-        raise workflow_common.WorkflowError(result["error"]["code"], result["error"]["message"])
+        raise workflow_common.WorkflowError(result["error"]["code"], result["error"]["message"], result.get("data"))
     return result["data"]
+
+
+def environment_check(c):
+    local_preflight("status")
+    modules = ("__init__.py", "common.py", "environment/__init__.py",
+               "environment/runtime.py", "environment/snapshot.py")
+    bootstrap = """import base64,json,sys,tempfile,zipfile,io,contextlib
+with tempfile.TemporaryDirectory(prefix='afxx-env-check-') as directory:
+    zipfile.ZipFile(io.BytesIO(base64.b64decode(sys.argv[1]))).extractall(directory)
+    sys.path.insert(0,directory)
+    from afxx.environment.snapshot import inspect_environment
+    from afxx.common import WorkflowError
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            data=inspect_environment(json.loads(sys.argv[2]))
+        result={'data':data}
+    except WorkflowError as error:
+        result={'error':{'code':error.code,'message':str(error)},'data':error.data}
+    print(json.dumps(result))
+"""
+    return adapter_call(c, modules, bootstrap, [json.dumps(c)], 2100,
+                        "environment check connection interrupted; run env check again")
+
+
+def submit_environment(c, request, dry_run):
+    """Allocate short IDs under a local lock; never reuse existing task records."""
+    prefix = 'ENV-' + request['command'].upper() + '-'
+    state = Path(c['local']['state_dir'])
+    with workflow_common.lock(state / 'environment-id.lock'):
+        while True:
+            key = prefix + uuid.uuid4().hex[:12]
+            if (state / 'requests' / (workflow_common.digest(key) + '.json')).exists() or (state / key).exists():
+                continue
+            if not dry_run:
+                code = "import json,sys; from pathlib import Path; print(json.dumps({'state':'success' if Path(sys.argv[1]).exists() else 'not_found'}))"
+                existing = remote(c, ['python3', '-c', code, str(Path(c['remote']['state_dir']) / key)])
+                if existing['state'] != 'not_found':
+                    continue
+            return submit(c, request, key, dry_run)
 
 
 def complete_config_save(c, job_id, data):

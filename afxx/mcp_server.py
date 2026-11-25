@@ -5,7 +5,6 @@ import asyncio
 import json
 import os
 import signal
-import uuid
 import sys
 from typing import Annotated, Literal
 from pathlib import Path
@@ -90,7 +89,7 @@ async def invoke(arguments):
     return process.returncode, stdout.decode("utf-8", errors="replace")
 
 
-LONG_COMMANDS = {"env init", "env update", "env check", "deploy", "fuzz run",
+LONG_COMMANDS = {"env init", "env update", "deploy", "fuzz run",
                  "client start", "client stop", "client restart", "issue verify"}
 RequestId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,128}$")]
 JobId = Annotated[str, Field(pattern=re.compile(JOB_ID_PATTERN))]
@@ -144,7 +143,7 @@ def prepare(command, arguments, config, default_config):
 def create_server(default_config=None):
     server = FastMCP("AFXX", instructions=(
         "Prefer typed tools; afxx_run is for commands without a typed tool. env update accepts explicit --afx VERSION|latest, --torch-npu DATE|latest, --torch VERSION and --cann DATE|latest [--ops]; no selectors only reports installed versions. --ops requires --cann. Optional --save-config writes resolved versions to the submitted config on successful status completion. Read afxx_help before constructing unfamiliar CLI arguments. Long commands return a local "
-        "invocation receipt: query afxx_operation_status with the returned request_id for the CLI result. env commands allocate IDs automatically; do not supply request_id. "
+        "invocation receipt: query afxx_operation_status with the returned request_id for the CLI result. env init/update allocate IDs automatically; env check returns directly without a receipt. Do not supply request_id for env commands. "
         "A completed invocation is not necessarily a completed remote job. Use afxx_job_status or "
         "afxx_issue_status next. Replay returns request_id/run directly; query replay show, not operation_status. Disconnecting does not cancel a submitted invocation. "
         "Restart and verify remain separate explicit actions."))
@@ -153,13 +152,12 @@ def create_server(default_config=None):
         environment_command = command in ("env init", "env update", "env check")
         if environment_command:
             if request_id is not None or any(arg == "--request-id" or arg.startswith("--request-id=") for arg in (arguments or [])):
-                return tool_result(envelope(command, "INVALID_ARGUMENT", "env commands allocate their own ENV ID; do not specify request_id"))
-            request_id = "ENV" + uuid.uuid4().hex
+                return tool_result(envelope(command, "INVALID_ARGUMENT", "env commands do not accept request_id; init/update allocate IDs and check returns directly"))
         try:
             args, path = prepare(command, arguments, config, default_config)
         except ValueError as error:
             return tool_result(envelope(command, "CONFIG_CONFLICT", str(error)))
-        if command in LONG_COMMANDS and (request_id is None or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id)):
+        if command in LONG_COMMANDS and not environment_command and (request_id is None or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id)):
             return tool_result(envelope(command, "INVALID_ARGUMENT", "long MCP commands require request_id for recovery"))
         forwarded = {"deploy", "fuzz run",
                      "replay", "replay list", "replay show", "replay compare", "status"}
@@ -196,9 +194,9 @@ def create_server(default_config=None):
                        config: str | None = None, request_id: RequestId | None = None) -> CallToolResult:
         """Fallback for commands without a dedicated typed tool; use afxx_help for arguments.
         Arguments are tokens, never shell code. Short commands return the CLI envelope directly.
-        Long commands: env init/update/check, deploy, fuzz run, client start/stop/restart, issue verify.
+        Long commands: env init/update, deploy, fuzz run, client start/stop/restart, issue verify.
         Long commands return an invocation receipt; query afxx_operation_status.
-        env init/update/check allocate IDs automatically and reject request_id; other long commands require it.
+        env init/update allocate IDs automatically; env check returns the result directly. All env commands reject request_id; other long commands require it.
         Conflicting explicit config paths are rejected; server config is only a default.
         """
         return await dispatch(command, arguments, config, request_id)

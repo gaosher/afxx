@@ -100,7 +100,7 @@ def test_cli_init_sync_after_success_only(platform_cfg, monkeypatch, state):
     monkeypatch.setattr(sys,'argv',['afxx','env','init','--detach'])
     calls=[]
     monkeypatch.setattr(auth,'prepare',lambda c:calls.append('prepare'))
-    monkeypatch.setattr(jobs,'submit',lambda *a: calls.append('submit') or {'job':'a'*32,'state':state})
+    monkeypatch.setattr(jobs,'submit_environment',lambda *a: calls.append('submit') or {'job':'a'*32,'state':state})
     monkeypatch.setattr(auth,'complete_init',lambda c,j,d:calls.append('sync') or d)
     cli.main()
     assert calls==['prepare','submit']+(['sync'] if state=='success' else [])

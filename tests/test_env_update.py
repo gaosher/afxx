@@ -271,7 +271,7 @@ def test_cli_update_torch_requires_exact_value(env_cfg, monkeypatch, capsys, arg
     assert json.loads(capsys.readouterr().out)['error']['code'] == 'INVALID_ARGUMENT'
 
 
-@pytest.mark.parametrize('action', ['init', 'update', 'check'])
+@pytest.mark.parametrize('action', ['init', 'update'])
 def test_environment_ids_are_automatic(env_cfg, monkeypatch, action):
     import sys
     from afxx import jobs
@@ -283,7 +283,7 @@ def test_environment_ids_are_automatic(env_cfg, monkeypatch, action):
     cli.main()
     cli.main()
     assert keys[0] != keys[1]
-    assert all(__import__('re').fullmatch(r'ENV[0-9a-f]{32}', key) for key in keys)
+    assert all(__import__('re').fullmatch(r'ENV-' + action.upper() + r'-[0-9a-f]{12}', key) for key in keys)
 
 
 @pytest.mark.parametrize('action', ['init', 'update', 'check'])
@@ -304,17 +304,12 @@ def test_mcp_environment_rejects_user_id(monkeypatch, action, extra):
     assert result.structuredContent['error']['code'] == 'INVALID_ARGUMENT'
 
 
-@pytest.mark.parametrize('action', ['init', 'update', 'check'])
+@pytest.mark.parametrize('action', ['init', 'update'])
 def test_mcp_environment_auto_id_not_forwarded(monkeypatch, action):
-    import re
     from test_mcp_tools import call
     from afxx import mcp_server, mcp_operations
     seen = []
     monkeypatch.setattr(mcp_operations, 'submit', lambda command,args,path,key: seen.append((args,key)) or {'ok': True})
-    server = mcp_server.create_server('/config')
-    call(server, 'afxx_run', {'command': 'env '+action})
-    call(server, 'afxx_run', {'command': 'env '+action})
-    assert seen[0][1] != seen[1][1]
-    for args, key in seen:
-        assert re.fullmatch(r'ENV[0-9a-f]{32}', key)
-        assert '--request-id' not in args
+    call(mcp_server.create_server('/config'), 'afxx_run', {'command': 'env '+action})
+    assert seen[0][1] is None  # Allocated atomically by the operation store.
+    assert '--request-id' not in seen[0][0]

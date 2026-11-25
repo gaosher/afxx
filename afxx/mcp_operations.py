@@ -66,13 +66,21 @@ def submit(command, arguments, config, request_id):
     os.umask(0o077)
     base = root()
     base.mkdir(parents=True, exist_ok=True)
-    identity = hashlib.sha256(request_id.encode()).hexdigest()
-    directory = base / identity
+    identity = hashlib.sha256(request_id.encode()).hexdigest() if request_id is not None else None
+    directory = base / identity if identity else None
     config_path = Path(config) if config else None
     config_hash = hashlib.sha256(config_path.read_bytes()).hexdigest() if config_path and config_path.is_file() else None
     expected = dict(command=command, arguments=arguments, config=config, config_sha256=config_hash, cwd=os.getcwd())
     with (base/'.lock').open('a') as guard:
         fcntl.flock(guard, fcntl.LOCK_EX)
+        if request_id is None:
+            prefix = 'ENV-' + command.split()[1].upper() + '-'
+            while True:
+                request_id = prefix + uuid.uuid4().hex[:12]
+                identity = hashlib.sha256(request_id.encode()).hexdigest()
+                directory = base / identity
+                if not directory.exists():
+                    break
         if directory.exists():
             request = json.loads((directory/'request.json').read_text())
             if request['input'] != expected:

@@ -2,6 +2,7 @@
 
 import datetime
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -29,7 +30,7 @@ print(json.dumps({'version': platform.python_version(), 'executable': sys.execut
 """
 
 
-def capture(c, job):
+def capture(c, job=None):
     report = {
         "captured_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),  # noqa: UP017 - remote worker supports Python 3.9
         "connection": c["connection"],
@@ -62,5 +63,28 @@ def capture(c, job):
             report["af"] = runtime.probe(c, env, job)
         except (OSError, ValueError, subprocess.SubprocessError) as error:
             report["errors"].append({"component": "af", "error": str(error)})
-    common.write(Path(job) / "environment.json", report)
+    if job is not None:
+        common.write(Path(job) / "environment.json", report)
+    return report
+
+
+def inspect_environment(c):
+    """Read live environment and dependencies without creating a workflow task."""
+    report = capture(c)
+    try:
+        env = runtime.environment(c)
+        code = ("import json; from afxx.environment.runtime import python_dependency_report; "
+                "print(json.dumps(python_dependency_report('autofusex', 'full', "
+                + repr(c['runtime']['venv_dir']) + ")))")
+        # The temporary adapter directory is code only, removed by the caller.
+        env['PYTHONPATH'] = str(Path(__file__).resolve().parents[2]) + os.pathsep + env.get('PYTHONPATH', '')
+        dependencies = json.loads(common.capture([runtime.python(c), '-c', code], env=env, timeout=1800))
+        report['dependencies'] = dependencies
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        report['state'] = 'failed'
+        raise common.WorkflowError('ENV_CHECK_FAILED', str(error), report) from error
+    report['state'] = 'success' if dependencies['passed'] else 'failed'
+    if not dependencies['passed']:
+        failed = [item['name'] for item in dependencies['checks'] if not item['passed']]
+        raise common.WorkflowError('ENV_CHECK_FAILED', 'Python dependency check failed: ' + ', '.join(failed), report)
     return report

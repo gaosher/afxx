@@ -104,7 +104,7 @@ afxx doctor
 ```bash
 afxx env init [--detach]
 ```
-- `--request-id` 可省略，由工具自动生成；后续查询使用返回的 ID。
+- init/update 分别自动分配 `ENV-INIT-` / `ENV-UPDATE-` 加 12 位随机十六进制后缀的任务 ID；后续查询使用返回的 ID。
 - `--detach`参数设置不跟随远端日志
 - 提交成功不代表初始化完成，应确认任务 `state=success`。
 
@@ -114,14 +114,11 @@ afxx env init [--detach]
 afxx status --request-id <返回的ENV开头ID>
 ```
 
-`env check` 检查虚拟环境、Python 依赖导入、AFX 接口及最低版本要求、pip 依赖冲突，并采集实际环境。
+`env check` 同步返回检查结果，不生成 ID、任务目录或幂等记录；断线后直接重跑。它检查虚拟环境、Python 依赖导入、AFX 接口及最低版本要求、pip 依赖冲突，并采集实际环境。
 ```bash
 afxx env check
 ```
-
 #### 3. 按需更新
-
-env init/update/check 自动分配 `ENV` 开头的任务 ID，不接受 `--request-id`；需要查询时使用返回的 ID。
 
 `env update` 以当前环境清单为基础，只更新命令明确指定的组件。默认不修改本地配置文件。
 ```bash

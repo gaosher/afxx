@@ -219,4 +219,6 @@ status 的公开参数和输出使用 request_id；replay 查询使用 request_i
 
 环境更新需要回写本地配置时，显式传 `--save-config`。MCP 异步任务成功后查询 status 完成回写；若返回 CONFIG_SAVE_CONFLICT，环境已更新但配置未覆盖，先检查用户编辑。不要为重试回写而重新更新环境。
 
-环境操作 `env init/update/check` 自动生成 `ENV` 开头的任务 ID，不接受 `--request-id`。通过返回 ID 使用 `status --request-id ID` 查询。MCP 调用记录与远端环境任务分别自动分配 ID：先用调用回执查询 `afxx_operation_status`，再用其中 CLI 结果的任务 ID 查询远端状态。
+环境操作 `env init/update` 分别自动生成 `ENV-INIT-` / `ENV-UPDATE-` 加 12 位随机十六进制后缀的任务 ID，不接受 `--request-id`。通过返回 ID 使用 `status --request-id ID` 查询。MCP 调用记录与远端环境任务分别自动分配 ID：先用调用回执查询 `afxx_operation_status`，再用其中 CLI 结果的任务 ID 查询远端状态。
+
+`env check` 在 CLI/MCP 均同步返回检查结果，不生成任务或 MCP 调用记录；不支持 request_id、--dry-run、--detach。远端仅临时解包检查代码并在结束后清理，检查失败返回 ENV_CHECK_FAILED 和检查详情，连接中断可直接重跑。

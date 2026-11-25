@@ -65,7 +65,7 @@ afxx env init --config /path/config.yaml
 |---|---|---|
 | `init` | 准备 Python、CANN、venv 和平台凭据 | 跟随日志，可 `--detach` |
 | `update` | 显式更新环境组件或查询版本 | 跟随日志，可 `--detach` |
-| `check` | 检查远端环境及 Python 依赖 | 异步，返回 job ID |
+| `check` | 检查远端环境及 Python 依赖 | 同步返回结果，不创建任务或 ID |
 
 ### `evidence`
 
@@ -100,7 +100,7 @@ afxx env init --config /path/config.yaml
 > 示意，按需取舍。
 
 ```text
-首次准备：config init → 编辑配置 → doctor → env init → env check → status
+首次准备：config init → 编辑配置 → doctor → env init（成功）→ env check（同步结果）
 独立复测：deploy → status（成功）→ replay → replay show（终态，获取 evidence_path）；replay 本身不依赖 deploy
 平台修复：issue claim → 复现/修改 → deploy → status（成功）
         → issue verify → issue verify-check（验证和关联回归通过）
@@ -113,8 +113,8 @@ afxx env init --config /path/config.yaml
 |---|---|---|
 | `-h` / `--help` | 所有命令及命令分组 | 显示帮助；不读取配置，不连接远端 |
 | `--config PATH` | 除 `help`、`config init` 外的业务命令 | 默认 `~/.config/afxx/config.yaml`。仅使用显式指定或默认路径，**不会**查找工作目录或配置环境变量 |
-| `--request-id ID` | `env init/update/check`、`deploy`、`replay`、`status`、`issue claim`、`issue submit-summary` | 见下方规则 |
-| `--dry-run` | `env init/update/check`、`deploy`、`replay`、`doctor` | 默认关闭；跳过远端连接，见 [第 10 节](#10-dry-run-说明) |
+| `--request-id ID` | `deploy`、`replay`、`status`、`issue claim`、`issue submit-summary` | 见下方规则 |
+| `--dry-run` | `env init/update`、`deploy`、`replay`、`doctor` | 默认关闭；跳过远端连接，见 [第 10 节](#10-dry-run-说明) |
 | `--detach` | `env init`、`env update`、`deploy` | 默认关闭（CLI 跟随日志直到结束）。开启后提交即返回，用 `status` 查询。MCP 下自动开启 |
 | `--job-id ID`（别名 `--job`） | `issue verify` | AFXX 的 任务 ID（新任务直接复用 request_id）。各命令引用的 job 类型见各节 |
 
@@ -175,7 +175,7 @@ afxx env init --config /path/config.yaml
 |---|---|---|
 | `env init` | 准备 Python、CANN、venv 和平台凭据 | 目标 venv 必须不存在。已配置 platform 时，非交互调用需提前准备好本地 token |
 | `env update` | 更新显式指定的组件；无参数查询版本 | `--afx VERSION/latest`、`--torch-npu YYYYMMDD/latest`、`--torch VERSION`、`--cann YYYYMMDD/latest`、`--ops`、`--save-config`；afx、torch-npu、cann 省略值默认 latest；torch 必须带确切版本，变更时必须配 torch-npu；ops 必须配 cann |
-| `env check` | 检查远端环境及 Python 依赖 | 无专用参数；异步提交，返回 job ID |
+| `env check` | 检查远端环境及 Python 依赖 | 同步返回检查结果，不创建任务/ID，不支持 --dry-run 或 --detach |
 
 `env init` / `env update` 默认跟随日志，可用 `--detach` 提交即返回。update 读取已有环境清单，未指定组件不更新，默认不改写配置。`--save-config` 在成功后回写实际版本，保留注释；异步任务在后续 status 查询终态时回写，配置被编辑则拒绝覆盖。CANN 默认仅 Toolkit，带 --ops 时使用同批次 OPS。Python 失败尝试回滚；CANN 安装开始后失败需检查现场恢复。详见 [更新规则](CONFIGURATION.md#初始化和更新环境)。
 
@@ -305,7 +305,7 @@ afxx env init --config /path/config.yaml
 
 ## 10. dry-run 说明
 
-适用命令：`env init/update/check`、`deploy`、`replay`、`doctor`。
+适用命令：`env init/update`、`deploy`、`replay`、`doctor`。
 
 | 命令类型 | dry-run 行为 |
 |---|---|
@@ -340,7 +340,7 @@ MCP 与 CLI 共用命令实现。优先使用结构化工具，不需要拼命�
 
 ### 长调用和查询
 
-`deploy`、`env init/update/check`、`fuzz run`、`client start/stop/restart`、`issue verify` 返回本机调用记录，除 env 命令自动分配 ID 外，必须提供工具级 request_id。env 命令拒绝用户指定 request_id（包括 arguments 中的 --request-id），也不会将 MCP 调用记录 ID 传入 CLI。既有 CLI 支持请求键的命令会使用同一个键；arguments 中不同的 --request-id 返回 REQUEST_CONFLICT。client/verify 的键只用于本机调用去重，不改变 CLI 或平台已有的幂等规则。
+`deploy`、`env init/update`、`fuzz run`、`client start/stop/restart`、`issue verify` 返回本机调用记录，除 env 命令自动分配 ID 外，必须提供工具级 request_id。env 命令拒绝用户指定 request_id（包括 arguments 中的 --request-id），也不会将 MCP 调用记录 ID 传入 CLI。既有 CLI 支持请求键的命令会使用同一个键；arguments 中不同的 --request-id 返回 REQUEST_CONFLICT。client/verify 的键只用于本机调用去重，不改变 CLI 或平台已有的幂等规则。
 
 ```text
 afxx_client({"action":"restart","request_id":"F152-restart-1","config":"/absolute/task.yaml"})
@@ -490,7 +490,7 @@ MCP 仅通过 `afxx_run(command="case list", arguments=[...])` 调用，不新�
 - `afxx_issue_status(issue_id, round_no, include_tasks=false)` 默认只返回验证/关联回归摘要；true 时分别在 verification.tasks、regression.tasks 添加各轮任务，无回归时 regression 为 null。round_no 指验证轮次；任一查询失败整体返回错误，不能把摘要当作任务读取成功。CLI 同步支持 `issue status --include-tasks`。原独立 issue_tasks 工具已移除，CLI issue tasks 仍可查询任意轮次。
 - `afxx_job_status` 支持 attempt 和 fields（字段名数组），转发 CLI --attempt/--fields；fields 需要 attempt，attempt 与 wait 互斥，since/timeout 仅在 wait=true 时有效（默认 30 秒）。不接受无关参数或空字段列表。
 - 手动复测列表使用 `afxx_run(command="retest list")`，不用于查询 issue verify；原独立 retest_list 工具已移除。
-- 优先使用结构化工具。仅在没有对应工具时使用 afxx_run，不熟悉参数先调用 afxx_help。短调用直接返回 CLI envelope；长调用（env init/update/check、deploy、fuzz run、client start/stop/restart、issue verify）除 env 命令自动分配外要求 request_id，先返回调用回执，再查 afxx_operation_status；CLI 完成后仍须按 job_id/round_no 跟踪远端执行。
+- 优先使用结构化工具。仅在没有对应工具时使用 afxx_run，不熟悉参数先调用 afxx_help。短调用直接返回 CLI envelope；长调用（env init/update、deploy、fuzz run、client start/stop/restart、issue verify）除 env 命令自动分配外要求 request_id，先返回调用回执，再查 afxx_operation_status；CLI 完成后仍须按 job_id/round_no 跟踪远端执行。
 
 当前注册 13 个 MCP 工具（10 个业务工具、3 个辅助工具），afxx_run 仍支持 38 条 CLI 命令。
 
@@ -515,4 +515,6 @@ state=running 表示继续等待；passed 表示任务全部明确通过，且�
 
 生命周期锁仅约束 AFXX 调用，不是 AFX 的全局接单屏障；协调期间其他入口不得启动任务。原本运行中的平台验证应先结束。停止/恢复失败后查同一 job 和 client status，不绕过占用检查、不强杀、不为恢复而盲目重新安装。
 
-环境操作 `env init/update/check` 自动生成 `ENV` 开头的任务 ID，不接受 `--request-id`。通过返回 ID 使用 `status --request-id ID` 查询。MCP 调用记录与远端环境任务分别自动分配 ID：先用调用回执查询 `afxx_operation_status`，再用其中 CLI 结果的任务 ID 查询远端状态。
+环境操作 `env init/update` 分别自动生成 `ENV-INIT-` / `ENV-UPDATE-` 加 12 位随机十六进制后缀的任务 ID，不接受 `--request-id`。通过返回 ID 使用 `status --request-id ID` 查询。MCP 调用记录与远端环境任务分别自动分配 ID：先用调用回执查询 `afxx_operation_status`，再用其中 CLI 结果的任务 ID 查询远端状态。
+
+`env check` 在 CLI/MCP 均同步返回检查结果，不生成任务或 MCP 调用记录；不支持 request_id、--dry-run、--detach。远端仅临时解包检查代码并在结束后清理，检查失败返回 ENV_CHECK_FAILED 和检查详情，连接中断可直接重跑。
