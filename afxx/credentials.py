@@ -72,8 +72,20 @@ def prepare(c):
         return
     if not c["platform"].get("client_token_file"):
         c["platform"]["client_token_file"] = c["platform"].get("remote_token_file")
-    read_token(c, prompt=True)
-    platform.call(c, "GET", "/api/me")
+    try:
+        read_token(c, prompt=True)
+        platform.call(c, "GET", "/api/me")
+    except common.WorkflowError as error:
+        if error.code not in {
+            "PLATFORM_CREDENTIAL_MISSING", "PLATFORM_CREDENTIAL_INVALID",
+            "PLATFORM_UNAUTHORIZED", "PLATFORM_FORBIDDEN", "PLATFORM_HTTP_ERROR",
+        }:
+            raise
+        raise common.WorkflowError(
+            error.code,
+            str(error) + "；如果只需初始化环境和部署、不使用平台功能，可以删除或注释配置中的整个 platform 段后重试；领取 issue、提交 verify 时仍需配置有效 token。",
+            error.data,
+        ) from None
 
 
 def sync(c):

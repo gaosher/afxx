@@ -32,11 +32,14 @@ cann:
 # 批量 seed 分配到多卡；单 seed 使用第一张可见卡。
 # 需要限制资源时可增加 replay: {devices: ["npu:0"], workers: 1}。
 
-# 接入提供 /api/issues（F152 等编号）的 AFX 平台时添加此节；两个 token 文件属于同一平台用户。
-# platform:
-#   url: "https://autofuse.online"
-#   agent_id: "af-repair-agent"
-#   # init 复用本地 Bearer token；缺失时终端隐藏输入，成功后同步到 NPU（0600）。
-#   token_file: null # 默认 ~/.config/afxx/auth/afx.token
-#   remote_token_file: null # 默认 <workflow_root>/auth/afx.token
-#   client_token_file: null # 默认复用 remote_token_file，需 upload/retest 权限
+# 默认接入 AFX 平台；无 token 且只需环境/部署时，可删除或注释整个 platform 节。
+platform:
+  url: "https://autofuse.online"
+  agent_id: "af-repair-agent"
+  # init 复用本地 Bearer token；缺失时终端隐藏输入，成功后同步到 NPU（0600）。
+  # 当前不支持无 token 的游客初始化；非交互运行需提前准备 token 文件。
+  token_file: null # 默认 ~/.config/afxx/auth/afx.token
+  remote_token_file: null # 默认 <workflow_root>/auth/afx.token
+  client_token_file: null # 首次创建 client 时默认复用 remote_token_file，需 upload/retest 权限
+
+# replay 默认上传本轮结果；离线运行使用 --no-upload，或添加 upload: {enabled: false}。

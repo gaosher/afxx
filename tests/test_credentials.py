@@ -30,6 +30,7 @@ def test_noninteractive_missing_and_invalid(platform_cfg, monkeypatch):
     with pytest.raises(common.WorkflowError) as e:
         auth.prepare(platform_cfg)
     assert e.value.code == 'PLATFORM_CREDENTIAL_MISSING'
+    assert '删除或注释配置中的整个 platform 段' in str(e.value)
     assert not path.exists()
     path.write_text('invalid secret')
     with pytest.raises(common.WorkflowError) as e:
@@ -151,3 +152,17 @@ def test_explicit_credential_paths_preserved(platform_cfg):
     platform_cfg['platform']['client_token_file']='/remote/client.token'
     normalized=config.normalize_config(platform_cfg)
     assert normalized['platform']==platform_cfg['platform']
+
+
+@pytest.mark.parametrize('code', ['PLATFORM_CREDENTIAL_INVALID', 'PLATFORM_UNAUTHORIZED', 'PLATFORM_FORBIDDEN', 'PLATFORM_HTTP_ERROR', 'PLATFORM_UNAVAILABLE'])
+def test_init_token_hint_preserves_error_code(platform_cfg, monkeypatch, code):
+    def fail(*args, **kwargs):
+        raise common.WorkflowError(code, 'original message', {'detail': 'safe'})
+    monkeypatch.setattr(auth, 'read_token', lambda *a, **k: 'secret')
+    monkeypatch.setattr(auth.platform, 'call', fail)
+    with pytest.raises(common.WorkflowError) as caught:
+        auth.prepare(platform_cfg)
+    assert caught.value.code == code
+    assert caught.value.data == {'detail': 'safe'}
+    assert str(caught.value).startswith('original message')
+    assert ('整个 platform 段' in str(caught.value)) == (code != 'PLATFORM_UNAVAILABLE')

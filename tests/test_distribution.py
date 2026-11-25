@@ -25,6 +25,11 @@ def test_template_preserves_comments_and_does_not_overwrite(tmp_path):
     config.write_template(tmp_path, output)
     assert str(tmp_path) in output.read_text()
     assert "#" in output.read_text()
+    import yaml
+    platform = yaml.safe_load(output.read_text())["platform"]
+    assert platform["url"] == "https://autofuse.online"
+    assert platform["agent_id"]
+    assert all(platform[k] is None for k in ("token_file", "remote_token_file", "client_token_file"))
     with pytest.raises(FileExistsError):
         config.write_template(tmp_path, output)
 
