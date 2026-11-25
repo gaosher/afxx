@@ -40,7 +40,7 @@ afxx env init --config /path/config.yaml
 | `help` | 查看顶层命令 | 本地 |
 | `doctor` | 检查配置、本地工具、npussh 登录 | 本地检查 |
 | `deploy` | 同步源码，构建并安装 AF | 默认跟随日志，可 `--detach` |
-| `replay` | 通过现有 AFX managed client 复跑 seed | 异步，每次返回 request_id/run |
+| `replay` | 通过 afx fuzz replay 复跑 seed | 异步，每次返回 request_id/run |
 | `status` | 查询任务状态 / 单次执行 / 等待变化 | 查询 |
 
 ### `fuzz`
@@ -116,7 +116,7 @@ afxx env init --config /path/config.yaml
 | `--request-id ID` | `env init/update/check`、`deploy`、`replay`、`status`、`issue claim`、`issue submit-summary` | 见下方规则 |
 | `--dry-run` | `env init/update/check`、`deploy`、`replay`、`doctor` | 默认关闭；跳过远端连接，见 [第 10 节](#10-dry-run-说明) |
 | `--detach` | `env init`、`env update`、`deploy` | 默认关闭（CLI 跟随日志直到结束）。开启后提交即返回，用 `status` 查询。MCP 下自动开启 |
-| `--job-id ID`（别名 `--job`） | `issue verify`、`evidence list/read` | AFXX 的 任务 ID（新任务直接复用 request_id）。各命令引用的 job 类型见各节 |
+| `--job-id ID`（别名 `--job`） | `issue verify` | AFXX 的 任务 ID（新任务直接复用 request_id）。各命令引用的 job 类型见各节 |
 
 **`--request-id` 规则**
 
@@ -143,7 +143,8 @@ afxx env init --config /path/config.yaml
 | `replay` | 不引用 job，使用流程 request_id |
 | `issue verify` | **deploy** job |
 | `status` | 要查询的任务 |
-| `status --attempt`、`evidence list/read` | **replay** job |
+| `status --attempt` | **replay** job |
+| `evidence list/read` | replay 的 request_id/run |
 
 ---
 
@@ -173,7 +174,7 @@ afxx env init --config /path/config.yaml
 | 命令 | 作用 | 约束 |
 |---|---|---|
 | `env init` | 准备 Python、CANN、venv 和平台凭据 | 目标 venv 必须不存在。已配置 platform 时，非交互调用需提前准备好本地 token |
-| `env update` | 更新显式指定的组件；无参数查询版本 | `--afx VERSION/latest`、`--torch-npu YYYYMMDD/latest`、`--torch VERSION`、`--cann YYYYMMDD/latest`、`--ops`、`--save-config`；torch 变更必须配 torch-npu，ops 必须配 cann |
+| `env update` | 更新显式指定的组件；无参数查询版本 | `--afx VERSION/latest`、`--torch-npu YYYYMMDD/latest`、`--torch VERSION`、`--cann YYYYMMDD/latest`、`--ops`、`--save-config`；afx、torch-npu、cann 省略值默认 latest；torch 必须带确切版本，变更时必须配 torch-npu；ops 必须配 cann |
 | `env check` | 检查远端环境及 Python 依赖 | 无专用参数；异步提交，返回 job ID |
 
 `env init` / `env update` 默认跟随日志，可用 `--detach` 提交即返回。update 读取已有环境清单，未指定组件不更新，默认不改写配置。`--save-config` 在成功后回写实际版本，保留注释；异步任务在后续 status 查询终态时回写，配置被编辑则拒绝覆盖。CANN 默认仅 Toolkit，带 --ops 时使用同批次 OPS。Python 失败尝试回滚；CANN 安装开始后失败需检查现场恢复。详见 [更新规则](CONFIGURATION.md#初始化和更新环境)。
@@ -192,15 +193,15 @@ afxx env init --config /path/config.yaml
 
 ### `replay`
 
-统一调用 `afx replay`，复用已有 client，由 AFX 决定执行环境和资源。每次调用都新建 run，返回 request_id/run。无需部署记录或 --new-run。
+统一调用 `afx fuzz replay`，使用配置的 Python/CANN 和设备参数，默认复用 AFX 队列和结果库，不需要 seed 历史。每次调用都新建 run，返回 request_id/run。无需部署记录或 --new-run。
 
 | 参数 | 必填 | 说明 |
 |---|---|---|
 | `--request-id ID` | 否 | 流程分组，省略生成新分组；同一 ID 多次提交自动递增 run，不去重 |
 | `--seed SEED` | 与 `--seeds-file` 二选一 | 单个 nnsmith seed |
 | `--seeds-file PATH` | 与 `--seed` 二选一 | 本地 seed 文件，每行一个；启用批量复跑 |
-| `--dump` | 否 | 当前不支持；指定或 replay.dump=true 返回 MANAGED_REPLAY_UNSUPPORTED |
-| `--upload` / `--no-upload` | 否 | 当前不支持覆盖 managed client 上传策略；指定返回 MANAGED_REPLAY_UNSUPPORTED |
+| `--dump` | 否 | 传入 AFX 逐任务 dump；通过 evidence list/read 读取产物 |
+| `--upload` / `--no-upload` | 否 | 默认开启，仅上传本轮 attempt；--no-upload 关闭（与共享 session 上传冲突时明确报错） |
 
 历史查询：
 
@@ -239,10 +240,11 @@ afxx env init --config /path/config.yaml
 
 | 参数 | 必填 | 说明 |
 |---|---|---|
-| `--job-id ID` | 是 | replay job |
+| `--request-id ID` | 是 | replay 流程 ID |
+| `--run N` | 否 | 轮次，省略为最新一次；返回解析后的 run |
 | `--offset N` | 否 | 默认 0；非负的文件序号，翻页用返回的 `next_offset` |
 
-返回：远端文件清单、摘录和明确的 attempt 关联。
+返回：request_id、run、远端文件清单、摘录和明确的 attempt 关联。翻页和续读固定返回的 run，避免最新轮次改变。CLI/MCP 不再接收 evidence 的 job_id；不存在的分组/轮次、配置冲突和 dry-run 均不会发起证据读取。
 
 ### `evidence read`
 
@@ -250,7 +252,8 @@ afxx env init --config /path/config.yaml
 
 | 参数 | 必填 | 说明 |
 |---|---|---|
-| `--job-id ID` | 是 | replay job |
+| `--request-id ID` | 是 | replay 流程 ID |
+| `--run N` | 否 | 轮次，省略为最新一次；返回解析后的 run |
 | `--path PATH` | 是 | 远端证据文件的绝对路径 |
 | `--offset N` | 否 | 默认 0，必须非负，单位为字节 |
 | `--limit N` | 否 | 默认 8192，范围 1–65536 |
@@ -337,7 +340,7 @@ MCP 与 CLI 共用命令实现。优先使用结构化工具，不需要拼命�
 
 ### 长调用和查询
 
-`deploy`、`env init/update/check`、`fuzz run`、`client start/stop/restart`、`issue verify` 返回本机调用记录，必须提供工具级 request_id。既有 CLI 支持请求键的命令会使用同一个键；arguments 中不同的 --request-id 返回 REQUEST_CONFLICT。client/verify 的键只用于本机调用去重，不改变 CLI 或平台已有的幂等规则。
+`deploy`、`env init/update/check`、`fuzz run`、`client start/stop/restart`、`issue verify` 返回本机调用记录，除 env 命令自动分配 ID 外，必须提供工具级 request_id。env 命令拒绝用户指定 request_id（包括 arguments 中的 --request-id），也不会将 MCP 调用记录 ID 传入 CLI。既有 CLI 支持请求键的命令会使用同一个键；arguments 中不同的 --request-id 返回 REQUEST_CONFLICT。client/verify 的键只用于本机调用去重，不改变 CLI 或平台已有的幂等规则。
 
 ```text
 afxx_client({"action":"restart","request_id":"F152-restart-1","config":"/absolute/task.yaml"})
@@ -453,17 +456,17 @@ MCP 仅通过 `afxx_run(command="case list", arguments=[...])` 调用，不新�
 | --- | --- | --- | --- |
 | `afxx_execution_show` | `exec_uuid` | `config` | `execution show` |
 | `afxx_issue_status` | `issue_id`、`round_no` | `include_tasks=false`、`config` | `issue status [--include-tasks]` |
-| `afxx_evidence_list` | `job_id` | `offset=0`、`config` | `evidence list` |
-| `afxx_evidence_read` | `job_id`、`path` | `offset=0`、`limit=8192`、`sha256`、`config` | `evidence read` |
+| `afxx_evidence_list` | `request_id` | `run`、`offset=0`、`config` | `evidence list` |
+| `afxx_evidence_read` | `request_id`、`path` | `run`、`offset=0`、`limit=8192`、`sha256`、`config` | `evidence read` |
 
 以上工具共用 CLI 实现并直接返回统一 JSON 结果，不创建长操作回执。前两个只查询平台，不要求领取租约或连接 NPU；后两个通过配置连接远端读取已有 replay 产物，不触发新的执行或 dump。
 
-`exec_uuid` 为 8–64 位字母、数字、下划线或连字符，不是数值 exec_id；`round_no` 为 1–999999。`job_id` 为 1–128 位字母、数字、下划线、点或连字符（排除 .、..、requests）。list 的 offset 是文件列表游标，read 的 offset/limit 是字节偏移和长度，limit 为 1–65536。path 使用 evidence list 返回的远端绝对路径，不展开成本机路径；已有 CLI 继续执行证据目录与符号链接限制。连续读取可携带上次返回的 64 位小写 sha256，文件发生变化则报错。
+`exec_uuid` 为 8–64 位字母、数字、下划线或连字符，不是数值 exec_id；`round_no` 为 1–999999。`request_id` 为 1–128 位字母、数字、下划线、点或连字符（排除 .、..、requests）。list 的 offset 是文件列表游标，read 的 offset/limit 是字节偏移和长度，limit 为 1–65536。path 使用 evidence list 返回的远端绝对路径，不展开成本机路径；已有 CLI 继续执行证据目录与符号链接限制。连续读取可携带上次返回的 64 位小写 sha256，文件发生变化则报错。
 
 平台错误、EVIDENCE_UNAVAILABLE、日志缺失/截断和分页信息沿用 CLI 返回，不改写为成功或完整证据。调用示例：
 
 ```json
-{"job_id":"0123456789abcdef0123456789abcdef","path":"/remote/results/dump/kernel.cpp","offset":0,"limit":8192}
+{"request_id":"repair-F152","run":1,"path":"/remote/results/dump/kernel.cpp","offset":0,"limit":8192}
 ```
 
 `afxx_client` 合并 client 生命周期入口：status 默认 timeout=30，直接返回查询结果，不接受 request_id；start/stop/restart 默认 timeout=300，必须提供 request_id，返回可通过 afxx_operation_status 查询的回执。原四个独立 MCP 工具已移除，CLI 命令保持不变。
@@ -487,7 +490,7 @@ MCP 仅通过 `afxx_run(command="case list", arguments=[...])` 调用，不新�
 - `afxx_issue_status(issue_id, round_no, include_tasks=false)` 默认只返回验证/关联回归摘要；true 时分别在 verification.tasks、regression.tasks 添加各轮任务，无回归时 regression 为 null。round_no 指验证轮次；任一查询失败整体返回错误，不能把摘要当作任务读取成功。CLI 同步支持 `issue status --include-tasks`。原独立 issue_tasks 工具已移除，CLI issue tasks 仍可查询任意轮次。
 - `afxx_job_status` 支持 attempt 和 fields（字段名数组），转发 CLI --attempt/--fields；fields 需要 attempt，attempt 与 wait 互斥，since/timeout 仅在 wait=true 时有效（默认 30 秒）。不接受无关参数或空字段列表。
 - 手动复测列表使用 `afxx_run(command="retest list")`，不用于查询 issue verify；原独立 retest_list 工具已移除。
-- 优先使用结构化工具。仅在没有对应工具时使用 afxx_run，不熟悉参数先调用 afxx_help。短调用直接返回 CLI envelope；长调用（env init/update/check、deploy、fuzz run、client start/stop/restart、issue verify）要求 request_id，先返回调用回执，再查 afxx_operation_status；CLI 完成后仍须按 job_id/round_no 跟踪远端执行。
+- 优先使用结构化工具。仅在没有对应工具时使用 afxx_run，不熟悉参数先调用 afxx_help。短调用直接返回 CLI envelope；长调用（env init/update/check、deploy、fuzz run、client start/stop/restart、issue verify）除 env 命令自动分配外要求 request_id，先返回调用回执，再查 afxx_operation_status；CLI 完成后仍须按 job_id/round_no 跟踪远端执行。
 
 当前注册 13 个 MCP 工具（10 个业务工具、3 个辅助工具），afxx_run 仍支持 38 条 CLI 命令。
 
@@ -502,4 +505,14 @@ state=running 表示继续等待；passed 表示任务全部明确通过，且�
 
 超时直接返回当前进度、timed_out=true、next_action=wait，查询成功仍为 ok=true；平台任务失败也通过 data.state 表达，HTTP/协议错误才返回 ok=false。多个查询不是平台原子快照，遇到不一致应复查；失败列表不读取完整日志。旧 issue status/tasks/detail/wait 保留，旧 wait 仍有自动续租行为，修复 skill 改用只读 verify-check。
 
-新提交的 workflow 任务（env init/update/check、deploy、fuzz run）直接使用 request_id 作为 job_id，例如 `--request-id deploy-F152-001` 返回 `job_id=deploy-F152-001`，可立即用 `status --request-id deploy-F152-001` 查询。同一 ID 重试仍校验配置与参数，冲突报 REQUEST_CONFLICT；省略请求 ID 时自动生成一个 UUID 字符串并同时用于两者。已有请求记录重试仍返回其中原来的 job ID，不重建旧任务。claim/release/client/verify 等无新 workflow job 的操作不受影响；MCP 本机回执仍用 request_id 查询，本次不改回执机制。
+新提交的 workflow 任务（deploy、fuzz run）直接使用 request_id 作为 job_id，例如 `--request-id deploy-F152-001` 返回 `job_id=deploy-F152-001`，可立即用 `status --request-id deploy-F152-001` 查询。同一 ID 重试仍校验配置与参数，冲突报 REQUEST_CONFLICT；省略请求 ID 时自动生成一个 UUID 字符串并同时用于两者。已有请求记录重试仍返回其中原来的 job ID，不重建旧任务。claim/release/client/verify 等无新 workflow job 的操作不受影响；MCP 本机回执仍用 request_id 查询，本次不改回执机制。
+
+### deploy 客户端协调
+
+`afxx deploy --coordinate-client` 在编包及包校验后、安装前停止唯一目标 AFX 客户端，安装验证成功后恢复原运行意图；MCP `afxx_deploy` 使用 `coordinate_client=true`。省略参数不协调。无需单独 stop/start，远端 worker 不依赖本地日志连接持续在线。
+
+支持 running（重新 start 会话）、idle（只启动 daemon）、stopped（不启动）。不保证原 run/队列进度续跑；paused、过渡状态或活动管理 operation 在停止前拒绝。注册执行环境的 CANN 必须属于部署目标，恢复后使用注册的 Python/env 核对 AF 库路径和哈希。安装前失败尝试恢复旧会话，安装开始后失败保持停止；恢复失败保留已验证安装并返回 DEPLOY_CLIENT_RESTORE_FAILED，不能继续 verify。status 返回 client_coordination 和 installation_state。
+
+生命周期锁仅约束 AFXX 调用，不是 AFX 的全局接单屏障；协调期间其他入口不得启动任务。原本运行中的平台验证应先结束。停止/恢复失败后查同一 job 和 client status，不绕过占用检查、不强杀、不为恢复而盲目重新安装。
+
+环境操作 `env init/update/check` 自动生成 `ENV` 开头的任务 ID，不接受 `--request-id`。通过返回 ID 使用 `status --request-id ID` 查询。MCP 调用记录与远端环境任务分别自动分配 ID：先用调用回执查询 `afxx_operation_status`，再用其中 CLI 结果的任务 ID 查询远端状态。

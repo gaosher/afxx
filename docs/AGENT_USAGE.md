@@ -55,9 +55,11 @@ init/update 默认跟随远端日志，Ctrl+C 停止本地查看，任务仍可�
 
 ## Replay 分组
 
-单 seed/批量均调用 `afx replay`，不创建第二个 client。环境、设备、线程和上传由 AFX 管理。dump 和上传覆盖当前返回 MANAGED_REPLAY_UNSUPPORTED。结果按本次 task/attempt ID 关联，不使用同 seed 的最新结果代替。任意 seed 是否支持交给实际 AFX 服务处理，不做本地历史门禁。
+AFXX 使用 AFX 0.4.1+ 的 `afx fuzz replay <seed> --save`，不强制指定数据库。有存活 client 时复用其 home 和队列，无 client 时由 AFX 独立执行；无需本机 seed 历史。默认开启 upload，只上传本轮明确关联的 attempt；`--no-upload` 可关闭，但正在自动上传的共享 session 会被明确拒绝，需先停止该 session。
 
-`replay --request-id repair-F152 --seed <seed>` 每次提交到现有 AFX managed client，自动递增 run。无部署引用或 `--new-run`。查询使用 `replay list/show/compare --request-id repair-F152`；show 默认最近一次，可指定 `--run 1`；compare 必须指定 `--runs 1 2`。MCP 的 afxx_replay 同样每次执行，直接返回 request_id/run；历史查询通过 afxx_run，传对应 CLI 参数，不查询 operation_status。
+`--dump` 或 `replay.dump: true` 传递给 AFX 逐任务开启采集。使用 `evidence list/read --request-id ID --run N` 按需读取远端产物；不自动复制整个共享 dump 目录。新增或发生文件变化的 worker 目录仅标为候选证据，只有诊断中的明确路径才能关联到 attempt；文件种类及保留期限由 AFX 管理，缺少 IR/kernel 时仍需报告证据缺口。
+
+`replay --request-id repair-F152 --seed <seed>` 每次通过 afx fuzz replay 提交，自动递增 run。无部署引用或 `--new-run`。查询使用 `replay list/show/compare --request-id repair-F152`；show 默认最近一次，可指定 `--run 1`；compare 必须指定 `--runs 1 2`。MCP 的 afxx_replay 同样每次执行，直接返回 request_id/run；历史查询通过 afxx_run，传对应 CLI 参数，不查询 operation_status。
 
 每次执行冻结提交配置并从本次 attempt 保存执行环境；组索引保存在 local.state_dir/replay-groups/。提交中断后用 list/show 确认远端状态，重新 replay 会创建新 run。对比区分变化、缺失、新增和无法对齐，不将未执行判为通过。
 
@@ -87,7 +89,7 @@ verify 与 deploy 分离，在远端采集实际 AF 身份，核对部署后提�
 
 status/wait 以 verify 返回的 round_no 定位验证，跟踪同一候选包的下一轮 regress。只有相关轮次全部通过才返回 outcome=passed。wait 遇到失败和 invalid 均返回 PLATFORM_VERIFICATION_FAILED；等待超时可继续查同一轮次。查询保留历史轮次身份，不使用其他修复的结果。
 
-AFX >= 0.2.3 managed client 在 NPU 常驻。verify 前由官方 init/start/status 初始化、启动并确认执行会话运行，需配置 platform.client_token_file。start 会读取平台配置，可能开始 fuzz。AFXX 不自动 stop/restart；环境变化需要刷新进程时使用同一环境、同一 data-dir 的 afx restart。replay 统一进入 managed 队列，派发优先级由 AFX 决定。部署、更新仍执行环境占用检查。
+AFX >= 0.4.1 managed client 在 NPU 常驻。verify 前由官方 init/start/status 初始化、启动并确认执行会话运行，需配置 platform.client_token_file。start 会读取平台配置，可能开始 fuzz。AFXX 不自动 stop/restart；环境变化需要刷新进程时使用同一环境、同一 data-dir 的 afx restart。replay 不指定数据库，由 AFX 接入现有队列。部署、更新仍执行环境占用检查。
 
 ## 错误处理
 
@@ -155,13 +157,13 @@ SUMMARY_INVALID 表示本地文件或字段有误；PLATFORM_WRONG_STATE、PLATF
 ## 证据分页与续读
 
 ```bash
-afxx evidence list --config "$CONFIG" --job-id <replay-job-id>
+afxx evidence list --config "$CONFIG" --request-id <流程request-id> --run <run>
 # 清单被截断时，用返回的 next_offset 继续分页（offset 为文件序号）。
-afxx evidence list --config "$CONFIG" --job-id <replay-job-id> --offset <next_offset>
-afxx evidence read --config "$CONFIG" --job-id <replay-job-id> \
+afxx evidence list --config "$CONFIG" --request-id <流程request-id> --run <run> --offset <next_offset>
+afxx evidence read --config "$CONFIG" --request-id <流程request-id> --run <run> \
   --path <files中的远端绝对路径> --offset 0 --limit 8192
 # 读取后续字节时同时传首次返回的 sha256，拒绝拼接已变化的文件。
-afxx evidence read --config "$CONFIG" --job-id <replay-job-id> \
+afxx evidence read --config "$CONFIG" --request-id <流程request-id> --run <run> \
   --path <同一文件路径> --offset <next_offset> --limit 8192 --sha256 <首次返回的sha256>
 ```
 
@@ -195,7 +197,7 @@ attempt 默认字段为 id、seed_short、backend、status、error_stage、error
 
 wait 默认 30 秒、允许 (0,50] 秒，CLI/MCP 均返回一次 JSON。携带 since 时与上次概要比较；未传时以首次查询为基线等待下一次变化。event=changed/terminal 返回新概要和 cursor；replay 终态直接返回上述 evidence_path 和 failures，不附 event/cursor；state=unknown 返回 event=attention，需处理进程不确定状态。没有变化时只返回 request_id、event=timeout、cursor，表示等待窗口结束而非任务失败。下一次继续使用返回的 cursor；不重复提交原任务。网络请求本身的超时独立于等待窗口。
 
-status 的公开参数和输出使用 request_id；replay 查询使用 request_id/run。其他尚未迁移的 evidence、fuzz 和 issue verify 接口仍使用 job_id。state 与 passed 含义不同；外层 ok 只表示查询成功。概要和字段投影在远端完成，避免轮询传回大图/日志。replay 终态优先读取本地证据文件；evidence list/read 保留为按需远端查询入口。
+status 的公开参数和输出使用 request_id；replay 查询使用 request_id/run。evidence 同样使用 request_id/run；fuzz 和 issue verify 接口仍使用 job_id。state 与 passed 含义不同；外层 ok 只表示查询成功。概要和字段投影在远端完成，避免轮询传回大图/日志。replay 终态优先读取本地证据文件；evidence list/read 保留为按需远端查询入口。
 
 ### Job 记录入口
 
@@ -207,12 +209,14 @@ status 的公开参数和输出使用 request_id；replay 查询使用 request_i
 
 用户明确要求退出已领取的 issue 时，使用 `issue release --issue-id <id> --request-id <稳定请求键>`；失败重试沿用该键，成功后本地租约不可再用，重新领取使用新的请求键。释放不等于取消已提交的执行。对应 MCP：`afxx_issue(action="release")`、`afxx_case(action="spec")`、`afxx_case(action="history")`、`afxx_run(command="retest list")`，参数与 CLI 对齐，均支持可选 `config`。
 
-定位时优先使用结构化 MCP `afxx_issue_status(issue_id, round_no, include_tasks=True)` 找到失败执行，再用 `afxx_execution_show(exec_uuid)` 读取平台详情。远端 dump 使用 `afxx_evidence_list(job_id, offset)` 和 `afxx_evidence_read(job_id, path, offset, limit, sha256)`；list offset 为文件游标，read offset/limit 为字节。工具直接返回 CLI 结果及错误，无须查询 operation_status。所有工具支持可选 config，且保留 afxx_run 通用调用方式。
+定位时优先使用结构化 MCP `afxx_issue_status(issue_id, round_no, include_tasks=True)` 找到失败执行，再用 `afxx_execution_show(exec_uuid)` 读取平台详情。远端 dump 使用 `afxx_evidence_list(request_id=..., run=..., offset=...)` 和 `afxx_evidence_read(request_id=..., run=..., path=..., offset=..., limit=..., sha256=...)`；list offset 为文件游标，read offset/limit 为字节。工具直接返回 CLI 结果及错误，无须查询 operation_status。所有工具支持可选 config，且保留 afxx_run 通用调用方式。
 
 验证闭环优先使用 issue verify-check，MCP 为 afxx_issue(action="verify-check", issue_id=..., round_no=..., wait=true, timeout=30)。直接返回聚合结果，无 operation 回执；timed_out 不代表任务失败，继续查询原轮次。该命令不续租、不重启、不提交，不将 skip/invalid 算通过。claim 现在 CLI/MCP 均必须指定 issue_id。
 
 ## 显式环境更新
 
-使用 `afxx_run` 的 `command="env update"`，在 arguments 传 `--afx VERSION|latest`、`--torch-npu YYYYMMDD|latest`、`--torch VERSION` 或 `--cann YYYYMMDD|latest [--ops]`。必须提供 request_id，MCP 返回操作记录后查询其结果。无组件参数只查询版本，不读取配置版本作为更新目标。torch 版本变化需配套 torch_npu，ops 不允许单独更新。配置只定位环境及包源，未指定组件沿用当前清单；CANN 安装失败不保证自动回滚，不能把 Python 回滚能力扩展到 CANN。
+使用 `afxx_run` 的 `command="env update"`，在 arguments 传 `--afx VERSION|latest`、`--torch-npu YYYYMMDD|latest`、`--torch VERSION` 或 `--cann YYYYMMDD|latest [--ops]`。不传 request_id，MCP 自动生成调用记录 ID；查询其结果后，使用 CLI 返回的 ENV 任务 ID 跟踪远端状态。无组件参数只查询版本，不读取配置版本作为更新目标。torch 版本变化需配套 torch_npu，ops 不允许单独更新。配置只定位环境及包源，未指定组件沿用当前清单；CANN 安装失败不保证自动回滚，不能把 Python 回滚能力扩展到 CANN。
 
 环境更新需要回写本地配置时，显式传 `--save-config`。MCP 异步任务成功后查询 status 完成回写；若返回 CONFIG_SAVE_CONFLICT，环境已更新但配置未覆盖，先检查用户编辑。不要为重试回写而重新更新环境。
+
+环境操作 `env init/update/check` 自动生成 `ENV` 开头的任务 ID，不接受 `--request-id`。通过返回 ID 使用 `status --request-id ID` 查询。MCP 调用记录与远端环境任务分别自动分配 ID：先用调用回执查询 `afxx_operation_status`，再用其中 CLI 结果的任务 ID 查询远端状态。

@@ -47,3 +47,18 @@ def test_cli_requires_no_workflow_config(tmp_path, monkeypatch):
     result = json.loads(proc.stdout)
     assert result["ok"] and result["command"] == "skills install"
     assert len(result["data"]["skills"]) == 2
+
+
+def test_bundled_repair_markdown_links_resolve():
+    import re
+    root=skills.bundled_skills().joinpath('afx-issue-repair')
+    for document in Path(root).rglob('*.md'):
+        for target in re.findall(r'\]\(([^)]+)\)',document.read_text()):
+            if '://' in target:continue
+            filename, _, fragment=target.partition('#')
+            destination=document.parent/filename if filename else document
+            assert destination.is_file(), (document,target)
+            if fragment:
+                headers=re.findall(r'^#+\s+(.+)$',destination.read_text(),re.M)
+                anchors=[re.sub(r'[^\w\- ]','',h.lower()).replace(' ','-') for h in headers]
+                assert fragment in anchors,(document,target)

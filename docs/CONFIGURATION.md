@@ -44,7 +44,7 @@ afxx config init --source /absolute/path/graph-autofusion --output ~/.config/afx
 | `replay.devices` / `workers` | auto，查询可见逻辑 NPU，每卡一个 worker |
 | `replay.compile_threads` / `batch_timeout_seconds` / `dump` | 4 / 300 / false |
 | `sync.include_ignored_paths` / `exclude_paths` | 空列表，相对于源码根目录的精确路径 |
-| `upload.enabled` | false；managed replay 上传由已有 AFX client 管理 |
+| `upload.enabled` | false；fuzz replay 仅保存本地结果，不接受上传覆盖 |
 
 Python 3.11 由工具自动准备；LLVM 和 LLD 仍由远端提供。修改 workflow_root 只影响路径推导；创建新环境应使用新目录，已有 venv 和编译缓存包含绝对路径。
 
@@ -117,7 +117,7 @@ Toolkit、所需 OPS 和可选 NNAL 必须属于同一完整发布。下载到 `
 
 ## 平台连接
 
-启用模板中的 platform 节，填写 HTTPS 地址、agent_id、本地及远端 token 文件路径。两端使用同一平台用户的 Bearer token。凭据文件放在源码目录外，远端文件权限需为 0600。
+模板默认启用 platform 节，确认 HTTPS 地址和 agent_id；token 文件路径通常保持 null 使用默认值。两端使用同一平台用户的 Bearer token。凭据文件放在源码目录外，远端文件权限需为 0600。
 
 ```yaml
 platform:
@@ -130,7 +130,7 @@ platform:
 
 AFXX 的 token 需要 `issue` 权限。远端独立运行的 AFX 客户端使用自己的 client token，需要 `upload/retest` 权限；不要将默认只具备客户端权限的 token 用于 AFXX 领取和提交问题。
 
-`platform.client_token_file` 为远端已有 token 文件路径，首次初始化 client 时必填；已有 managed client 可以复用其保存的凭据。AFX >= 0.2.3 managed init/start/status 管理客户端，设备沿用 replay.devices。客户端目录由远端 AFX 自身解析（AUTOFUSEX_HOME、active-home 指针或系统默认目录）。启动读取平台配置，可能同时执行 fuzz；已有 endpoint、token 或设备不匹配时报错。AFXX 不自动停止或重启驻留进程。详见 README 的 AFX 常驻客户端章节。
+`platform.client_token_file` 为远端已有 token 文件路径，首次初始化 client 时必填；已有 managed client 可以复用其保存的凭据。AFX >= 0.4.1 公开 init/start/status 管理客户端，设备沿用 replay.devices。客户端目录由远端 AFX 自身解析（AUTOFUSEX_HOME、active-home 指针或系统默认目录）。启动读取平台配置，可能同时执行 fuzz；已有 client 的 endpoint、token 和设备配置由 AFX 管理。AFXX 不自动停止或重启驻留进程。详见 README 的 AFX 常驻客户端章节。
 
 ## Job 环境快照
 
@@ -138,7 +138,7 @@ deploy/replay/check 在远端开始执行时保留提交的 `config.yaml`，并�
 
 日常任务不再比对配置与 init/update 清单，也不要求缓存 wheel 或旧锁文件存在。必需依赖无法加载仍会报错；replay 不再引用部署记录。环境快照用于追溯，不能单凭版本列表保证精确重建；未发布 wheel 的原始来源可能需要另外保存。
 
-日常 deploy 检查构建与安装验证所需依赖；replay 检查用例执行及 seed/results 接口。全量依赖一致性检查（pip check）在 init/update 和 env check 中执行。managed replay 的 environment.json/submitter_runtime 是提交端记录，执行环境来自 attempt.contexts.environment 并保存于 execution_environments。
+日常 deploy 检查构建与安装验证所需依赖；replay 检查用例执行及 seed/results 接口。全量依赖一致性检查（pip check）在 init/update 和 env check 中执行。replay 的 environment.json/submitter_runtime 是启动端记录，执行环境来自 attempt.contexts.environment 并保存于 execution_environments。
 
 安装 AF 前只检查本次包安装清单中的共享库是否被可见进程加载，不阻止仅使用其他 CANN 库的进程。init/update 共用入口在目标 venv 已存在时仍检查整个 venv 的占用。
 
@@ -150,19 +150,20 @@ deploy/replay/check 在远端开始执行时保留提交的 `config.yaml`，并�
 
 MCP 默认读取同一固定配置；需要覆盖时，通过调用的 `config` 字段、`arguments` 中的 `--config`，或启动 `afxx mcp --config ...` 提供。
 
-## Managed replay 与定位证据
+## Fuzz replay 与定位证据
 
-AFXX replay 统一调用已有 client 的 `afx replay`。客户端目录按 AFX 的 AUTOFUSEX_HOME/active-home/default-home 解析；不创建独立 replay client。
+AFXX 使用 AFX 0.4.1+ 的 `afx fuzz replay <seed> --save`，不强制指定数据库。有存活 client 时复用其 home 和队列，无 client 时由 AFX 独立执行；无需本机 seed 历史。默认开启 upload，只上传本轮明确关联的 attempt；`--no-upload` 可关闭，但正在自动上传的共享 session 会被明确拒绝，需先停止该 session。
 
-设备、后端、线程和上传策略由 AFX 决定。`replay.devices` 仍可用于 client 初始化，但 replay.devices/workers/compile_threads/batch_timeout_seconds 不作为逐任务参数传给 managed replay。实际配置保存于 result.json/managed_specs。
+AFXX request_id/run 保存队列路径、task ID、attempt ID、结果摘要和日志，不复制共享数据库。结果通过 `afx results list <database> --attempt <id>` 精确读取；task→attempt 尚无公开查询接口，仅在适配层只读查询队列表。队列任务由 client 上传，AFXX 标记 upload.owner=client、state=delegated，不再执行整批补传；delegated 不等于服务端已确认。仅独立执行的 attempt 由 AFXX 通过临时数据库调用 `afx sync once`，结束即清理。
 
-当前 `--dump` 或 `replay.dump: true` 返回 MANAGED_REPLAY_UNSUPPORTED；`--upload`、`--no-upload` 或 upload.enabled=true 同样拒绝，因为不能覆盖常驻 client 的上传策略。配置中的 dump/upload.enabled 保持 false。AFXX 不回退旧执行入口，不假装已打开 dump。
+`--dump` 或 `replay.dump: true` 传递给 AFX 逐任务开启采集。使用 `evidence list/read --request-id ID --run N` 按需读取远端产物；不自动复制整个共享 dump 目录。新增或发生文件变化的 worker 目录仅标为候选证据，只有诊断中的明确路径才能关联到 attempt；文件种类及保留期限由 AFX 管理，缺少 IR/kernel 时仍需报告证据缺口。
 
-终态使用 `replay show --request-id ID --run N` 下载本次 AFXX 报告和日志，并返回 evidence_path。不复制整个共享 client 数据库和其他任务的缓存。结果库中的诊断信息不等于持久 IR/kernel dump；完整定位采集等待 AFX 的逐任务接口，见[复现证据清单](../skills/afx-issue-repair/references/replay-evidence.md)。
+seed 顺序提交；devices=auto 交给 AFX 调度，显式设备轮转传入。compile_threads 传给 AFX；batch_timeout_seconds 限制单 seed 提交及等待时间，超时保留回执，不自动重提。workers 不控制该入口的并发。
 
-## Init 平台凭据准备
 
-未配置 platform 时，init 不读取或创建 token。配置 platform.url 和 agent_id 后：
+## 平台连接
+
+新配置默认启用 platform。AFXX 当前不支持无 token 的游客平台初始化：交互 init 会要求输入 token，非交互调用缺少 token 文件时报错，均不会匿名跳过身份校验。只需环境初始化和部署时，可以删除或注释整个 platform 节；此时 init 不读取或创建 token，平台 issue 操作仍需配置凭据。配置 platform.url 和 agent_id 后：
 
 - platform.token_file 省略、null 或空字符串时，默认 `~/.config/afxx/auth/afx.token`。
 - platform.remote_token_file 留空时，默认 `<workflow_root>/auth/afx.token`。
@@ -191,3 +192,5 @@ AFX 仅接受 `python_env.afx.version`（默认 `latest`），不再接受 wheel
 `env update --save-config` 仅在更新成功后回写选中组件的实际版本/日期（`latest` 展开为具体值），保留注释和其他字段。更新 torch_npu 时也记录匹配的 torch 版本。dry-run 不写文件；`--detach` 或 MCP 提交后，由后续 `status` / 等待终态完成本地回写。回写目标是提交时使用的配置文件；等待期间文件被编辑则报冲突，不覆盖编辑，远端成功的更新不因此回滚。重复查询复用回写结果。
 
 单个 `cann.date` 无法表达不同批次的 Toolkit 和 OPS。若选用 `--save-config` 会产生这种组合，则安装前拒绝；使用 `--cann DATE --ops --save-config` 同批更新，或省略回写参数。
+
+AFX 公共 CLI 暂未暴露完整 AF 加载身份和 NNSmith 源码校验；这些探测仍在适配层调用新版 execution/workloads 模块。client 操作与结果查询使用公开 CLI。

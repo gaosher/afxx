@@ -51,14 +51,14 @@ TASK_CONFIG="/absolute/path/to/task-config.yaml"
 
 以下示例按 worktree 任务配置编写；未创建任务配置且使用默认配置时，省略 `--config "$TASK_CONFIG"`。
 
-基线和候选复现均使用 `replay`，统一进入已有 AFX managed client。当前逐任务 dump 接口未接通，`--dump` 会明确报错；先读取结果中的诊断信息，若定位必须依赖 IR/kernel dump，报告缺失，不绕过工具另起旧执行进程。执行前读取 [复现证据清单](references/replay-evidence.md)，按失败阶段收集和读取证据。
+基线和候选复现均使用 `replay --dump`，通过 `afx fuzz replay` 复用现有队列。默认上传本轮结果，离线复现明确传 --no-upload。读取 [复现证据清单](references/replay-evidence.md)，仅把明确路径关联的 dump 当作本轮证据；不自动重启 client 开启全局 dump。
 
 ### 2.1 Deploy 主线基线
 
-修改源码前，先部署上述主线 worktree。deploy 会同步未提交修改，提交前必须确认 worktree 干净，不包含会被同步的额外源码文件。
+修改源码前，先部署上述主线 worktree。deploy 会同步未提交修改，提交前必须确认 worktree 干净，不包含会被同步的额外源码文件。基线与每轮候选 deploy 前均执行[部署期间的客户端协调](references/platform-evidence.md#部署期间的客户端协调)，确认允许协调目标客户端；由 deploy 在包准备好之后停止并恢复，不能只在候选部署时处理。
 
 ```bash
-afxx deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <基线部署请求ID>
+afxx deploy --config "$TASK_CONFIG" --coordinate-client --issue-id <issue-id> --request-id <基线部署请求ID>
 ```
 
 记录返回的 `job_id` 为基线 deploy job，并保存对应的主线 SHA。这个步骤仅部署，不提交平台 verify。
@@ -80,22 +80,30 @@ afxx status --config "$TASK_CONFIG" --request-id <基线deploy-job-id> \
   --wait --since <cursor> --timeout 30
 ```
 
-只有 `state=success` 才进入复现。queued/running 或提交响应的 ok=true 不代表部署完成；failed/unknown 时先处理部署或状态问题，不能继续 replay，也不能宣称已复现。
+只有 `state=success` 才进入复现，并按部署前记录恢复需要的客户端会话、核对实际 worker 使用的 AF 身份。queued/running 或提交响应的 ok=true 不代表部署完成；failed/unknown 时按客户端协调说明处理恢复，不继续 replay，也不能宣称已复现。
 
 ### 2.3 Replay 复现原问题
 
-对 nnsmith seed，使用本次修复的流程 request_id。replay 由 managed client 执行；先确认需要的基线已安装、client 已刷新，不能以提交进程的环境替代 worker 身份：
+对 nnsmith seed，使用本次修复的流程 request_id。replay 复用现有队列；先确认需要的基线已安装，不能以提交进程的环境替代 worker 身份：
 
 ```bash
-afxx replay --config "$TASK_CONFIG" --seed <原始seed> --request-id <流程request-id>
+afxx replay --config "$TASK_CONFIG" --dump --seed <原始seed> --request-id <流程request-id>
 afxx replay show --config "$TASK_CONFIG" --request-id <流程request-id> --run <run>
 ```
 
 记录 replay 返回的 request_id/run，所有修复轮次复用同一流程 request_id；每次调用都会执行，不需要 --new-run。用 replay list 查看历史、replay show --run N 查看指定一次、replay compare --runs N M 对比。MCP 的 afxx_replay 直接返回 request_id/run，通过 afxx_run 调用上述查询，不查 operation_status。断线先查历史，不能盲目重复 replay。
 
-若 replay 在准备阶段退出，先按[准备阶段失败](references/replay-evidence.md#准备阶段失败)定位出错的子命令。目标 seed 实际执行且失败阶段和关键诊断与平台记录吻合后，才能报告已复现。
+若 replay 在准备阶段退出，先按[准备阶段失败](references/replay-evidence.md)定位出错的子命令。目标 seed 实际执行且失败阶段和关键诊断与平台记录吻合后，才能报告已复现。
 
-用 replay show 查询指定 run 直到终态并取得 evidence_path，再按 [复现证据清单](references/replay-evidence.md#replay-自动返回的证据) 读取必要的本地报告、日志和 dump。缺失证据注明原因；保持原 seed、输入和精度语义。
+用 replay show 查询指定 run 直到终态并取得 evidence_path，再按 [复现证据清单](references/replay-evidence.md) 读取本地报告及日志；dump 使用下面的 evidence 命令按需读取远端文件。缺失证据注明原因；保持原 seed、输入和精度语义。
+
+```bash
+afxx evidence list --config "$TASK_CONFIG" --request-id <流程request-id> --run <run>
+afxx evidence read --config "$TASK_CONFIG" --request-id <流程request-id> --run <run> \
+  --path <list返回的远端文件路径> --offset 0 --limit 8192
+```
+
+省略 --run 时查询最新一次，但翻页、续读和对比时必须固定首次返回的 run；不要在出现新复跑后混读另一轮。read 续读传 next_offset 和上次 sha256。MCP 使用 afxx_evidence_list/read(request_id=..., run=...)，定位 replay 设置 dump=true。默认上传，无需额外传 --upload。
 
 非 nnsmith 用例使用平台给出的复现方式和目标环境，不强行传入 AFXX seed 接口。失败无法复现时，先比较环境、包版本和用例条件；明确“未复现”及缺失证据，不直接宣称修复。
 
@@ -107,11 +115,10 @@ afxx replay show --config "$TASK_CONFIG" --request-id <流程request-id> --run <
 
 ## 4. 部署修复版本
 
-先通过 `afxx client status --config "$TASK_CONFIG"` 记录唯一 client 的原状态。需要释放共享安装目录时，在授权范围内执行 `client stop --timeout 300`，只有返回 stopped 才视为退出完成；超时先查询状态，不手工 kill。部署成功后需要恢复原有会话或刷新已加载库时，使用 `client start/restart`。start 会读取平台配置，可能开启 fuzz，不能将它当作仅启动复测监听。停止状态不应在未约定恢复时被擅自改为持续 fuzz；verify 的自动启动行为也需纳入本次执行范围。
-
+每轮部署使用 `--coordinate-client`，执行前阅读[部署期间的客户端协调](references/platform-evidence.md#部署期间的客户端协调)。由远端 worker 在编包完成后停止客户端、安装并恢复；agent 不再拆开执行 stop/deploy/start。
 
 ```bash
-afxx deploy --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <本轮唯一部署请求ID>
+afxx deploy --config "$TASK_CONFIG" --coordinate-client --issue-id <issue-id> --request-id <本轮唯一部署请求ID>
 afxx status --config "$TASK_CONFIG" --request-id <deploy-job-id>
 ```
 
@@ -121,13 +128,13 @@ afxx status --config "$TASK_CONFIG" --request-id <deploy-job-id>
 
 ## 5. 提交并等待 verify
 
-每轮候选 deploy 成功后，首次提交该候选的 verify 前，先查询 client status；存在唯一存活 client 时重启其实际 home，让驻留执行进程重新加载当前安装的 AF 包。没有存活 client 时使用 client start，多个存活 client 报错时停止流程，不自行挑选或强杀：
+每轮候选 deploy 成功后，首次提交该候选的 verify 前，先查询 client status。若 deploy 返回 `client_coordination.state=restored`、原状态为 running，且当前仍运行，则复用本轮已核验的恢复结果，不重复重启。恢复为 idle 或原本 stopped 时，不把它当作测试已启动；按本次测试授权启动。否则，存在唯一存活 client 时重启其实际 home；没有存活 client 时使用 client start，多个存活 client 报错时停止流程，不自行挑选或强杀：
 
 ```bash
 afxx client restart --config "$TASK_CONFIG" --timeout 300
 ```
 
-只有 restart（或无存活 client 时的 start）返回 `ok=true` 且 `data.state=running` 才提交下面的 verify。失败或超时时先用 `client status` 检查并处理，不继续提交，不手工 kill 或新建 client。此重启是本修复流程的必要步骤，包含等待在途任务结束；已有完整修复流程授权时无需重复确认。重启可能按平台配置恢复 fuzz，但不代表复测领取或平台派发已经正常。
+复用已核验且仍 running 的部署恢复结果，或本次 restart/start 返回 `ok=true` 且 `data.state=running` 后，才提交下面的 verify。失败或超时时先用 `client status` 检查并处理，不继续提交，不手工 kill 或新建 client。此重启是本修复流程的必要步骤，包含等待在途任务结束；已有完整修复流程授权时无需重复确认。重启可能按平台配置恢复 fuzz，但不代表复测领取或平台派发已经正常。
 
 同一候选的 verify 已提交或响应丢失时，先查询已有轮次或按原请求幂等重试，不为等待、轮询或提交重试再次重启，避免打断在途复测。
 
@@ -148,7 +155,7 @@ agent 使用 issue verify-check 等待原验证轮次；MCP 调用 afxx_issue(ac
 - state=invalid：优先排查包身份、结果缺失和执行环境，不等同于代码缺陷。
 - verification.outcome=passed：转第 6 步；不能提前 commit 为已验证修复。
 
-失败任务查询、环境阻塞和客户端身份处理按 [平台定位参考](references/platform-evidence.md)。尤其第二轮 deploy 后可能遇到存活客户端的旧 AF 身份：先调用 `client status`，在已有客户端协调授权范围内使用 `client stop/restart`，不绕过检查或误报循环成功。deploy 本身仍不自动协调 client。
+失败任务查询、环境阻塞和客户端身份处理按 [平台定位参考](references/platform-evidence.md)。尤其第二轮 deploy 后可能遇到存活客户端的旧 AF 身份：先调用 `client status`，在已有客户端协调授权范围内使用 `client stop/restart`，不绕过检查或误报循环成功。未传 `--coordinate-client` 的 deploy 不协调 client；传入后协调失败必须先处理，不绕过恢复检查。
 
 ## 6. 等待关联回归
 
