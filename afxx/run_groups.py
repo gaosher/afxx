@@ -64,3 +64,20 @@ def select(c, request_id, run, kind):
     return group["runs"][number - 1]
 
 
+
+
+def status(c, request_id, kind, run=None, *, wait=False, since=None, timeout=30,
+           attempt_id=None, fields=None):
+    # Resolve latest once, including while waiting; never switch runs mid-poll.
+    entry = select(c, request_id, run, kind)
+    if entry['dry_run']:
+        value = {'state': entry['state'], 'dry_run': True}
+    elif wait:
+        value = jobs.wait_status(c, entry['execution'], since=since, timeout=timeout, download=False)
+    else:
+        value = jobs.query_status(c, entry['execution'], attempt_id=attempt_id, fields=fields)
+        common.require_code(value['state'] != 'not_found', 'JOB_NOT_FOUND', 'remote run not found')
+        if attempt_id is None:
+            value['cursor'] = jobs.status_cursor(value)
+    return {**{k: v for k, v in value.items() if k not in ('job', 'job_id')},
+            'request_id': request_id, 'task_type': kind, 'run': entry['run']}

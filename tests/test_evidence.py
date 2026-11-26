@@ -84,7 +84,9 @@ def test_remote_evidence_protocol_runs_without_installed_forge(scene, monkeypatc
     monkeypatch.setattr(jobs, 'remote', remote)
     cfg = {'remote': {'state_dir': str(job.parent)}, 'local': {'state_dir': str(job.parent / 'local')}}
     assert jobs.query_evidence(cfg, job.name, 'read', path=str(path))['content'] == 'test ir'
-    assert jobs.query_evidence(cfg, job.name, 'list')['files'][0]['path'] == str(path)
+    listing = jobs.query_evidence(cfg, job.name, 'list')
+    assert listing['files'][0]['path'] == str(path)
+    assert not any(key.startswith('excerpt') for row in listing['files'] for key in row)
 
 
 @pytest.mark.parametrize('action', ['list', 'read'])
@@ -144,3 +146,26 @@ def test_evidence_cli_rejects_missing_request_or_old_job_id(monkeypatch,capsys,a
     monkeypatch.setattr(sys,'argv',['afxx','evidence','list',*args])
     assert cli.cli()==2
     assert json.loads(capsys.readouterr().out)['error']['code']=='INVALID_ARGUMENT'
+
+
+def test_metadata_pages_do_not_read_file_contents(scene, monkeypatch):
+    job, results = scene
+    for i in range(70):
+        (results/'dump'/f'{i:03}.mlir').write_text('large IR' * 1000)
+    original = Path.open
+    def guard(path, *args, **kwargs):
+        if path.suffix == '.mlir':
+            pytest.fail('listing must not read artifact contents')
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'open', guard)
+    paths, offset = [], 0
+    while True:
+        page = replay.collect_evidence(job, results, True, offset, excerpts=False, page_size=32)
+        assert len(page['files']) <= 32
+        assert all('excerpt' not in row for row in page['files'])
+        paths.extend(row['path'] for row in page['files'])
+        if page['next_offset'] is None:
+            break
+        assert page['next_offset'] > offset
+        offset = page['next_offset']
+    assert len(paths) == len(set(paths)) == 70

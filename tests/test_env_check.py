@@ -38,7 +38,7 @@ def test_remote_adapter_returns_failure_and_cleans_code(tmp_path, monkeypatch):
         # Execute the actual packaged bootstrap locally, with an isolated temp root.
         import os
         env = dict(os.environ, TMPDIR=str(tmp_path))
-        result = subprocess.run(remote, text=True, capture_output=True, env=env)
+        result = subprocess.run(remote, text=True, capture_output=True, env=env, stdin=kwargs["stdin"])
         assert result.returncode == 0, result.stderr
         assert not list(tmp_path.iterdir())
         return result.stdout

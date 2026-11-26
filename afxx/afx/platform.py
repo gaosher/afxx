@@ -264,7 +264,7 @@ def renew(c, lease, *, remote=False):
     )
 
 
-def submit_issue_round(c, path, state, lease, package):
+def submit_issue_round(c, path, state, lease, package, *, remote=True):
     issue_id = lease["id"]
     # Match the version representation advertised by AFX platform clients.
     candidate = {
@@ -285,9 +285,10 @@ def submit_issue_round(c, path, state, lease, package):
     )
     from afxx.afx import launcher
 
-    launcher.ensure_started(c, package)
+    if remote:
+        launcher.ensure_started(c, package)
     result = call(
-        c, "POST", f"/api/issues/{issue_id}/verify", state["body"], remote=True
+        c, "POST", f"/api/issues/{issue_id}/verify", state["body"], remote=remote
     )
     workflow_common.require_code(
         isinstance(result, dict)
@@ -709,3 +710,14 @@ def verify_current(c, request_id, lease):
             if state.get("state") != "submitted":
                 state = submit_issue_round(c, path, state, lease, package)
             return dict(state, request_id=request_id, package=package)
+
+
+def submit_current_local(c, request_id, lease, package):
+    """Persist the request before POST; caller holds the remote installation locks."""
+    key = workflow_common.digest({"lease": lease, "package": package})
+    path = Path(c["local"]["state_dir"]) / "verification" / request_id / (key + ".json")
+    with workflow_common.lock(path.with_suffix(".lock")):
+        state = workflow_common.read(path) if path.exists() else {}
+        if state.get("state") != "submitted":
+            state = submit_issue_round(c, path, state, lease, package, remote=False)
+        return dict(state, request_id=request_id, package=package)

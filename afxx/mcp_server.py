@@ -261,10 +261,14 @@ def create_server(default_config=None):
     async def afxx_job_status(request_id: JobId, config: str | None = None,
                               wait: bool = False, since: str | None = None,
                               timeout: Annotated[float, Field(gt=0, le=50)] | None = None,
-                              attempt: str | None = None, fields: list[str] | None = None) -> CallToolResult:
+                              attempt: str | None = None, fields: list[str] | None = None,
+                              task_type: Literal["deploy", "replay"] | None = None,
+                              run: Annotated[int, Field(ge=1)] | None = None) -> CallToolResult:
         """Query job summary, one attempt (optional fields), or wait for changes.
         attempt and wait are exclusive; fields requires attempt; since/timeout require wait.
-        Fields are nonempty dotted field names. Terminal replay may download evidence.
+        task_type selects a request group; run defaults to latest and requires task_type.
+        Group queries return compact status without downloading evidence.
+        Fields are nonempty dotted field names. Ungrouped terminal replay may download evidence.
         """
         if ((since is not None or timeout is not None) and not wait) or (attempt is not None and wait) or (fields is not None and attempt is None):
             return tool_result(envelope("status", "INVALID_ARGUMENT", "attempt conflicts with wait; fields requires attempt; since/timeout require wait"))
@@ -272,7 +276,11 @@ def create_server(default_config=None):
             return tool_result(envelope("status", "INVALID_ARGUMENT", "attempt cannot be empty"))
         if fields is not None and (not fields or not all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", f) for f in fields)):
             return tool_result(envelope("status", "INVALID_ARGUMENT", "fields must be nonempty dotted field names"))
+        if run is not None and task_type is None:
+            return tool_result(envelope("status", "INVALID_ARGUMENT", "run requires task_type"))
         args = ["--request-id", request_id]
+        if task_type is not None: args += ["--type", task_type]
+        if run is not None: args += ["--run", str(run)]
         if wait: args += ["--wait", "--timeout", str(timeout if timeout is not None else 30)]
         if since is not None: args += ["--since", since]
         if attempt is not None: args += ["--attempt", attempt]

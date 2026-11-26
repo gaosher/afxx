@@ -74,7 +74,7 @@ afxx env init --config /path/config.yaml
 | `detail` | 查看生命周期、租约和历史轮次 | 只读 |
 | `tasks` | 查询一轮验证 / 回归任务 | 只读 |
 | `regression-preview` | 查看平台回归候选集 | 只读 |
-| `verify` | 提交已部署 AF 的修复身份 | 连接 NPU 后提交平台请求 |
+| `verify` | 提交已部署 AF 的修复身份 | 连接 NPU 采集包身份，本机提交平台请求 |
 | `status` | 查询验证和关联回归结果 | 查询 |
 | `wait` | 等待验证和关联回归结束 | 阻塞查询；等待期间自动续租 |
 | `submit-summary` | 提交人工检视后的修复总结 | 平台写操作 |
@@ -255,7 +255,7 @@ afxx env init --config /path/config.yaml
 
 - 所有 `issue *`、`case execution` 命令都支持 `--config`。
 - claim/verify 使用 `--request-id`；release/submit-summary 使用可选的 `--request-key`，默认自动生成，旧参数不再接受。
-- `issue verify` 连接 NPU 后提交平台请求；其余命令由本地处理，按需访问平台。`issue preview --full` 读取本地领取回执。
+- `issue verify` 连接 NPU 采集包身份，本机提交平台请求；其余命令由本地处理，按需访问平台。`issue preview --full` 读取本地领取回执。
 - preview、renew、wait、submit-summary 需要已有本地领取记录；verify 需要显式指定已领取问题，或使用已关联问题的 deploy job。detail、tasks、regression-preview、status 和 case execution 不要求先领取。
 
 ### 领取与续租
@@ -528,3 +528,20 @@ afxx mcp upgrade --agent codex
 使用当前 Python 环境中安装的 AFXX，不从 PyPI 更新包。skill 同步包内资源并备份被替换的目录；MCP 更新 `$CODEX_HOME/config.toml`（默认 `~/.codex/config.toml`），保留其他服务、环境变量及原有 `--config` 参数，变更前备份配置。返回值包含备份路径。
 
 MCP 命令不会终止现有服务进程；更新后需重连 AFXX MCP 或重新开启客户端会话。HTTP 类型的同名服务不会自动覆盖。
+
+日志跟随连接中断时，错误信息和 `data.follow_command` 返回可直接执行的 `npussh ... tail -F ...` 命令，继续查看同一任务，不重新提交。默认显示最近 100 行并持续跟随；环境任务同时跟随 `job.log` 和 `uv.log`（后者尚未创建时会等待重试）。任务结束后按 Ctrl+C 退出查看，再用 status 或 deploy show 确认终态。
+
+`deploy show` 默认返回精简状态、日志路径、包路径/哈希、客户端协调状态及环境告警摘要，不展开依赖明细和完整环境快照。需要完整记录时使用 `afxx deploy show --request-id <ID> --run <N> --full`；MCP 的 `afxx_run(command="deploy show", arguments=[...])` 使用相同参数与返回规则。原始任务记录不裁剪。
+
+`evidence list` 仅返回文件元数据和关联信息，不返回内容摘录；每页最多 32 个文件，使用返回的 `next_offset` 作为下一次的 `--offset`，并固定 `--run`。需要日志、IR 或 kernel 内容时使用 `evidence read --path <返回路径>`。
+
+修复组进度可使用统一 status 查询（不下载 evidence）：
+
+```bash
+afxx status --request-id F001 --type deploy --run 1
+afxx status --request-id F001 --type replay --run 2 --wait --timeout 30
+```
+
+`--type` 区分独立计数的 deploy/replay；`--run` 省略时固定查询开始时的最新轮次，返回实际 run，后续轮询建议显式携带。支持原有 `--since`、`--attempt`、`--fields`。不传 `--type` 保留原独立任务查询方式，env 任务仍只需其 ENV ID。MCP 对应 `afxx_job_status(request_id=..., task_type="replay", run=2)`。
+
+verify 的幂等回执保存在本机 state_dir/verification/<request_id>/。远端通过 AFX status 采集包身份，安装锁保持到提交结束；不上传平台提交模块或租约。网络异常后重试相同 request_id，复用已冻结的 request_key。

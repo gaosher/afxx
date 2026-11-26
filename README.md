@@ -58,11 +58,23 @@ afxx env init
 
 ### 3. 使用修复 Skill
 
+目前 Skill 安装/升级和 MCP 自动配置仅支持 Codex（`--agent codex`）。其他 agent 可通过支持 stdio 的 MCP 客户端手动接入 `afxx mcp`，或直接使用 AFXX CLI；Skill 的安装目录、加载方式和指令兼容性尚未适配验证，不支持通过 `--agent` 一键安装到其他 agent。
+
 先在本机安装 Skill：
 
 ```bash
 afxx skills install --agent codex
 ```
+
+如需通过 MCP 调用结构化工具，在本机安装 MCP 依赖并写入 Codex 配置：
+
+```bash
+# 使用安装 afxx 的同一个 Python 环境
+python3 -m pip install 'afxx[mcp]'
+afxx mcp upgrade --agent codex
+```
+
+`mcp upgrade` 支持首次配置，也会更新已有配置以使用当前 AFXX 的 Python 环境；完成后重连 AFXX MCP 或重启 Codex，无需在 NPU 上安装 MCP 服务。
 
 然后在 Codex 对话中输入 Prompt：
 
@@ -359,7 +371,7 @@ afxx issue verify --issue-id F001 --request-id repair-F001
 ```text
 本机 AFXX
   → NPU：采集当前安装的 AF 包身份
-  → 由 NPU 向平台提交 verify
+  → 本机向平台提交 verify（远端安装锁保持至提交结束）
   → 平台创建验证任务
   → 符合条件的 client 领取并执行，上报结果
 ```
@@ -618,3 +630,9 @@ afxx mcp upgrade --agent codex
 ```
 
 旧内容自动备份，路径显示在返回结果中。命令不会升级 AFXX 包或重启现有 MCP；完成后重连 MCP，使新版本生效。
+
+`deploy show` 默认返回精简状态、日志路径、包路径/哈希、客户端协调状态及环境告警摘要，不展开依赖明细和完整环境快照。需要完整记录时使用 `afxx deploy show --request-id <ID> --run <N> --full`；MCP 的 `afxx_run(command="deploy show", arguments=[...])` 使用相同参数与返回规则。原始任务记录不裁剪。
+
+`evidence list` 仅返回文件元数据和关联信息，不返回内容摘录；每页最多 32 个文件，使用返回的 `next_offset` 作为下一次的 `--offset`，并固定 `--run`。需要日志、IR 或 kernel 内容时使用 `evidence read --path <返回路径>`。
+
+部署与复跑的日常进度查询可用 `afxx status --request-id <ID> --type deploy|replay --run <N>`；省略 run 查询该类型最新轮次，可加 `--wait --timeout 30` 等待变化。此分组查询只返回状态摘要，不下载证据；详细结果仍使用对应的 show 命令。

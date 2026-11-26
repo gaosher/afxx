@@ -535,7 +535,7 @@ try:
   value = read_evidence(job, options['path'], options['offset'], options['limit'], options['sha256'])
  else:
   report = json.loads((job/'result.json').read_text())
-  value = collect_evidence(job, Path(report['results_dir']), report.get('dump_enabled', report.get('resources',{}).get('dump', False)), options['offset'])
+  value = collect_evidence(job, Path(report['results_dir']), report.get('dump_enabled', report.get('resources',{}).get('dump', False)), options['offset'], excerpts=False, page_size=32)
   associate_evidence(value, report.get('attempts', []))
  print(json.dumps({'state':'success','evidence':value}))
 except (OSError, ValueError, KeyError) as error:
@@ -564,7 +564,7 @@ def status_cursor(data):
                                    if key not in {"cursor", "snapshot_cleanup", "local_snapshot_cleanup"}})
 
 
-def wait_status(c, job_id, *, since=None, timeout=30):
+def wait_status(c, job_id, *, since=None, timeout=30, download=True):
     """Bounded long poll: one changed/terminal result, or a tiny timeout receipt."""
     import time
     workflow_common.require_code(0 < timeout <= 50, "INVALID_ARGUMENT", "wait timeout must be in (0, 50] seconds")
@@ -580,7 +580,7 @@ def wait_status(c, job_id, *, since=None, timeout=30):
             from afxx import credentials
             data = credentials.complete_init(c, job_id, data)
             data = complete_config_save(c, job_id, data)
-            result = localize_replay(c, job_id, data)
+            result = localize_replay(c, job_id, data) if download else data
             if "evidence_path" in result:
                 return result
             return dict(result, cursor=cursor, event="terminal" if data["state"] != "unknown" else "attention")
@@ -629,14 +629,23 @@ def adapter_call(c, modules, bootstrap, arguments, timeout, unavailable):
     import base64
     import io
     import zipfile
+    import tempfile
     root = Path(__file__).resolve().parent
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in modules:
             archive.writestr("afxx/" + name, (root / name).read_bytes())
-    argv = [workflow_runtime.python(c), "-c", bootstrap, base64.b64encode(buffer.getvalue()).decode(), *arguments]
+    # Code and request data can exceed exec/SSH argument limits. Stream them
+    # over stdin; reconstruct adapter argv inside Python, never in a shell.
+    loader = "import json,sys; p=json.load(sys.stdin); sys.argv=['-c',*p['arguments']]; exec(p['code'])"
+    argv = [workflow_runtime.python(c), "-c", loader]
     try:
-        result = json.loads(workflow_common.capture(["npussh", c["connection"]["environment"], shlex.join(argv)], timeout=timeout))
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as payload:
+            json.dump({"code": bootstrap, "arguments": [base64.b64encode(buffer.getvalue()).decode(), *arguments]}, payload)
+            payload.seek(0)
+            result = json.loads(workflow_common.capture(
+                ["npussh", c["connection"]["environment"], shlex.join(argv)],
+                stdin=payload, timeout=timeout))
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         raise workflow_common.WorkflowError("REMOTE_UNAVAILABLE", unavailable) from error
     if result.get("error"):
@@ -700,23 +709,9 @@ def complete_config_save(c, job_id, data):
 
 
 def verify_current(c, request_id, lease):
-    from afxx.bundle import FILES
-    modules = tuple(name.removeprefix("afxx/") for name in FILES)
-    bootstrap = """import base64,json,sys,tempfile,zipfile,io,contextlib
-with tempfile.TemporaryDirectory(prefix='afxx-verify-') as directory:
-    zipfile.ZipFile(io.BytesIO(base64.b64decode(sys.argv[1]))).extractall(directory)
-    sys.path.insert(0,directory)
-    from afxx.afx.platform import verify_current
-    from afxx.common import WorkflowError
-    try:
-        with contextlib.redirect_stdout(sys.stderr):
-            data=verify_current(json.loads(sys.argv[2]),sys.argv[3],json.loads(sys.argv[4]))
-        result={'data':data}
-    except WorkflowError as error:
-        result={'error':{'code':error.code,'message':str(error)}}
-    except Exception as error:
-        result={'error':{'code':'PLATFORM_VERIFY_FAILED','message':str(error)}}
-    print(json.dumps(result))
-"""
-    return adapter_call(c, modules, bootstrap, [json.dumps(c), request_id, json.dumps(lease)],
-                        2100, "无法连接远端提交 verify")
+    from afxx.afx import platform
+    from afxx.verify_transport import installed_package
+    workflow_common.validate_job_id(request_id)
+    client_control(c, "start")
+    with installed_package(c) as package:
+        return platform.submit_current_local(c, request_id, lease, package)

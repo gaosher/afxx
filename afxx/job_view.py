@@ -79,7 +79,7 @@ def status_view(data, full=False, attempt_id=None, fields=None):
     if "client_coordination" in report:
         coordination = report["client_coordination"]
         out["client_coordination"] = {k: coordination[k] for k in
-            ("state", "restore_mode", "error", "reason") if k in coordination}
+            ("state", "restore_mode", "execution_environment_state", "error", "reason") if k in coordination}
         out["installation_state"] = report.get("state", "not_verified")
     checks = data.get("environment.json", {}).get("dependencies")
     if checks is not None:

@@ -18,7 +18,7 @@ MCP 优先使用结构化工具。长操作先选定 request_id，再提交并�
 | issue claim / issue preview / issue renew | 本地直接调用平台 HTTPS | 保存领取响应、预览或续租到期时间 |
 | issue detail / issue tasks / issue regression-preview / case execution | 本地只读查询平台，不要求租约或 NPU 连接 | ok=true 后读取 data；空 tasks/cases 不代表通过 |
 | issue submit-summary | 本地显式发布已检视总结；不创建远端 job | 返回 status=resolved 和 knowledge_id |
-| issue verify | 通过 npussh 在远端提交平台请求 | 返回 state=submitted，保存 round_no |
+| issue verify | 远端采集包身份，本机提交平台请求 | 返回 state=submitted，保存 round_no |
 | issue status | 本地查询平台指定验证轮次 | 检查 terminal 和 outcome |
 | issue wait | 本地持续查询平台并续租 | terminal=true 且 outcome=passed |
 
@@ -103,7 +103,7 @@ afxx issue verify-check --issue-id F152 --round-no <round_no> --wait --timeout 3
 
 claim 必须用 --issue-id 指定问题。领取回执存于 issues/<issue_id>.json，包含复现信息和租约。重复请求复用 request-id；无任务时返回 null。preview 默认输出失败摘要及去重 seed，--full 返回完整复现信息。
 
-verify 与 deploy 分离，在远端采集当前 AF 身份后提交 `/api/issues/{id}/verify`，不查询历史部署。workflow-state/verification/<request_id>/ 保存按租约和实际包身份区分的固定请求与回执；同包重试复用回执，包变化生成新验证。
+verify 与 deploy 分离，在远端采集当前 AF 身份后提交 `/api/issues/{id}/verify`，不查询历史部署。本机 local.state_dir/verification/<request_id>/ 保存按租约和实际包身份区分的固定请求与回执；同包重试复用回执，包变化生成新验证。
 
 status/wait 以 verify 返回的 round_no 定位验证，跟踪同一候选包的下一轮 regress。只有相关轮次全部通过才返回 outcome=passed。wait 遇到失败和 invalid 均返回 PLATFORM_VERIFICATION_FAILED；等待超时可继续查同一轮次。查询保留历史轮次身份，不使用其他修复的结果。
 
@@ -128,7 +128,7 @@ AFX >= 0.4.1 managed client 在 NPU 常驻。verify 前由官方 init/start/stat
 | PLATFORM_CREDENTIAL_MISSING | 检查相应端的凭据文件 |
 | PLATFORM_UNAVAILABLE / PLATFORM_RESPONSE_INVALID | 检查平台连接和响应，重试原请求 |
 | PLATFORM_CONFLICT / PLATFORM_UNAUTHORIZED | 核对 issue 租约、请求键、用户及客户端归属 |
-| PLATFORM_VERIFY_FAILED | 检查远端提交错误、包身份和已保存请求 |
+| PLATFORM_VERIFY_FAILED | 检查 AFX 包身份采集、平台响应和已保存请求 |
 | PLATFORM_VERIFICATION_FAILED | 查看 data.verification 和 data.regression |
 | PLATFORM_WAIT_TIMEOUT | 继续查询同一 issue 和 round_no |
 | INTERNAL_ERROR | 保留现场并排查实现错误 |

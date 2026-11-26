@@ -131,7 +131,7 @@ def shared_dump_roots(job):
     return roots
 
 
-def collect_evidence(job, results, dump, offset=0):
+def collect_evidence(job, results, dump, offset=0, *, excerpts=True, page_size=128):
     """Return bounded, local diagnostic evidence without following symlinks."""
     roots = {
         "af_dump": results / "dump",
@@ -151,13 +151,13 @@ def collect_evidence(job, results, dump, offset=0):
         seen += 1
         if seen <= offset:
             return
-        if len(evidence["files"]) >= 128:
+        if len(evidence["files"]) >= page_size:
             evidence["truncated"] = True
             return
         try:
             size = path.stat().st_size
             row = {"path": str(path.absolute()), "category": category, "size_bytes": size}
-            if path.suffix in text_suffixes:
+            if excerpts and path.suffix in text_suffixes:
                 limit = min(2048, remaining)
                 with path.open("rb") as stream:
                     excerpt_offset = max(0, size - limit) if path.suffix == ".log" else 0

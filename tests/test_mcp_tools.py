@@ -497,3 +497,17 @@ def test_mcp_replay_has_no_upload_switch():
     tools = asyncio.run(m.create_server().list_tools())
     replay = next(t for t in tools if t.name == 'afxx_replay')
     assert 'upload' not in replay.inputSchema['properties']
+
+
+def test_group_status_parameters(monkeypatch):
+    calls=[]
+    async def invoke(args):
+        calls.append(args)
+        return 0, '{"ok":true,"data":{}}'
+    monkeypatch.setattr(m,'invoke',invoke)
+    server=m.create_server('/config')
+    result=call(server,'afxx_job_status',{'request_id':'repair','task_type':'replay','run':2})
+    assert not result.isError
+    assert '--type' in calls[0] and 'replay' in calls[0]
+    assert calls[0][calls[0].index('--run')+1]=='2'
+    assert call(server,'afxx_job_status',{'request_id':'repair','run':2}).isError

@@ -30,7 +30,7 @@ def test_uncertain_submission_keeps_round_and_can_query(cfg, monkeypatch):
         deploy_runs.submit(cfg, {"command": "deploy"}, "repair")
     assert error.value.data == {"request_id": "repair", "run": 1, "state": "submission_unknown"}
     monkeypatch.setattr(jobs, "query_job", lambda *a: {"state": "success", "result.json": {"runtime": {"hash": "A"}}})
-    shown = deploy_runs.show(cfg, "repair", 1)
+    shown = deploy_runs.show(cfg, "repair", 1, full=True)
     assert shown["result"]["runtime"]["hash"] == "A"
     assert shown["state"] == "success"
     assert "execution" not in shown
@@ -137,3 +137,66 @@ def test_remote_path_collision_is_rejected_before_upload(cfg, monkeypatch, tmp_p
 def test_grouped_path_rejects_invalid_components(group, run):
     with pytest.raises(common.WorkflowError):
         common.grouped_path({"command": "deploy", "request_id": group, "run": run}, "execution")
+
+
+def test_show_compact_preserves_diagnostics_and_full_details(cfg, monkeypatch):
+    import json
+    entry = {'execution': 'internal', 'run': 1, 'dry_run': False}
+    monkeypatch.setattr(run_groups, 'select', lambda *a: entry)
+    raw = {'state': 'running', 'phase': 'build', 'log': '/remote/job.log',
+           'result.json': {'package': '/pkg.run', 'package_sha256': 'abc',
+                           'client_coordination': {'state': 'restored', 'before': {'huge': 'x'*10000}}},
+           'environment.json': {'python': {'packages': {'large': 'x'*100000}},
+                                'dependencies': {'passed': False, 'checks': [{'name': 'torch', 'passed': False, 'stdout': 'x'*10000}]},
+                                'errors': [{'component': 'af', 'error': 'failure'*1000}]}}
+    monkeypatch.setattr(jobs, 'query_job', lambda *a: raw)
+    brief = deploy_runs.show(cfg, 'repair', 1)
+    assert brief['phase'] == 'build' and brief['state'] == 'running'
+    assert 'environment' not in brief and 'result' not in brief
+    assert brief['package'] == '/pkg.run'
+    assert brief['dependencies']['failed_checks'] == ['torch']
+    assert brief['warnings'][0]['component'] == 'af'
+    assert len(json.dumps(brief)) < 2000
+    full = deploy_runs.show(cfg, 'repair', 1, full=True)
+    assert full['environment'] == raw['environment.json']
+    assert full['result'] == raw['result.json']
+    assert 'python' in raw['environment.json']
+
+
+def test_show_full_argument(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['afxx','deploy','show','--request-id','repair','--full'])
+    assert cli.parse_arguments().full is True
+
+
+@pytest.mark.parametrize('kind', ['deploy', 'replay'])
+@pytest.mark.parametrize('wait', [False, True])
+def test_group_status_resolves_once_without_evidence(cfg, monkeypatch, kind, wait):
+    selections=[]
+    def select(c, request_id, run, selected_kind):
+        selections.append((request_id,run,selected_kind))
+        return {'execution':'internal','run':3,'dry_run':False}
+    monkeypatch.setattr(run_groups,'select',select)
+    def query(c, execution, **kwargs):
+        assert execution == 'internal'
+        if wait:
+            assert kwargs['download'] is False
+        return {'job_id': execution, 'state':'success', 'phase':'done'}
+    monkeypatch.setattr(jobs,'query_status',query)
+    monkeypatch.setattr(jobs,'wait_status',query)
+    monkeypatch.setattr(jobs,'localize_replay',lambda *a:pytest.fail('must not download'))
+    result=run_groups.status(cfg,'repair',kind,wait=wait)
+    assert selections == [('repair',None,kind)]
+    assert result['request_id']=='repair' and result['run']==3
+    assert result['task_type']==kind and result['state']=='success'
+    assert 'job_id' not in result
+
+
+def test_cli_group_status(cfg, monkeypatch):
+    monkeypatch.setattr(cli.workflow_config,'config',lambda *a:cfg)
+    monkeypatch.setattr(jobs,'local_preflight',lambda *a:None)
+    monkeypatch.setattr(run_groups,'status',lambda c,r,k,n,**kw: {'request_id':r,'task_type':k,'run':n})
+    monkeypatch.setattr(sys,'argv',['afxx','status','--request-id','repair','--type','replay','--run','2'])
+    assert cli.main()=={'request_id':'repair','task_type':'replay','run':2}
+    monkeypatch.setattr(sys,'argv',['afxx','status','--request-id','repair','--run','2'])
+    with pytest.raises(common.WorkflowError,match='--run requires --type'):
+        cli.main()

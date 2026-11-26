@@ -1,4 +1,5 @@
 """Deploy follows remote logs without changing the remote task lifecycle."""
+import shlex
 import subprocess
 import sys
 
@@ -63,6 +64,11 @@ def test_follow_interruption_does_not_cancel_deploy(submitted, monkeypatch, exce
     with pytest.raises(common.WorkflowError) as caught:
         cli.main()
     assert caught.value.code == code
+    follow = caught.value.data['follow_command']
+    argv = shlex.split(follow)
+    assert argv[:2] == ['npussh', 'test-npu']
+    assert shlex.split(argv[2]) == ['tail', '-n', '100', '-F', '--', '/state/deploy-test/job.log']
+    assert follow in str(caught.value)
     assert len(calls) == 1
 
 

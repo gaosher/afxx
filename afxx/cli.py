@@ -18,7 +18,7 @@ from afxx import common as workflow_common
 from afxx import config as workflow_config
 from afxx import jobs as workflow_jobs
 from afxx import credentials
-from afxx import replay_runs, deploy_runs
+from afxx import replay_runs, deploy_runs, run_groups
 from afxx.job_view import status_view
 from afxx.environment import runtime as workflow_runtime
 
@@ -202,6 +202,7 @@ def parse_arguments():
                 query.add_argument("--request-id", required=True)
                 if action == "show":
                     query.add_argument("--run", type=int)
+                    query.add_argument("--full", action="store_true", help="包含完整部署报告和环境快照")
         if name == "update":
             cmd.add_argument("--save-config", action="store_true", help="成功后将实际版本回写本次配置，保留其他字段及注释")
             cmd.add_argument("--torch", help="目标 torch 版本；变更版本时必须同时指定 --torch-npu")
@@ -266,6 +267,8 @@ def parse_arguments():
             cmd.add_argument("--sha256", help="hash from previous read; reject changed file")
         if name == "status":
             cmd.add_argument("--request-id", required=True)
+            cmd.add_argument("--type", choices=("deploy", "replay"), help="按修复分组查询部署或复跑")
+            cmd.add_argument("--run", type=int, help="分组轮次；省略为最新轮次")
             detail = cmd.add_mutually_exclusive_group()
             detail.add_argument("--attempt", help="read one AFX attempt (compact fields by default)")
             detail.add_argument("--wait", action="store_true", help="return only changes or terminal state")
@@ -384,7 +387,7 @@ def main():
         return workflow_jobs.environment_check(c)
     if args.command.startswith("deploy-"):
         workflow_jobs.local_preflight("status")
-        return deploy_runs.list_runs(c, args.request_id) if args.command == "deploy-list" else deploy_runs.show(c, args.request_id, args.run)
+        return deploy_runs.list_runs(c, args.request_id) if args.command == "deploy-list" else deploy_runs.show(c, args.request_id, args.run, full=args.full)
     if args.command.startswith("replay-"):
         workflow_jobs.local_preflight("status")
         if args.command == "replay-list":
@@ -489,6 +492,12 @@ def main():
         fields = args.fields.split(",") if args.fields is not None else None
         workflow_common.require_code(fields is None or all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", name) for name in fields),
                                      "INVALID_ARGUMENT", "invalid attempt fields")
+        workflow_common.require_code(args.run is None or args.type is not None,
+                                     "INVALID_ARGUMENT", "--run requires --type")
+        if args.type is not None:
+            return run_groups.status(c, args.request_id, args.type, args.run, wait=args.wait,
+                                     since=args.since, timeout=args.timeout if args.timeout is not None else 30,
+                                     attempt_id=args.attempt, fields=fields)
         if args.wait:
             return workflow_jobs.wait_status(c, args.job, since=args.since,
                                              timeout=args.timeout if args.timeout is not None else 30)
@@ -559,6 +568,13 @@ def main():
             "follow",
             args.command,
         ]
+        logs = [str(Path(data["remote"]) / "job.log")]
+        if args.command in ("init", "update"):
+            logs.append(str(Path(data["remote"]) / "uv.log"))
+        follow_command = shlex.join([
+            "npussh", c["connection"]["environment"],
+            shlex.join(["tail", "-n", "100", "-F", "--", *logs]),
+        ])
         try:
             workflow_common.run(
                 ["npussh", c["connection"]["environment"], shlex.join(command)],
@@ -567,16 +583,19 @@ def main():
             )
             status = workflow_jobs.query_job(c, data["job"])
         except KeyboardInterrupt:
+            data["follow_command"] = follow_command
             raise workflow_common.WorkflowError(
-                "FOLLOW_INTERRUPTED", "已停止查看；可用 deploy show 查询本轮。" if args.command == "deploy" else "已停止查看；可用 status 查询此任务。", data
+                "FOLLOW_INTERRUPTED", "已停止查看，远端任务未取消。继续跟随日志：\n" + follow_command + "\n此命令不会自动退出，按 Ctrl+C 停止查看。", data
             ) from None
         except (
             OSError,
             subprocess.SubprocessError,
             workflow_common.WorkflowError,
         ) as error:
+            data["follow_command"] = follow_command
+            query_hint = "deploy show" if args.command == "deploy" else "status"
             raise workflow_common.WorkflowError(
-                "REMOTE_UNAVAILABLE", "日志连接中断，请用 deploy show 查询本轮。" if args.command == "deploy" else "日志连接中断，请用 status 查询此任务。", data
+                "REMOTE_UNAVAILABLE", "日志连接中断，请用 " + query_hint + " 查询任务。继续跟随日志：\n" + follow_command + "\n此命令不会自动退出，按 Ctrl+C 停止查看。", data
             ) from error
         data.update(state=status["state"], status=status)
         if status["state"] != "success":
