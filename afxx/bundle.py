@@ -22,6 +22,8 @@ FILES = (
     "afxx/deploy_client.py",
     "afxx/jobs.py",
     "afxx/replay_runs.py",
+    "afxx/run_groups.py",
+    "afxx/deploy_runs.py",
     "afxx/job_view.py",
     "afxx/evidence_bundle.py",
     "afxx/bundle.py",

@@ -1,72 +1,21 @@
 """Local replay groups; execution records remain isolated and immutable per run."""
 
-from datetime import datetime, timezone
-from pathlib import Path
-import uuid
-import subprocess
-
-from afxx import common, jobs
-
-
-def _path(c, request_id):
-    common.validate_job_id(request_id)
-    return Path(c["local"]["state_dir"]) / "replay-groups" / (common.digest(request_id) + ".json")
-
-
-def _context(c):
-    return {"environment": c["connection"]["environment"], "state_dir": c["remote"]["state_dir"]}
+from afxx import common, jobs, run_groups
 
 
 def _load(c, request_id):
-    path = _path(c, request_id)
-    common.require_code(path.exists(), "REPLAY_NOT_FOUND", "未找到 replay 分组：" + request_id)
-    value = common.read(path)
-    common.require_code(value["context"] == _context(c), "CONFIG_CONFLICT",
-                        "replay 分组的远端环境或 state_dir 与当前配置不同")
-    return value
+    return run_groups.load(c, request_id, "replay")
 
 
-def _update(c, request_id, run, **fields):
-    path = _path(c, request_id)
-    with common.lock(path.with_suffix(".lock")):
-        group = _load(c, request_id)
-        group["runs"][run - 1].update(fields)
-        common.write(path, group)
+def _select(c, request_id, run):
+    return run_groups.select(c, request_id, run, "replay")
 
 
 def submit(c, request, request_id, dry_run=False):
     from afxx.afx.fuzz_replay import validate_options
     validate_options(c, request)
-    path = _path(c, request_id)
-    with common.lock(path.with_suffix(".lock")):
-        group = _load(c, request_id) if path.exists() else {
-            "request_id": request_id, "context": _context(c), "runs": []}
-        run = len(group["runs"]) + 1
-        execution = uuid.uuid4().hex
-        group["runs"].append({"run": run, "execution": execution,
-                              "created_at": datetime.now(timezone.utc).isoformat(),
-                              "seeds": request["seeds"], "dry_run": dry_run, "state": "submitting"})
-        common.write(path, group)
-    # Persist allocation before any upload; a lost connection remains discoverable.
-    try:
-        data = jobs.submit(c, dict(request, request_id=request_id, run=run), execution, dry_run)
-    except (OSError, ValueError, subprocess.SubprocessError) as error:
-        detail = {"code": getattr(error, "code", "SUBMISSION_FAILED"), "message": str(error)}
-        _update(c, request_id, run, state="submission_unknown", submission_error=detail)
-        raise common.WorkflowError(detail["code"], detail["message"],
-                                   {"request_id": request_id, "run": run, "state": "submission_unknown"}) from error
-    state = data.get("state", "queued")
-    _update(c, request_id, run, state=state)
-    return {"request_id": request_id, "run": run, "state": state,
-            "dry_run": dry_run, "local": data.get("local"), "remote": data.get("remote")}
-
-
-def _select(c, request_id, run):
-    group = _load(c, request_id)
-    number = len(group["runs"]) if run is None else run
-    common.require_code(type(number) is int and 1 <= number <= len(group["runs"]),
-                        "REPLAY_NOT_FOUND", "未找到 replay run：" + str(number))
-    return group["runs"][number - 1]
+    data = run_groups.submit(c, request, request_id, dry_run, kind="replay")
+    return {key: data.get(key) for key in ("request_id", "run", "state", "dry_run", "local", "remote")}
 
 
 def _view(c, entry, full=False, download=True):

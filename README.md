@@ -155,7 +155,7 @@ afxx env update --afx --save-config
 
 本地修改完成后执行：
 ```bash
-afxx deploy [--coordinate-client] [--request-id deploy-001]
+afxx deploy [--coordinate-client] [--request-id repair-F001]
 
 # 可先运行离线检查并生成源码快照
 afxx deploy --dry-run
@@ -171,19 +171,15 @@ afxx deploy --dry-run
 4. 校验 AF run 包并升级安装，验证加载的 pyautofuse、adapter、codegen 与本轮构建产物一致。
   - 安装前仍会检查环境占用，不会强行覆盖正在使用的库。
 
->默认实时跟随远端日志，完成后返回最终结果。`Ctrl+C` 只停止查看，不终止远端部署，可继续用 `status` 查询。后台提交使用 `afxx deploy --detach`；MCP 自动使用后台提交。
+>默认实时跟随远端日志，完成后返回最终结果。`Ctrl+C` 只停止查看，不终止远端部署，可继续用 `deploy show` 查询。后台提交使用 `afxx deploy --detach`；MCP 自动使用后台提交。
 
-`status` 命令查看当前 deploy 任务状态：
+同一修复流程手动指定相同的 `request_id`，每次 deploy 自动新增部署轮次；省略时自动创建新分组。断线后先查询，不要重复提交。
+
 ```bash
-afxx status --request-id deploy-001
+afxx deploy list --request-id repair-F001
+afxx deploy show --request-id repair-F001          # 最新部署
+afxx deploy show --request-id repair-F001 --run 1  # 历史部署
 ```
-查询到 `state=success` 后才能使用这次部署。运行较久时可等待状态变化：
-```bash
-afxx status --request-id deploy-001 --wait --timeout 30
-# 后续带上上次返回的 cursor
-afxx status --request-id deploy-001 --wait --since <cursor> --timeout 30
-```
-相同deploy request_id 用于重试原提交；修改代码后再次部署应使用新的 ID，例如 `deploy-002`。省略 `--request-id` 时每次自动生成新 ID。cursor 表示上次查询到的状态，`--wait --since` 等待相对该状态的变化；
 
 部署需要暂停并恢复目标 AFX 客户端时使用 `--coordinate-client`，详见[部署客户端协调](docs/afxx-commands.md#deploy-客户端协调)。原来停止的客户端保持停止，运行会话重新启动，不保证原队列续跑。
 
@@ -229,42 +225,67 @@ afxx client restart --timeout 300
 
 ### 用例复跑与定位
 
+#### 用例复跑
+replay 在远端当前安装的环境中复跑 seed。有 client 时复用其队列，没有时临时启动执行进程。
+
 ```bash
-afxx replay [--request-id issue-F001-repair] --seed <seed>
+# 单个 seed 复跑
+afxx replay --request-id repair-F001 --seed <seed>
 
 # 批量复跑：文件每行一个 seed
-afxx replay [--request-id issue-F001-repair] --seeds-file /absolute/path/seeds.txt
+afxx replay --request-id repair-F001 --seeds-file /absolute/path/seeds.txt
 ```
+replay 会校验当前环境中的 afx client 唯一性，多个存活 client 时直接报错。进入 client 队列的结果由 client 上传；独立执行的结果由 AFXX 调用 `afx sync once`。`--no-upload` 可关闭上传，新 session 生效。
 
-AFXX 使用 `afx fuzz replay <seed> --save`，不强制指定数据库。有存活 client 时复用其 home 和队列，无 client 时由 AFX 独立执行；无需本机 seed 历史。默认开启 upload，只上传本轮明确关联的 attempt；`--no-upload` 可关闭，但正在自动上传的共享 session 会被明确拒绝，需先停止该 session。
+多轮复跑需要归为同一组时，每次显式传入相同的 --request-id，工具自动新增 run 序号。省略该参数则每次创建新分组。断线后先查询记录，重复执行 replay 会重新提交用例。
 
-AFXX request_id/run 保存队列路径、task ID、attempt ID、结果摘要和日志，不复制共享数据库。结果通过 `afx results list <database> --attempt <id>` 精确读取；task→attempt 尚无公开查询接口，仅在适配层只读查询队列表。队列任务由 client 上传，AFXX 标记 upload.owner=client、state=delegated，不再执行整批补传；delegated 不等于服务端已确认。仅独立执行的 attempt 由 AFXX 通过临时数据库调用 `afx sync once`，结束即清理。
-
-由 AFX 管理任务优先级和设备分配；AFXX 不会自动抢占设备或暂停 client。
-
-同一修复流程复用 `request_id`，每次 replay 自动新增一个 `run`。不需要 `--new-run`，也不引用 deploy ID。断线后先查记录，重复调用 replay 会再次提交。
-
+#### 复跑结果展示
 ```bash
-afxx replay list --request-id repair-F152
-afxx replay show --request-id repair-F152          # 默认最新一次
-afxx replay show --request-id repair-F152 --run 1
-afxx replay compare --request-id repair-F152 --runs 1 2
+# 列出本组所有复跑记录
+# 比如：run-1、run-2、run-3
+afxx replay list --request-id repair-F001
+
+# 查看最新一轮
+afxx replay show --request-id repair-F001
+# 指定 --run 可查看历史轮次
+afxx replay show --request-id repair-F001 --run 2
+
+# 对比两轮结果
+afxx replay compare --request-id repair-F001 --runs 1 2
+```
+`repair-F001` 的远端目录结构示意：
+```text
+repair-F001/
+├── deploy/
+│   ├── run-1/               基线部署
+│   │   └── packages/          本次 AF run 包
+│   └── run-2/               修改代码后的候选部署，文件结构同上
+└── replay/
+    ├── run-1/                 基线部署后复跑
+    │   └── result.json          本轮用例结果、错误诊断和证据索引
+    ├── run-2/                 候选部署后复跑
+    └── run-3/                 同一候选包再次复跑，例如补采 dump
 ```
 
-AFXX 通过 AFX 公共结果查询接口按本轮 attempt ID 读取结果，完整检查 seed、CPU/AF-MLIR 后端和 shape 覆盖。终态查看 `state`、`passed` 和结果；CPU 参考允许 `not_checked`，其他后端要求精度通过。队列等待超时不等于执行失败；AFXX 继续按 task ID 等待至配置的期限，缺失或不完整结果不会视为成功。
+- 同一修复流程中，调用 deploy 和 replay 时需手动传入相同的 `--request-id` 才会被归入同一目录下，例如 `repair-F001`；工具不会自动关联。
+- 该 ID 下，deploy 和 replay 各自递增 `run`，不要求一一对应。
+- replay 和 verify 使用当前安装的包；历史部署用于追溯源码、包和日志。
 
-`replay show` 的 `environment` 来自执行结果；`submission_environment` 是启动端快照。replay.workers 不控制此逐 seed 入口的调度；执行由 AFX 负责。
+当前实际文件保存在远端 `workflow-state/<执行ID>/`，由本地分组索引关联到 `request_id/run`；dump 仍位于 AFX 管理的目录，通过 `evidence list/read` 访问。
 
-`compare` 按完整 seed、backend、shape_index 对齐，区分变化、新增、缺失和无法对齐，不会自动把“少了失败记录”判为修复成功。
+远端文件位置见[远端目录结构](#远端目录结构)，完整查询参数见[命令参考](docs/afxx-commands.md#7-部署与复跑)。
 
 #### 定位 dump 与结果
 
-`--dump` 或 `replay.dump: true` 传递给 AFX 逐任务开启采集。使用 `evidence list/read --request-id ID --run N` 按需读取远端产物（省略 run 为最新一次，分页固定返回的 run）；不自动复制整个共享 dump 目录。新增或发生文件变化的 worker 目录仅标为候选证据，只有诊断中的明确路径才能关联到 attempt；文件种类及保留期限由 AFX 管理，缺少 IR/kernel 时仍需报告证据缺口。
+使用 `evidence list/read --request-id ID --run N` 按需读取远端产物（省略 run 为最新一次，分页固定返回的 run）；不自动复制整个共享 dump 目录。新增或发生文件变化的 worker 目录仅标为候选证据，只有诊断中的明确路径才能关联到 attempt；文件种类及保留期限由 AFX 管理，缺少 IR/kernel 时仍需报告证据缺口。
 
 ```bash
-afxx replay --request-id repair-F152 --seed <seed> --dump
-afxx evidence list --request-id repair-F152 --run 1
-afxx evidence read --request-id repair-F152 --run 1 --path <返回的文件路径>
+# 开启 dump 复跑
+afxx replay --request-id repair-F001 --seed <seed> --dump
+# 查看某一轮的 evidence
+afxx evidence list --request-id repair-F001 --run n
+# 
+afxx evidence read --request-id repair-F001 --run 1 --path <返回的文件路径>
 ```
 
 读取与分页参数见[状态与证据](docs/afxx-commands.md#8-状态与证据)。
@@ -289,10 +310,10 @@ afxx evidence read --request-id repair-F152 --run 1 --path <返回的文件路�
 
 ```bash
 afxx issue list
-afxx issue claim --issue-id F152 --request-id claim-F152
-afxx issue preview --issue-id F152
+afxx issue claim --issue-id F001 --request-id claim-F001
+afxx issue preview --issue-id F001
 # 修复期间按租约到期时间提前续租
-afxx issue renew --issue-id F152
+afxx issue renew --issue-id F001
 ```
 
 claim 必须指定 issue_id。preview 默认显示失败摘要和全部去重 seed；需要更多内容时加 `--full`。基础复现、定位和修复过程遵循[修复 skill](skills/afx-issue-repair/SKILL.md)。
@@ -302,16 +323,16 @@ claim 必须指定 issue_id。preview 默认显示失败摘要和全部去重 se
 每轮修改使用新的部署 ID，replay 继续使用同一个分组 ID：
 
 ```bash
-afxx deploy --issue-id F152 --request-id deploy-F152-1
-afxx status --request-id deploy-F152-1
+afxx deploy --issue-id F001 --request-id repair-F001
+afxx deploy show --request-id repair-F001
 # 确认部署成功；有存活 client 用 restart，无存活 client 用 start
 afxx client status
 afxx client restart
-afxx replay --request-id repair-F152 --seed <seed>
-afxx replay show --request-id repair-F152
+afxx replay --request-id repair-F001 --seed <seed>
+afxx replay show --request-id repair-F001
 ```
 
-需要继续修复时，下一轮部署用 `deploy-F152-2`，replay 仍用 `repair-F152`。关联 issue 的部署会在构建期间续租。基线、候选版本与每次复跑结果应分别保留，不能把“任务已结束”当作问题已修复。
+需要继续修复时，deploy 和 replay 都继续使用 `repair-F001`，各自新增一轮。关联 issue 的部署会在构建期间续租。基线、候选版本与每次复跑结果应分别保留，不能把“任务已结束”当作问题已修复。
 
 #### 提交 verify 并检查回归
 
@@ -319,32 +340,32 @@ afxx replay show --request-id repair-F152
 # 确认最终部署成功；有存活 client 用 restart，无存活 client 用 start
 afxx client status
 afxx client restart
-afxx issue verify --issue-id F152 --job-id deploy-F152-2
+afxx issue verify --issue-id F001 --request-id repair-F001
 
 # 使用 verify 返回的 round_no
-afxx issue verify-check --issue-id F152 --round-no <round_no> --wait --timeout 30
+afxx issue verify-check --issue-id F001 --round-no <round_no> --wait --timeout 30
 ```
 
-`issue verify` 当前仍通过 `--job-id` 引用部署，传入对应部署的 request_id 值；普通任务查询已使用 `status --request-id`。提交 verify 只代表平台已受理，还需确认验证及关联回归的终态。查询超时可继续查同一 round_no，不要重新提交验证。
+`issue verify --request-id repair-F001 --issue-id F001` 采集当前包身份后提交，不依赖 deploy 历史。同组、同租约、同包复用已有回执；包变化后提交新的验证。提交 verify 只代表平台已受理，还需确认验证及关联回归的终态。查询超时可继续查同一 round_no，不要重新提交验证。
 
 查看具体失败任务和执行证据：
 
 ```bash
-afxx issue tasks --issue-id F152 --round-no <round_no>
+afxx issue tasks --issue-id F001 --round-no <round_no>
 afxx execution show --exec-uuid <exec_uuid>
 ```
 
 不再处理该 issue 时，可以显式释放租约：
 
 ```bash
-afxx issue release --issue-id F152 --request-id release-F152
+afxx issue release --issue-id F001 --request-id release-F001
 ```
 
 修复总结先生成本地 `summary.yaml` 并检视，之后再显式发布：
 
 ```bash
-afxx issue submit-summary --issue-id F152 \
-  --summary-file /absolute/path/summary.yaml --request-id summary-F152
+afxx issue submit-summary --issue-id F001 \
+  --summary-file /absolute/path/summary.yaml --request-id summary-F001
 ```
 
 发布需要平台状态、租约和权限满足要求；不会由 verify 自动触发。总结格式见[模板](skills/afx-issue-summary/assets/summary.yaml)，其他平台查询见[命令参考](docs/afxx-commands.md)和[API 实现对照](docs/PLATFORM_API_MAPPING.md)。
@@ -392,7 +413,7 @@ afxx skills install --agent codex
 
 安装到 `~/.agents/skills/afx-issue-repair` 和 `afx-issue-summary`。相同内容重复安装会跳过；已有内容不同则返回 `SKILL_CONFLICT`，保留旧文件，需先备份并移走旧目录再安装。
 
-调用示例：`使用 $afx-issue-repair 修复 AFX issue F152，验证和回归通过后 commit，等待检视。` 定位时添加 `--dump`，按[定位 dump 与结果](#定位-dump-与结果)读取实际产物。
+调用示例：`使用 $afx-issue-repair 修复 AFX issue F001，验证和回归通过后 commit，等待检视。` 定位时添加 `--dump`，按[定位 dump 与结果](#定位-dump-与结果)读取实际产物。
 
 ### MCP 配置与调用
 
@@ -418,6 +439,8 @@ afxx mcp
 
 需要其他配置时，args 增加 `--config /absolute/path/config.yaml`。客户端运行环境必须能找到 npussh 等本地工具。
 
+MCP 的 deploy/verify 返回独立的本机调用回执，使用返回的 ID 查询 `afxx_operation_status`；其中 CLI 结果归属于传入的修复组。重复调用 deploy 会新建轮次，断线先查已有回执或 `deploy list`。
+
 常用结构化工具包括 `afxx_deploy`、`afxx_replay`、`afxx_job_status`、`afxx_client`、`afxx_issue` 和 `afxx_issue_status`，其他命令可通过 `afxx_run` 调用。
 
 replay 直接返回 request_id/run，用 `replay show` 查询。其他需要本机长操作回执的命令先查 `afxx_operation_status`；调用完成后仍要继续检查远端任务或平台轮次。参数和恢复规则见[MCP 调用说明](docs/afxx-commands.md#11-mcp-调用)。
@@ -427,6 +450,46 @@ replay 直接返回 request_id/run，用 `replay show` 查询。其他需要本�
 Skill 定义修复流程，CLI 和 MCP 提供执行入口并共用业务实现。优先使用结构化 MCP 工具；没有对应工具的命令可通过 `afxx_run` 调用，也可以直接执行 CLI。具体查询恢复规则见[Agent 调用约定](docs/AGENT_USAGE.md)。
 
 ## 任务记录与清理
+
+### 远端目录结构
+
+默认按 `workflow_root` 推导目录；配置覆盖路径时，以实际配置为准。目录按需创建，并非初始化后全部存在。
+
+```text
+<workflow_root>/
+├── python/                    workflow 专用 Python
+├── venv/                      torch、torch_npu、AFX 等 Python 包
+├── Ascend/cann/                CANN 和 deploy 安装的 AF 库
+├── graph-autofusion/           同步的源码
+│   └── build/                 复用的编译目录
+├── auth/                      平台凭据
+├── workflow-env-state/        当前环境清单、依赖锁及包缓存
+├── workflow-state/<执行ID>/   init/update、deploy、replay 等执行记录
+│   ├── config.yaml            本次配置
+│   ├── result.json            执行报告；replay 包含本轮用例结果
+│   ├── job.log                执行日志
+│   └── packages/              deploy 产出的 AF run 包
+└── workflow-results/<执行ID>/ replay 结果与证据归档目录
+```
+
+任务目录仅展示常用文件，实际内容随操作类型变化。`env check` 不创建任务目录。replay 的 `request_id/run` 是查询分组，远端目录使用内部执行 ID，直接通过 `replay show` 查询即可。
+
+AFX client 数据目录由 AFX 自己管理，不随 workflow_root 改变；实际 home 可用 `afxx client status` 查看，常见默认布局为：
+
+```text
+~/.local/share/autofusex/
+├── client.json                client 配置与身份
+├── client.log                 客户端日志
+├── supervisor/                守护进程相关文件
+└── runs/<AFX-run-id>/          AFX 执行会话
+    ├── tasks.sqlite           任务队列
+    ├── results.sqlite         执行结果
+    └── debug/                 诊断产物（开启 dump 后按需生成）
+```
+
+dump 也可能位于 client home 的 `debug/` 下；以 `evidence list` 返回的路径为准，不需要手动查数据库或猜目录。
+
+### 记录与清理规则
 
 | 位置 | 内容 |
 |---|---|

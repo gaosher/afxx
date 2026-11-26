@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import signal
+import uuid
 import sys
 from typing import Annotated, Literal
 from pathlib import Path
@@ -23,6 +24,8 @@ Command = Literal[
     "env update",
     "env check",
     "deploy",
+    "deploy list",
+    "deploy show",
     "replay",
     "replay list",
     "replay show",
@@ -159,9 +162,11 @@ def create_server(default_config=None):
             return tool_result(envelope(command, "CONFIG_CONFLICT", str(error)))
         if command in LONG_COMMANDS and not environment_command and (request_id is None or not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id)):
             return tool_result(envelope(command, "INVALID_ARGUMENT", "long MCP commands require request_id for recovery"))
-        forwarded = {"deploy", "fuzz run",
+        grouped_verify = command == "issue verify" and not any(
+            arg in ("--job-id", "--job") or arg.startswith(("--job-id=", "--job=")) for arg in args)
+        forwarded = {"deploy", "deploy list", "deploy show", "fuzz run",
                      "replay", "replay list", "replay show", "replay compare", "status"}
-        if command in forwarded and request_id is not None:
+        if (command in forwarded or grouped_verify) and request_id is not None:
             keys = [args[i + 1] if i + 1 < len(args) else "" for i, arg in enumerate(args) if arg == "--request-id"]
             keys += [arg.split("=", 1)[1] for arg in args if arg.startswith("--request-id=")]
             if keys and any(key != request_id for key in keys):
@@ -170,7 +175,10 @@ def create_server(default_config=None):
                 args += ["--request-id", request_id]
         if command in LONG_COMMANDS:
             try:
-                payload = mcp_operations.submit(command, [*command.split(), *args], path, request_id)
+                operation_id = uuid.uuid4().hex if command == "deploy" or grouped_verify else request_id
+                payload = mcp_operations.submit(command, [*command.split(), *args], path, operation_id)
+                if command == "deploy" or grouped_verify:
+                    payload["data"]["group_request_id"] = request_id
             except (OSError, ValueError) as error:
                 return tool_result(envelope(command,"OPERATION_STORAGE_ERROR",str(error)))
             return tool_result(payload)
@@ -212,7 +220,10 @@ def create_server(default_config=None):
     @server.tool()
     async def afxx_deploy(request_id: RequestId, issue_id: str | None = None,
                           config: str | None = None, dry_run: bool = False, coordinate_client: bool = False) -> CallToolResult:
-        """Sync, build and install through CLI; return a queryable invocation receipt."""
+        """Create a new deploy run in request_id on every call. Return a local invocation receipt.
+        Query operation_status with its ID, then deploy list/show with the group request_id.
+        Deployment records do not select the package used by replay or verify.
+        """
         args = (["--issue-id",issue_id] if issue_id else []) + (["--dry-run"] if dry_run else [])
         if coordinate_client:
             args += ["--coordinate-client"]
@@ -287,17 +298,17 @@ def create_server(default_config=None):
         preview is read-only, accepts only full (optional), and returns directly.
         verify-check requires round_no; optional wait/timeout (<=50s) polls read-only,
         returns state/progress/failures directly, never renews or restarts. timed_out is not failure.
-        verify requires request_id and deploy_job_id, submits candidate verification and
+        verify requires the repair request_id, probes the currently installed package and
         returns an invocation receipt: query afxx_operation_status, then afxx_issue_status.
         Restart the client separately before verification; this tool never restarts it.
-        For verify request_id identifies the local invocation; CLI owns platform idempotency.
+        For verify request_id identifies the repair group. deploy_job_id is a legacy record reference; omit it.
         Parameters irrelevant to the action are rejected, even full=false outside preview.
         """
         command = "issue " + action
         supplied = {key for key, value in {"request_id": request_id, "deploy_job_id": deploy_job_id, "full": full, "round_no": round_no, "wait": wait, "timeout": timeout}.items() if value is not None}
         allowed = {"claim": {"request_id"}, "preview": {"full"},
                    "verify": {"request_id", "deploy_job_id"}, "release": {"request_id"}, "verify-check": {"round_no", "wait", "timeout"}}[action]
-        required = {"round_no"} if action == "verify-check" else set() if action == "preview" else allowed
+        required = {"request_id"} if action == "verify" else {"round_no"} if action == "verify-check" else set() if action == "preview" else allowed
         if supplied - allowed or required - supplied:
             return tool_result(envelope(command, "INVALID_ARGUMENT",
                 f"{action}: missing parameters {sorted(required - supplied)}; irrelevant parameters {sorted(supplied - allowed)}"))
@@ -310,7 +321,7 @@ def create_server(default_config=None):
             if timeout is not None: args += ["--timeout", str(timeout)]
             return await dispatch(command, args, config)
         if action == "verify":
-            return await dispatch(command, args + ["--job-id", deploy_job_id], config, request_id)
+            return await dispatch(command, args + (["--job-id", deploy_job_id] if deploy_job_id else ["--request-id", request_id]), config, request_id)
         if action in ("claim", "release"):
             args += ["--request-id", request_id]
         elif full:

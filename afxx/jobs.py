@@ -692,3 +692,26 @@ def complete_config_save(c, job_id, data):
     if report is None and not request.get("config_save_result"):
         report = query_job(c, job_id).get("result.json", {})
     return complete(c, job_id, data, report or {})
+
+
+def verify_current(c, request_id, lease):
+    from afxx.bundle import FILES
+    modules = tuple(name.removeprefix("afxx/") for name in FILES)
+    bootstrap = """import base64,json,sys,tempfile,zipfile,io,contextlib
+with tempfile.TemporaryDirectory(prefix='afxx-verify-') as directory:
+    zipfile.ZipFile(io.BytesIO(base64.b64decode(sys.argv[1]))).extractall(directory)
+    sys.path.insert(0,directory)
+    from afxx.afx.platform import verify_current
+    from afxx.common import WorkflowError
+    try:
+        with contextlib.redirect_stdout(sys.stderr):
+            data=verify_current(json.loads(sys.argv[2]),sys.argv[3],json.loads(sys.argv[4]))
+        result={'data':data}
+    except WorkflowError as error:
+        result={'error':{'code':error.code,'message':str(error)}}
+    except Exception as error:
+        result={'error':{'code':'PLATFORM_VERIFY_FAILED','message':str(error)}}
+    print(json.dumps(result))
+"""
+    return adapter_call(c, modules, bootstrap, [json.dumps(c), request_id, json.dumps(lease)],
+                        2100, "无法连接远端提交 verify")

@@ -159,13 +159,14 @@ def test_stdio_structured_tool_and_operation_reconnect(tmp_path):
                 assert any(t.name=='afxx_client' for t in tools.tools)
                 # Invalid config fails in the real CLI without ever connecting to NPU.
                 submitted=await session.call_tool('afxx_deploy',{'request_id':'stdio-deploy','config':str(tmp_path/'absent')})
-                assert submitted.structuredContent['data']['request_id']=='stdio-deploy'
+                assert submitted.structuredContent['data']['group_request_id']=='stdio-deploy'
+                operation_id = submitted.structuredContent['data']['request_id']
         # Closing the first MCP session must not lose or cancel the detached invocation.
         async with stdio_client(parameters) as (reader,writer):
             async with ClientSession(reader,writer) as session:
                 await session.initialize()
                 for _ in range(100):
-                    result=await session.call_tool('afxx_operation_status',{'request_id':'stdio-deploy'})
+                    result=await session.call_tool('afxx_operation_status',{'request_id':operation_id})
                     data=result.structuredContent['data']
                     if data['state']=='completed': break
                     await asyncio.sleep(.05)
@@ -310,7 +311,7 @@ def test_issue_requires_explicit_identity(monkeypatch,action):
 
 
 @pytest.mark.parametrize('args', [
-    {'action':'claim'}, {'action':'release'}, {'action':'verify','request_id':'r'},
+    {'action':'claim'}, {'action':'release'},
     {'action':'verify','deploy_job_id':'a'*32},
     {'action':'preview','request_id':'r'}, {'action':'preview','deploy_job_id':'a'*32},
     {'action':'claim','request_id':'r','full':False},

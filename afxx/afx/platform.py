@@ -356,11 +356,6 @@ def verify(c, job, lease=None):
                 ).splitlines()[-1]
             )
         )
-        deployment = workflow_runtime.current_deployment(c, job / "result.json")
-        workflow_common.require(
-            package["sha256"] == deployment["runtime"]["pyautofuse"]["sha256"],
-            "installed AF differs from this deployment",
-        )
         return submit_issue_round(c, path, state, lease, package)
 
 
@@ -714,3 +709,23 @@ def verify_check(c, issue_id, round_no, *, wait=False, timeout=None):
             result["timed_out"] = True
             return result
         time.sleep(min(5, remaining))
+
+
+def verify_current(c, request_id, lease):
+    """Submit the installed package, independent of any deployment history."""
+    workflow_common.validate_job_id(request_id)
+    with (workflow_common.lock(workflow_runtime.venv_lock(c), shared=True),
+          workflow_common.lock(workflow_runtime.registry(c).with_suffix(".lock"), shared=True)):
+        code = "import json; from autofusex.execution.environment import collect; print(json.dumps(collect()))"
+        package = workflow_runtime.af_identity(json.loads(workflow_common.capture(
+            [workflow_runtime.python(c), "-c", code], env=workflow_runtime.environment(c)).splitlines()[-1]))
+        # The same group, lease and installed binary reuse a frozen POST; new binaries
+        # get their own receipt without treating an old deployment as the runtime.
+        key = workflow_common.digest({"lease": lease, "package": package})
+        directory = Path(c["remote"]["state_dir"]) / "verification" / request_id
+        path = directory / (key + ".json")
+        with workflow_common.lock(path.with_suffix(".lock")):
+            state = workflow_common.read(path) if path.exists() else {}
+            if state.get("state") != "submitted":
+                state = submit_issue_round(c, path, state, lease, package)
+            return dict(state, request_id=request_id, package=package)

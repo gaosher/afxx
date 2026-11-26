@@ -18,7 +18,7 @@ from afxx import common as workflow_common
 from afxx import config as workflow_config
 from afxx import jobs as workflow_jobs
 from afxx import credentials
-from afxx import replay_runs
+from afxx import replay_runs, deploy_runs
 from afxx.job_view import status_view
 from afxx.environment import runtime as workflow_runtime
 
@@ -70,12 +70,14 @@ def response(command, data=None, error=None):
         if isinstance(data.get("status"), dict):
             status = status_view(data.pop("status"))
             data.update({key: value for key, value in status.items() if key not in data})
+    if command == "deploy" and isinstance(data, dict):
+        data.pop("job_id", None)
     if command == "status" and isinstance(data, dict) and "job_id" in data:
         data["request_id"] = data.pop("job_id")
     return {
         "schema_version": 1,
         "ok": error is None,
-        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-", "client-", "case-", "platform-", "retest-", "replay-")) else command,
+        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-", "client-", "case-", "platform-", "retest-", "replay-", "deploy-")) else command,
         "data": data,
         "error": None if error is None else {"code": error.code, "message": str(error)},
     }
@@ -196,6 +198,14 @@ def parse_arguments():
             cmd.add_argument("--detach", action="store_true", help="提交后立即返回，不跟随远端日志")
         if name == "deploy":
             cmd.add_argument("--coordinate-client", action="store_true", help="安装前停止目标 AFX client，成功后恢复运行或空闲状态；不恢复原队列")
+            history = cmd.add_subparsers(dest="deploy_action")
+            for action in ("list", "show"):
+                query = history.add_parser(action, allow_abbrev=False)
+                query.set_defaults(command="deploy-" + action)
+                query.add_argument("--config", default=argparse.SUPPRESS)
+                query.add_argument("--request-id", required=True)
+                if action == "show":
+                    query.add_argument("--run", type=int)
         if name == "update":
             cmd.add_argument("--save-config", action="store_true", help="成功后将实际版本回写本次配置，保留其他字段及注释")
             cmd.add_argument("--torch", help="目标 torch 版本；变更版本时必须同时指定 --torch-npu")
@@ -246,7 +256,11 @@ def parse_arguments():
             cmd.add_argument("--exec-uuid", required=True, help="AFX execution UUID, not numeric exec_id")
         if name == "issue-wait":
             cmd.add_argument("--timeout", type=float, default=3600)
-        if name in ("issue-verify", "fuzz-status", "fuzz-stop"):
+        if name == "issue-verify":
+            selector = cmd.add_mutually_exclusive_group(required=True)
+            selector.add_argument("--request-id", help="修复分组；验证当前安装的包")
+            selector.add_argument("--job-id", "--job", dest="job", help="旧执行记录入口")
+        if name in ("fuzz-status", "fuzz-stop"):
             cmd.add_argument("--job-id", "--job", dest="job", required=True)
         if name in ("evidence-list", "evidence-read"):
             cmd.add_argument("--request-id", required=True)
@@ -324,6 +338,8 @@ def parse_arguments():
         workflow_common.require_code(args.seed or args.seeds_file, "INVALID_ARGUMENT", "replay requires --seed or --seeds-file")
     if args.command == "status":
         args.job = args.request_id
+    if args.command.startswith("deploy-"):
+        workflow_common.require_code(not (args.dry_run or args.detach or args.coordinate_client or args.issue_id), "INVALID_ARGUMENT", "deploy 查询不接受执行参数")
     if args.command.startswith("replay-"):
         workflow_common.require_code(not (args.dump or args.seed or args.seeds_file or args.dry_run or args.upload is not None),
                                      "INVALID_ARGUMENT", "replay 查询不接受执行参数")
@@ -373,6 +389,9 @@ def main():
         )
     if args.command == "check":
         return workflow_jobs.environment_check(c)
+    if args.command.startswith("deploy-"):
+        workflow_jobs.local_preflight("status")
+        return deploy_runs.list_runs(c, args.request_id) if args.command == "deploy-list" else deploy_runs.show(c, args.request_id, args.run)
     if args.command.startswith("replay-"):
         workflow_jobs.local_preflight("status")
         if args.command == "replay-list":
@@ -435,6 +454,10 @@ def main():
                 return platform.wait(c, args.issue_id, args.round_no, args.timeout)
             return platform.poll(c, args.issue_id, args.round_no, include_tasks=True) if args.include_tasks else platform.poll(c, args.issue_id, args.round_no)
         workflow_jobs.local_preflight("status")
+        if args.request_id:
+            workflow_common.require_code(bool(args.issue_id), "INVALID_ARGUMENT", "verify requires --issue-id")
+            lease = platform.claimed(c, args.issue_id)
+            return workflow_jobs.verify_current(c, args.request_id, {key: lease[key] for key in ("id", "lease_id")})
         directory = str(Path(c["remote"]["state_dir"]) / args.job)
         lease = platform.claimed(c, args.issue_id) if args.issue_id else None
         context = {key: lease[key] for key in ("id", "lease_id")} if lease else None
@@ -533,6 +556,8 @@ def main():
         credentials.prepare(c)
     if args.command in ("init", "update"):
         data = workflow_jobs.submit_environment(c, request, args.dry_run)
+    elif args.command == "deploy":
+        data = deploy_runs.submit(c, request, args.request_id or uuid.uuid4().hex, args.dry_run)
     else:
         data = workflow_jobs.submit(c, request, args.request_id or uuid.uuid4().hex, args.dry_run)
     if (
@@ -541,8 +566,9 @@ def main():
         and not args.dry_run
         and not getattr(args, "detach", False)
     ):
+        label = f"deploy {data['request_id']} run {data['run']}" if args.command == "deploy" else f"{args.command} job {data['job']}"
         print(
-            f"{args.command} job {data['job']} (Ctrl+C stops viewing)",
+            f"{label} (Ctrl+C stops viewing)",
             file=sys.stderr,
             flush=True,
         )
@@ -563,7 +589,7 @@ def main():
             status = workflow_jobs.query_job(c, data["job"])
         except KeyboardInterrupt:
             raise workflow_common.WorkflowError(
-                "FOLLOW_INTERRUPTED", "已停止查看；可用 status 查询此任务。", data
+                "FOLLOW_INTERRUPTED", "已停止查看；可用 deploy show 查询本轮。" if args.command == "deploy" else "已停止查看；可用 status 查询此任务。", data
             ) from None
         except (
             OSError,
@@ -571,7 +597,7 @@ def main():
             workflow_common.WorkflowError,
         ) as error:
             raise workflow_common.WorkflowError(
-                "REMOTE_UNAVAILABLE", "日志连接中断，请用 status 查询此任务。", data
+                "REMOTE_UNAVAILABLE", "日志连接中断，请用 deploy show 查询本轮。" if args.command == "deploy" else "日志连接中断，请用 status 查询此任务。", data
             ) from error
         data.update(state=status["state"], status=status)
         if status["state"] != "success":
@@ -600,7 +626,7 @@ def cli():
         mcp_main(sys.argv[2:])
         return 0
     command = sys.argv[1] if len(sys.argv) > 1 else None
-    if command in ("issue", "execution", "config", "evidence", "fuzz", "skills", "client", "case", "platform", "retest", "replay") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
+    if command in ("issue", "execution", "config", "evidence", "fuzz", "skills", "client", "case", "platform", "retest", "replay", "deploy") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()

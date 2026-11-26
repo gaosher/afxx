@@ -26,7 +26,7 @@ MCP 优先使用结构化工具。长操作先选定 request_id，再提交并�
 
 fuzz 使用固定的 `<workflow_root>/fuzz/`，一次只允许一个运行。重复启动的任务报 `FUZZ_ALREADY_RUNNING`；`FUZZ_JOB_REPLACED` 表示该目录已由新 job 接管，应使用新 job ID 控制。历史记录仍用普通 status 查询。
 
-命令之间使用 data.job_id、data.issue_id、data.round_no，分别传给 --job-id、--issue-id、--round-no。status 使用 --request-id；replay 使用分组 request_id 和自动 run 序号，不引用 deploy。各命令的 --help 列出接受的参数。
+deploy/replay 使用修复分组 request_id 和各自自动递增的 run，通过 deploy/replay list/show 查询。issue verify 使用 --request-id 和 --issue-id，验证当前包；平台查询使用 --round-no。env/fuzz 独立执行通过 status 查询。各命令的 --help 列出接受的参数。
 
 所有公共命令 stdout 返回一个 JSON 对象，日志走 stderr。--help 返回帮助文本。
 
@@ -85,7 +85,7 @@ afxx issue verify-check --issue-id F152 --round-no <round_no> --wait --timeout 3
 
 claim 必须用 --issue-id 指定问题。领取回执存于 issues/<issue_id>.json，包含复现信息和租约。重复请求复用 request-id；无任务时返回 null。preview 默认输出失败摘要及去重 seed，--full 返回完整复现信息。
 
-verify 与 deploy 分离，在远端采集实际 AF 身份，核对部署后提交 `/api/issues/{id}/verify`。platform.json 固定候选身份、租约和幂等键；已提交时返回原回执。一个部署只绑定一个问题和租约。
+verify 与 deploy 分离，在远端采集当前 AF 身份后提交 `/api/issues/{id}/verify`，不查询历史部署。workflow-state/verification/<request_id>/ 保存按租约和实际包身份区分的固定请求与回执；同包重试复用回执，包变化生成新验证。
 
 status/wait 以 verify 返回的 round_no 定位验证，跟踪同一候选包的下一轮 regress。只有相关轮次全部通过才返回 outcome=passed。wait 遇到失败和 invalid 均返回 PLATFORM_VERIFICATION_FAILED；等待超时可继续查同一轮次。查询保留历史轮次身份，不使用其他修复的结果。
 

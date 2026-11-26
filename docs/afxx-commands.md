@@ -116,7 +116,7 @@ afxx env init --config /path/config.yaml
 | `--request-id ID` | `deploy`、`replay`、`status`、`issue claim`、`issue submit-summary` | 见下方规则 |
 | `--dry-run` | `env init/update`、`deploy`、`replay`、`doctor` | 默认关闭；跳过远端连接，见 [第 10 节](#10-dry-run-说明) |
 | `--detach` | `env init`、`env update`、`deploy` | 默认关闭（CLI 跟随日志直到结束）。开启后提交即返回，用 `status` 查询。MCP 下自动开启 |
-| `--job-id ID`（别名 `--job`） | `issue verify` | AFXX 的 任务 ID（新任务直接复用 request_id）。各命令引用的 job 类型见各节 |
+| `issue verify` | `--request-id ID --issue-id ID` | 采集当前安装的包；同组/租约/包复用回执，包变化生成新验证，不选择历史部署 |
 
 **`--request-id` 规则**
 
@@ -132,7 +132,7 @@ afxx env init --config /path/config.yaml
 | ID | 示例 / 格式 | 用在哪里 |
 |---|---|---|
 | 平台问题 ID | `F152` | `issue *` 命令的 `--issue-id` |
-| AFXX job ID | 1–128 位字母、数字、下划线、点或连字符（排除 .、..、requests） | `--job-id`：deploy job 或 replay job，因命令而异 |
+| AFXX job ID | 1–128 位字母、数字、下划线、点或连字符（排除 .、..、requests） | fuzz 的 `--job-id` 或旧 verify 兼容入口；deploy/replay 使用 request_id/run |
 | AFX attempt ID | AFX 单次执行 ID | `status --attempt` |
 | 平台 exec UUID | 平台返回的 exec_uuid，未必为标准 UUID；8–64 位字母、数字、`_`、`-` | `execution show --exec-uuid`（不接受数字 exec_id 或 AFXX job ID） |
 
@@ -141,7 +141,7 @@ afxx env init --config /path/config.yaml
 | 命令 | `--job-id` 指向 |
 |---|---|
 | `replay` | 不引用 job，使用流程 request_id |
-| `issue verify` | **deploy** job |
+| `issue verify` | `--request-id ID --issue-id ID` | 采集当前安装的包；同组/租约/包复用回执，包变化生成新验证，不选择历史部署 |
 | `status` | 要查询的任务 |
 | `status --attempt` | **replay** job |
 | `evidence list/read` | replay 的 request_id/run |
@@ -289,7 +289,7 @@ afxx env init --config /path/config.yaml
 
 | 命令 | 必填参数 | 可选参数与说明 |
 |---|---|---|
-| `issue verify` | `--job-id ID`（deploy job） | `--issue-id ID`：省略时复用部署中记录的问题上下文；部署无上下文时必须显式指定。提交前确保官方客户端已启动 |
+| `issue verify` | `--request-id ID --issue-id ID` | 采集当前安装的包；同组/租约/包复用回执，包变化生成新验证，不选择历史部署 |
 | `issue status` | `--issue-id ID`、`--round-no N` | 查询一次；`round-no` 使用 `verify` 的返回值 |
 | `issue wait` | `--issue-id ID`、`--round-no N` | `--timeout SECONDS`：默认 3600，必须为有限正数；**agent 建议传 30**。等待期间自动续租，仅在变化时报告进度；超时返回 PLATFORM_WAIT_TIMEOUT，可继续等待同一轮次 |
 
@@ -340,16 +340,16 @@ MCP 与 CLI 共用命令实现。优先使用结构化工具，不需要拼命�
 
 ### 长调用和查询
 
-`deploy`、`env init/update`、`fuzz run`、`client start/stop/restart`、`issue verify` 返回本机调用记录，除 env 命令自动分配 ID 外，必须提供工具级 request_id。env 命令拒绝用户指定 request_id（包括 arguments 中的 --request-id），也不会将 MCP 调用记录 ID 传入 CLI。既有 CLI 支持请求键的命令会使用同一个键；arguments 中不同的 --request-id 返回 REQUEST_CONFLICT。client/verify 的键只用于本机调用去重，不改变 CLI 或平台已有的幂等规则。
+`deploy`、`env init/update`、`fuzz run`、`client start/stop/restart`、`issue verify` 返回本机调用记录，除 env 命令自动分配 ID 外，必须提供工具级 request_id。env 命令拒绝用户指定 request_id（包括 arguments 中的 --request-id），也不会将 MCP 调用记录 ID 传入 CLI。CLI 收到原始分组/请求键；arguments 中不同的 --request-id 返回 REQUEST_CONFLICT。client 的键只用于本机调用去重；deploy/verify 使用修复分组并自动分配本机调用键，不改变 CLI 或平台已有的幂等规则。
 
 ```text
 afxx_client({"action":"restart","request_id":"F152-restart-1","config":"/absolute/task.yaml"})
 afxx_operation_status({"request_id":"F152-restart-1"})
 # completed 后检查 data.result.ok=true 且 data.result.data.state=running
 
-afxx_issue({"action":"verify","deploy_job_id":"<deploy job id>","issue_id":"F152",
-                   "request_id":"F152-verify-1","config":"/absolute/task.yaml"})
-afxx_operation_status({"request_id":"F152-verify-1"})
+afxx_issue({"action":"verify","issue_id":"F152",
+                   "request_id":"repair-F152","config":"/absolute/task.yaml"})
+afxx_operation_status({"request_id":"<返回的本机回执ID>"})
 # 从 data.result 取得 CLI 的轮次回执，再查询 afxx_issue_status
 ```
 
@@ -361,7 +361,7 @@ MCP 断开、取消提交响应的等待或服务退出，不会停止已启动�
 
 replay 不创建调用回执，直接返回 request_id/run，用 replay show 查询。
 
-completed 不代表 deploy/env 的远端 job 完成：从 data.result.data.job_id 继续调用 afxx_job_status。verify 的回执也不等于回归通过，从返回轮次继续调用 afxx_issue_status。MCP 仍为 env init/update 注入 --detach；结构化工具不自动串联 restart 和 verify，顺序由 skill 控制。
+completed 不代表 deploy/env 的远端 job 完成：deploy 从 data.result.data.request_id/run 继续查询 deploy show；env 从任务 ID 继续调用 afxx_job_status。verify 的回执也不等于回归通过，从返回轮次继续调用 afxx_issue_status。MCP 仍为 env init/update 注入 --detach；结构化工具不自动串联 restart 和 verify，顺序由 skill 控制。
 
 ## MCP 服务
 
@@ -478,7 +478,7 @@ MCP 仅通过 `afxx_run(command="case list", arguments=[...])` 调用，不新�
 | --- | --- | --- | --- |
 | claim | request_id | 无 | 直接返回领取结果 |
 | preview | 无 | full | 直接返回失败摘要与 seed |
-| verify | request_id、deploy_job_id | 无 | 调用回执；先查 operation_status，再查 issue_status |
+| verify | request_id | deploy_job_id（旧入口） | 调用回执；先查 operation_status，再查 issue_status |
 | release | request_id | 无 | 直接返回释放结果 |
 
 均支持 config。缺少必填参数或传入无关参数直接报错（例如 claim 传 full=false 也不接受）。原四个独立 MCP 入口已移除；issue_status 保留，include_tasks 可附带任务。CLI 与 afxx_run 的原有参数规则不变。verify 不自动 restart client；request_id 用于本地调用回执，平台幂等仍由 CLI 管理。
@@ -505,7 +505,11 @@ state=running 表示继续等待；passed 表示任务全部明确通过，且�
 
 超时直接返回当前进度、timed_out=true、next_action=wait，查询成功仍为 ok=true；平台任务失败也通过 data.state 表达，HTTP/协议错误才返回 ok=false。多个查询不是平台原子快照，遇到不一致应复查；失败列表不读取完整日志。旧 issue status/tasks/detail/wait 保留，旧 wait 仍有自动续租行为，修复 skill 改用只读 verify-check。
 
-新提交的 workflow 任务（deploy、fuzz run）直接使用 request_id 作为 job_id，例如 `--request-id deploy-F152-001` 返回 `job_id=deploy-F152-001`，可立即用 `status --request-id deploy-F152-001` 查询。同一 ID 重试仍校验配置与参数，冲突报 REQUEST_CONFLICT；省略请求 ID 时自动生成一个 UUID 字符串并同时用于两者。已有请求记录重试仍返回其中原来的 job ID，不重建旧任务。claim/release/client/verify 等无新 workflow job 的操作不受影响；MCP 本机回执仍用 request_id 查询，本次不改回执机制。
+deploy 和 replay 使用 request_id 分组，各自从 run=1 计数，每次调用新增一轮；底层执行目录独立，内部提交仍有幂等保护。修改代码后继续使用同一分组。断线先查询 `deploy list/show` 或 `replay list/show`，不要盲目重提。fuzz run 保持独立任务行为。
+
+`afxx deploy list --request-id repair-F001` 列出部署记录；`afxx deploy show --request-id repair-F001 [--run N]` 查询最新或指定部署。历史记录不选择运行包。verify 使用 `--request-id repair-F001 --issue-id F001` 读取当前安装身份；同组/租约/包的重试复用冻结请求和回执，包变化后生成新验证。
+
+MCP deploy/verify 的本机 operation ID 自动生成，与修复分组不同；使用返回的回执 ID 查询 operation_status，CLI 结果中的 request_id/run 用于分组查询。旧 verify --job-id/deploy_job_id 入口保留为记录兼容入口，也不要求当前包等于历史部署包；新流程使用 request_id。
 
 ### deploy 客户端协调
 

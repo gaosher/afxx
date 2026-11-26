@@ -16,9 +16,9 @@ description: 使用 AFXX 领取 AFX 平台 issue，复现并定位 graph-autofus
 - 用户要求执行完整修复流程时，按授权范围领取、部署、verify 和本地 commit；已有授权不重复询问。只做诊断或讨论时不发起这些写操作。不自动 push、合并或关闭 issue。
 - 远端 verify/续租使用 `platform.remote_token_file`，AFX client 使用 `platform.client_token_file`。配置 platform 后，env init 会复用或隐藏输入本地 token，并在环境成功后同步；异步 init 用 status/wait 完成同步。修复时复用已有凭据，遇到缺失或鉴权错误报告具体字段；不要为领取问题重建环境或重新签发 token。
 - 每个目标 NPU 环境只维护一个 AFX client，跨 issue、worktree 和部署轮次复用同一 client home 与身份。不要为单个问题初始化新 client、生成新 source_id 或另起旧版客户端；发现重复身份时先核对已有进程和平台记录，不自动删除平台记录。
-- 一个问题的工作记录保留 issue_id、租约到期时间、基线/候选 deploy job_id、request-id、verify round_no、AF 包身份及证据路径。复用任务已有笔记或修复总结，不另造状态数据库、不复制 wheel/源码快照。
-- 使用 MCP 时优先调用结构化工具。deploy、client start/stop/restart 和 issue verify 等长操作先选定工具级 request_id，提交后用 afxx_operation_status 查询同一记录；completed 只表示 CLI 调用结束，必须检查 data.result.ok，再从其中取得 job_id/round_no 或 client running 状态。MCP 断开后继续查询原 request_id；unknown 时先核对远端，不换键盲目重试。restart 的调用记录成功后才进入 verify，不因收到 pending 回执就继续。
-- 网络重试复用同一请求与 request-id；源码/配置改变后使用新的 deploy request-id。一个候选 job 的 verify 重试取回原回执，不能用它开始新的修复轮次。
+- 一个问题的工作记录保留 issue_id、租约到期时间、基线/候选 deploy run、request-id、verify round_no、AF 包身份及证据路径。复用任务已有笔记或修复总结，不另造状态数据库、不复制 wheel/源码快照。
+- 使用 MCP 时优先调用结构化工具。deploy、client start/stop/restart 和 issue verify 等长操作先选定工具级 request_id，提交后用 afxx_operation_status 查询返回的回执 ID（deploy/verify 自动分配，区别于修复分组）；completed 只表示 CLI 调用结束，必须检查 data.result.ok，再从其中取得 request_id/run 或 round_no 或 client running 状态。MCP 断开后继续查询原 request_id；unknown 时先核对远端，不换键盲目重试。restart 的调用记录成功后才进入 verify，不因收到 pending 回执就继续。
+- 部署断线后先查询 deploy list/show，不盲目重复提交；源码/配置改变后继续使用同一修复 request-id，每次 deploy 自动新增 run。同组、同租约、同包的 verify 重试取回原回执，包变化后生成新验证。
 
 ## 1. 领取 issue
 
@@ -58,10 +58,10 @@ TASK_CONFIG="/absolute/path/to/task-config.yaml"
 修改源码前，先部署上述主线 worktree。deploy 会同步未提交修改，提交前必须确认 worktree 干净，不包含会被同步的额外源码文件。基线与每轮候选 deploy 前均执行[部署期间的客户端协调](references/platform-evidence.md#部署期间的客户端协调)，确认允许协调目标客户端；由 deploy 在包准备好之后停止并恢复，不能只在候选部署时处理。
 
 ```bash
-afxx deploy --config "$TASK_CONFIG" --coordinate-client --issue-id <issue-id> --request-id <基线部署请求ID>
+afxx deploy --config "$TASK_CONFIG" --coordinate-client --issue-id <issue-id> --request-id <修复流程ID>
 ```
 
-记录返回的 `job_id` 为基线 deploy job，并保存对应的主线 SHA。这个步骤仅部署，不提交平台 verify。
+记录返回的 `request_id/run` 为基线部署记录，并保存对应的主线 SHA。这个步骤仅部署，不提交平台 verify。
 
 仅当以下条件全部满足时，才可跳过本次 deploy，复用已有基线 job：
 
@@ -74,10 +74,7 @@ afxx deploy --config "$TASK_CONFIG" --coordinate-client --issue-id <issue-id> --
 ### 2.2 等待基线部署成功
 
 ```bash
-afxx status --config "$TASK_CONFIG" --request-id <基线deploy-job-id>
-# 尚未结束时，用上次返回的 cursor 等待变化；超时继续查询同一 job。
-afxx status --config "$TASK_CONFIG" --request-id <基线deploy-job-id> \
-  --wait --since <cursor> --timeout 30
+afxx deploy show --config "$TASK_CONFIG" --request-id <修复流程ID> --run <基线run>
 ```
 
 只有 `state=success` 才进入复现，并按部署前记录恢复需要的客户端会话、核对实际 worker 使用的 AF 身份。queued/running 或提交响应的 ok=true 不代表部署完成；failed/unknown 时按客户端协调说明处理恢复，不继续 replay，也不能宣称已复现。
@@ -118,11 +115,11 @@ afxx evidence read --config "$TASK_CONFIG" --request-id <流程request-id> --run
 每轮部署使用 `--coordinate-client`，执行前阅读[部署期间的客户端协调](references/platform-evidence.md#部署期间的客户端协调)。由远端 worker 在编包完成后停止客户端、安装并恢复；agent 不再拆开执行 stop/deploy/start。
 
 ```bash
-afxx deploy --config "$TASK_CONFIG" --coordinate-client --issue-id <issue-id> --request-id <本轮唯一部署请求ID>
-afxx status --config "$TASK_CONFIG" --request-id <deploy-job-id>
+afxx deploy --config "$TASK_CONFIG" --coordinate-client --issue-id <issue-id> --request-id <修复流程ID>
+afxx deploy show --config "$TASK_CONFIG" --request-id <修复流程ID> --run <候选run>
 ```
 
-部署等待时，保存首次 status 的 cursor，使用 `status --config "$TASK_CONFIG" --wait --since <cursor> --timeout 30`（带同一 job ID）；无变化只得到 timeout 回执，继续沿用返回 cursor，不重复读取概要或提交任务。无 cursor 时该命令以首次查询为基线。replay 使用 replay show 查询并取得 evidence_path，不使用部署的 cursor。event=attention 表示状态不确定，应排查进程。等待 job state=success，并保留部署记录和源码/包身份。构建或安装失败先处理对应失败，不进入 verify。候选部署后可用同一原始 seed 快速 replay；平台验证仍是下一步独立验收。
+部署等待时查询同一 request_id/run 的 deploy show；等待 state=success，保留源码和实际包身份。断线先查记录，不重复部署。构建或安装失败不进入 verify。replay 使用 replay show 查询。
 
 环境一致性 WARNING 不会自动阻止 AFXX；agent 应读懂差异，并确认候选环境能用于该问题。不能把带差异的配置视为精确复现证据。平台复测执行期间不覆盖它使用的候选环境。
 
@@ -139,10 +136,10 @@ afxx client restart --config "$TASK_CONFIG" --timeout 300
 同一候选的 verify 已提交或响应丢失时，先查询已有轮次或按原请求幂等重试，不为等待、轮询或提交重试再次重启，避免打断在途复测。
 
 ```bash
-afxx issue verify --config "$TASK_CONFIG" --issue-id <issue-id> --job-id <deploy-job-id>
+afxx issue verify --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <修复流程ID>
 ```
 
-verify 在远端核对候选 AF 身份，确保环境中唯一的 AFX client 启动，再向平台提交；已有 client 沿用 AFX 保存的凭据，首次创建时才使用 `platform.client_token_file`。保存返回的 verify round_no，`submitted` 只表示提交成功，client/session running 也不证明平台已派发或本机已领取。平台复测派发问题当前待平台侧定位；排队、领取和执行结果分别取证，不通过启动额外 client、重复提交 verify 或修改 AFX 领取逻辑绕过。
+verify 在远端采集当前安装的 AF 身份，不选择历史部署，确保环境中唯一的 AFX client 启动，再向平台提交；已有 client 沿用 AFX 保存的凭据，首次创建时才使用 `platform.client_token_file`。保存返回的 verify round_no，`submitted` 只表示提交成功，client/session running 也不证明平台已派发或本机已领取。平台复测派发问题当前待平台侧定位；排队、领取和执行结果分别取证，不通过启动额外 client、重复提交 verify 或修改 AFX 领取逻辑绕过。
 
 ```bash
 afxx issue verify-check --config "$TASK_CONFIG" --issue-id <issue-id> --round-no <verify-round-no> --wait --timeout 30

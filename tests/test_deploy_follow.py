@@ -8,8 +8,8 @@ from afxx import cli, common, config, jobs
 
 
 @pytest.fixture
-def submitted(monkeypatch):
-    monkeypatch.setattr(config, 'config', lambda *_: {'connection': {'environment': 'test-npu'}})
+def submitted(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, 'config', lambda *_: {'connection': {'environment': 'test-npu'}, 'local': {'state_dir': str(tmp_path)}, 'remote': {'state_dir': '/state'}})
     monkeypatch.setattr(jobs, 'local_preflight', lambda *a: None)
     monkeypatch.setattr(jobs, 'submit', lambda *a: {
         'job': 'deploy-test', 'remote': '/state/deploy-test', 'state': 'queued'})

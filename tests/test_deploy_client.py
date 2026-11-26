@@ -175,6 +175,6 @@ def test_cli_freezes_opt_in_and_mcp_forwards_it(cfg, monkeypatch):
     from afxx import mcp_server, mcp_operations
     from test_mcp_tools import call
     calls=[]
-    monkeypatch.setattr(mcp_operations,'submit',lambda command,args,path,key:calls.append(args) or {'ok':True})
+    monkeypatch.setattr(mcp_operations,'submit',lambda command,args,path,key:calls.append(args) or {'ok':True, 'data':{}})
     call(mcp_server.create_server('/config'), 'afxx_deploy', {'request_id':'deploy-1','coordinate_client':True})
     assert '--coordinate-client' in calls[0]

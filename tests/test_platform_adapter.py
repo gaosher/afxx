@@ -113,7 +113,7 @@ def test_verify_timeout_retries_frozen_body(platform_cfg, candidate, monkeypatch
     assert bodies[0]["fix_sha256"] == PACKAGE["sha256"]
 
 
-@pytest.mark.parametrize("failure", ["binary", "lease", "changed_retry"])
+@pytest.mark.parametrize("failure", ["lease", "changed_retry"])
 def test_verify_rejects_drift_before_post(
     platform_cfg, candidate, monkeypatch, failure
 ):
@@ -477,3 +477,44 @@ def test_wait_unchanged_round_does_not_repeat_output(platform_cfg, monkeypatch, 
         p.wait(platform_cfg, REPAIR, 1, 65)
     assert error.value.data == {"issue_id": REPAIR, "round_no": 1, "event": "timeout"}
     assert capsys.readouterr().err == ""
+
+
+def test_verify_current_without_deployment_records(platform_cfg, candidate, monkeypatch, tmp_path):
+    platform_cfg["remote"]["state_dir"] = str(tmp_path / "state")
+    monkeypatch.setattr(workflow_runtime, "current_deployment", lambda *a: pytest.fail("must not read deployment"))
+    calls = []
+    def api(c, method, path, body, **kw):
+        calls.append(dict(body))
+        return dict(receipt(), round_no=len(calls))
+    monkeypatch.setattr(p, "call", api)
+    first = p.verify_current(platform_cfg, "repair", LEASE)
+    assert p.verify_current(platform_cfg, "repair", LEASE) == first
+    assert len(calls) == 1
+    monkeypatch.setattr(workflow_common, "capture", lambda *a, **k: json.dumps({"cann": "9.3", "autofuse_binary": "b" * 64}))
+    second = p.verify_current(platform_cfg, "repair", LEASE)
+    assert second["round_no"] == 2 and second["package"]["sha256"] == "b" * 64
+    assert calls[0]["request_key"] != calls[1]["request_key"]
+
+
+def test_verify_group_cli_requires_no_deploy(platform_cfg, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["afxx", "issue", "verify", "--issue-id", "F152", "--request-id", "repair"])
+    monkeypatch.setattr(workflow_config, "config", lambda *a: platform_cfg)
+    monkeypatch.setattr(workflow_jobs, "local_preflight", lambda *a: None)
+    monkeypatch.setattr(p, "claimed", lambda *a: LEASE)
+    monkeypatch.setattr(workflow_jobs, "verify_current", lambda c, key, lease: {"request_id": key, "lease": lease})
+    assert w.main() == {"request_id": "repair", "lease": LEASE}
+
+
+def test_verify_current_uncertain_post_reuses_frozen_key(platform_cfg, candidate, monkeypatch, tmp_path):
+    platform_cfg["remote"]["state_dir"] = str(tmp_path / "state")
+    calls = []
+    def api(c, method, path, body, **kw):
+        calls.append(dict(body))
+        if len(calls) == 1:
+            raise workflow_common.WorkflowError("PLATFORM_UNAVAILABLE", "response lost")
+        return receipt()
+    monkeypatch.setattr(p, "call", api)
+    with pytest.raises(workflow_common.WorkflowError):
+        p.verify_current(platform_cfg, "repair", LEASE)
+    assert p.verify_current(platform_cfg, "repair", LEASE)["round_no"] == 1
+    assert calls[0] == calls[1]
