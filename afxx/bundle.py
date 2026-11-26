@@ -30,7 +30,6 @@ FILES = (
     "afxx/environment/snapshot.py",
     "afxx/afx/replay.py",
     "afxx/afx/fuzz_replay.py",
-    "afxx/afx/fuzz.py",
     "afxx/afx/platform.py",
     "afxx/afx/launcher.py",
     "afxx/afx/managed_client.py",

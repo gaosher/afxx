@@ -94,7 +94,7 @@ def test_invalid_summary_does_not_post(platform_cfg, summary, monkeypatch, text)
 
 def test_summary_cli_preserves_errors_without_npu(platform_cfg, summary, monkeypatch, capsys):
     code = "PLATFORM_LEASE_LOST"
-    monkeypatch.setattr(sys, "argv", ["afxx", "issue", "submit-summary", "--issue-id", "F152", "--summary-file", str(summary), "--request-id", "summary-1"])
+    monkeypatch.setattr(sys, "argv", ["afxx", "issue", "submit-summary", "--issue-id", "F152", "--summary-file", str(summary), "--request-key", "summary-1"])
     monkeypatch.setattr(config, "config", lambda _: platform_cfg)
     monkeypatch.setattr(jobs, "local_preflight", lambda *a: pytest.fail("no NPU connection"))
     def fail(*a):
@@ -105,10 +105,9 @@ def test_summary_cli_preserves_errors_without_npu(platform_cfg, summary, monkeyp
     assert out["command"] == "issue submit-summary" and out["error"]["code"] == code
 
 
-def test_summary_requires_explicit_request_id(monkeypatch, capsys):
+def test_summary_request_key_is_optional(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["afxx", "issue", "submit-summary", "--issue-id", "F152", "--summary-file", "summary.yaml"])
-    assert cli.cli() == 2
-    assert json.loads(capsys.readouterr().out)["error"]["code"] == "INVALID_ARGUMENT"
+    assert cli.parse_arguments().request_key is None
 
 
 def test_summary_rejects_wrong_receipt(platform_cfg, summary, monkeypatch):
@@ -116,3 +115,34 @@ def test_summary_rejects_wrong_receipt(platform_cfg, summary, monkeypatch):
     with pytest.raises(w.WorkflowError) as error:
         p.summarize(platform_cfg, "F152", summary, "summary-1")
     assert error.value.code == "PLATFORM_RESPONSE_INVALID"
+
+
+def test_automatic_summary_key_is_stable_and_tracks_content(platform_cfg, summary, monkeypatch):
+    bodies = []
+    def api(c, method, path, body):
+        bodies.append(json.loads(json.dumps(body)))
+        if len(bodies) == 1:
+            raise w.WorkflowError("PLATFORM_UNAVAILABLE", "response lost")
+        return dict(issue_id="F152", status="resolved", knowledge_id="K42")
+    monkeypatch.setattr(p, "call", api)
+    with pytest.raises(w.WorkflowError):
+        p.summarize(platform_cfg, "F152", summary)
+    fields = yaml.safe_load(summary.read_text())
+    summary.write_text(yaml.safe_dump(fields, sort_keys=True))
+    p.summarize(platform_cfg, "F152", summary)
+    assert bodies[0] == bodies[1]
+    assert bodies[0]["request_key"].startswith("summary-")
+    fields["title"] += " updated"
+    summary.write_text(yaml.safe_dump(fields))
+    p.summarize(platform_cfg, "F152", summary)
+    assert bodies[2]["request_key"] != bodies[1]["request_key"]
+    lease = w.read(p.record_path(platform_cfg, "F152"))
+    w.write(p.record_path(platform_cfg, "F152"), dict(lease, lease_id="new-lease"))
+    p.summarize(platform_cfg, "F152", summary)
+    assert bodies[3]["request_key"] != bodies[2]["request_key"]
+
+
+def test_summary_rejects_old_request_id(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["afxx", "issue", "submit-summary", "--issue-id", "F152", "--summary-file", "summary.yaml", "--request-id", "old"])
+    assert cli.cli() == 2
+    assert "INVALID_ARGUMENT" in capsys.readouterr().out

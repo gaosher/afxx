@@ -27,7 +27,6 @@ FIELDS = {
         "batch_timeout_seconds",
         "dump",
     },
-    "upload": {"enabled"},
 }
 
 
@@ -191,7 +190,6 @@ def normalize_config(raw):
             "batch_timeout_seconds": 300,
             "dump": False,
         },
-        "upload": {"enabled": True},
     }
     if "platform" in raw:
         defaults["platform"] = {
@@ -390,7 +388,7 @@ def validate_config(c):
     workflow_common.require(
         type(t) in (int, float) and math.isfinite(t) and t > 0, "invalid timeout"
     )
-    for section, key in [("replay", "dump"), ("upload", "enabled")]:
+    for section, key in [("replay", "dump")]:
         workflow_common.require(
             type(c[section][key]) is bool, "invalid boolean: " + key
         )

@@ -77,7 +77,7 @@ def response(command, data=None, error=None):
     return {
         "schema_version": 1,
         "ok": error is None,
-        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-", "client-", "case-", "platform-", "retest-", "replay-", "deploy-")) else command,
+        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "config-", "evidence-", "skills-", "client-", "case-", "platform-", "retest-", "replay-", "deploy-")) else command,
         "data": data,
         "error": None if error is None else {"code": error.code, "message": str(error)},
     }
@@ -99,7 +99,6 @@ def parse_arguments():
     jobs = (
         "deploy",
         "replay",
-        "fuzz-run",
     )
     issues = (
         "issue-list",
@@ -118,7 +117,7 @@ def parse_arguments():
         "issue-submit-summary",
     )
     clients = tuple("client-" + action for action in ("status", "start", "stop", "restart"))
-    queries = ("platform-me", "platform-summary", "case-list", "case-spec", "case-history", "retest-list")
+    queries = ("platform-me", "platform-summary", "case-list", "case-spec", "case-history", "case-execution", "retest-list")
     descriptions = {
         "issue-list": "分页查询平台问题",
         "issue-cases": "分页查询问题关联用例",
@@ -135,9 +134,6 @@ def parse_arguments():
         "check": "远端环境：检查运行环境及 Python 依赖",
         "deploy": "远端工作流：同步本地源码，编包并安装 AF",
         "replay": "远端工作流：通过 afx fuzz replay 复跑 seed，按 request_id 归组",
-        "fuzz-run": "随机测试：调用远端 AFX fuzz run 并保存结果",
-        "fuzz-status": "随机测试：查询 AFX 队列与运行进度",
-        "fuzz-stop": "随机测试：请求 AFX 停止本次随机测试",
         "status": "远端工作流：查询 workflow 任务状态",
         "issue-claim": "问题验证：从 AFX 平台领取待修复问题",
         "issue-preview": "问题验证：查看复现用例和失败摘要",
@@ -150,27 +146,25 @@ def parse_arguments():
         "issue-tasks": "问题查询：查看指定轮次的任务与失败信息",
         "issue-regression-preview": "问题查询：预览平台回归候选集",
         "issue-submit-summary": "问题归档：提交已检视的本地修复总结",
-        "execution-show": "执行查询：查看执行详情、Shape 和日志",
+        "case-execution": "执行查询：查看执行详情、Shape 和日志",
         "evidence-list": "定位证据：分页列出远端复测产物与失败关联",
         "evidence-read": "定位证据：按字节分页读取日志、IR 和代码",
         "doctor": "本地检查：检查配置、连接工具及登录状态",
     }
-    for name in (*env_jobs, *jobs, *issues, *clients, *queries, "fuzz-status", "fuzz-stop", "execution-show", "evidence-list", "evidence-read", "status", "doctor"):
+    for name in (*env_jobs, *jobs, *issues, *clients, *queries, "evidence-list", "evidence-read", "status", "doctor"):
         parent = commands
         leaf = name
-        if name in env_jobs or name.startswith(("issue-", "execution-", "config-", "evidence-", "fuzz-", "skills-", "client-", "case-", "platform-", "retest-")):
+        if name in env_jobs or name.startswith(("issue-", "config-", "evidence-", "skills-", "client-", "case-", "platform-", "retest-")):
             group = "env" if name in env_jobs else name.split("-", 1)[0]
             leaf = name if group == "env" else name.split("-", 1)[1]
             if group not in groups:
                 summary = {
                     "platform": "查询平台身份与运行概况",
-                    "case": "查询用例图及执行历史",
+                    "case": "查询用例图、执行历史和执行详情",
                     "retest": "查询手动复测批次",
                     "client": "查询、启动、停止和重启远端 AFX client",
-                    "fuzz": "运行、查询和停止远端 AFX 随机测试",
                     "env": "管理远端 Python、CANN 和依赖环境",
                     "issue": "领取问题、提交验证及查询回归结果",
-                    "execution": "查询平台执行详情和日志",
                     "evidence": "读取远端 replay 定位证据",
                 }[group]
                 group_parser = commands.add_parser(
@@ -190,8 +184,10 @@ def parse_arguments():
         )
         if name in ("init", "update", *jobs) or name == "doctor":
             cmd.add_argument("--dry-run", action="store_true")
-        if name in jobs or name in ("issue-claim", "issue-submit-summary", "issue-release"):
-            cmd.add_argument("--request-id", required=name in ("issue-submit-summary", "issue-release"))
+        if name in jobs or name == "issue-claim":
+            cmd.add_argument("--request-id")
+        if name in ("issue-submit-summary", "issue-release"):
+            cmd.add_argument("--request-key", help="平台去重键；默认按操作、租约和内容自动生成")
         if name in clients:
             cmd.add_argument("--timeout", type=float, default=300, help="等待生命周期完成的秒数，默认 300；超时不强杀")
         if name in ("init", "update", "deploy"):
@@ -217,8 +213,8 @@ def parse_arguments():
             cmd.add_argument(
                 "--full", action="store_true", help="show full preview details"
             )
-        if name == "deploy" or (name in issues and name != "issue-list"):
-            cmd.add_argument("--issue-id", required=name not in ("deploy", "issue-verify"),
+        if name in issues and name != "issue-list":
+            cmd.add_argument("--issue-id", required=name != "issue-verify",
                              help="AFX platform issue, e.g. F152")
         if name in ("issue-wait", "issue-status", "issue-verify-check"):
             cmd.add_argument("--round-no", type=int, required=True, help="verification round returned by issue verify")
@@ -252,7 +248,7 @@ def parse_arguments():
             cmd.add_argument("--after", type=int)
         if name == "platform-summary":
             cmd.add_argument("--scope", choices=("mine", "all"), default="mine")
-        if name == "execution-show":
+        if name == "case-execution":
             cmd.add_argument("--exec-uuid", required=True, help="AFX execution UUID, not numeric exec_id")
         if name == "issue-wait":
             cmd.add_argument("--timeout", type=float, default=3600)
@@ -260,8 +256,6 @@ def parse_arguments():
             selector = cmd.add_mutually_exclusive_group(required=True)
             selector.add_argument("--request-id", help="修复分组；验证当前安装的包")
             selector.add_argument("--job-id", "--job", dest="job", help="旧执行记录入口")
-        if name in ("fuzz-status", "fuzz-stop"):
-            cmd.add_argument("--job-id", "--job", dest="job", required=True)
         if name in ("evidence-list", "evidence-read"):
             cmd.add_argument("--request-id", required=True)
             cmd.add_argument("--run", type=int, help="replay run; defaults to latest")
@@ -278,21 +272,11 @@ def parse_arguments():
             cmd.add_argument("--fields", help="comma-separated attempt fields; supports dotted paths")
             cmd.add_argument("--since", help="cursor from previous status; requires --wait")
             cmd.add_argument("--timeout", type=float, help="wait timeout in seconds, default 30, maximum 50")
-        if name == "fuzz-run":
-            cmd.add_argument("--count", type=int, help="生成用例数；省略则持续运行，使用 fuzz stop 停止")
-            cmd.add_argument("--device", action="append", help="逻辑 NPU，如 npu:0；可重复，默认由 AFX 使用可见多卡")
-            cmd.add_argument("--workers", type=int, help="AFX 并发 worker 上限；默认由 AFX 决定")
-            cmd.add_argument("--compile-threads", type=int, help="AFX 编译线程数；默认由 AFX 决定")
-            cmd.add_argument("--ops", help="AFX 算子过滤，如 add,sum,reshape")
-            cmd.add_argument("--backend", action="append", help="增加 AFX 测试后端；可重复，默认 CPU 和 AF-MLIR")
         if name == "replay":
             cmd.add_argument("--dump", action="store_true", help="开启 AFX 逐任务 dump，产物通过 evidence list/read 读取")
             seeds = cmd.add_mutually_exclusive_group()
             seeds.add_argument("--seed")
             seeds.add_argument("--seeds-file")
-            uploads = cmd.add_mutually_exclusive_group()
-            uploads.add_argument("--upload", action="store_true", default=None)
-            uploads.add_argument("--no-upload", dest="upload", action="store_false")
             history = cmd.add_subparsers(dest="replay_action")
             for action in ("list", "show", "compare"):
                 query = history.add_parser(action, allow_abbrev=False)
@@ -331,7 +315,6 @@ def parse_arguments():
         detach=False,
         seeds_file=None,
         deployment=None,
-        upload=None,
     )
     args = parser.parse_args()
     if args.command == "replay":
@@ -339,9 +322,9 @@ def parse_arguments():
     if args.command == "status":
         args.job = args.request_id
     if args.command.startswith("deploy-"):
-        workflow_common.require_code(not (args.dry_run or args.detach or args.coordinate_client or args.issue_id), "INVALID_ARGUMENT", "deploy 查询不接受执行参数")
+        workflow_common.require_code(not (args.dry_run or args.detach or args.coordinate_client), "INVALID_ARGUMENT", "deploy 查询不接受执行参数")
     if args.command.startswith("replay-"):
-        workflow_common.require_code(not (args.dump or args.seed or args.seeds_file or args.dry_run or args.upload is not None),
+        workflow_common.require_code(not (args.dump or args.seed or args.seeds_file or args.dry_run),
                                      "INVALID_ARGUMENT", "replay 查询不接受执行参数")
     if args.command == "help":
         parser.print_help()
@@ -415,7 +398,7 @@ def main():
         return platform.case_history(c, args.case_key, after=args.after, limit=args.limit)
     if args.command == "retest-list":
         return platform.retest_list(c)
-    if args.command == "execution-show":
+    if args.command == "case-execution":
         return platform.execution_detail(c, args.exec_uuid)
     if args.command.startswith("issue-"):
         workflow_config.platform_settings(c)
@@ -431,9 +414,9 @@ def main():
         if args.command == "issue-verify-check":
             return platform.verify_check(c, args.issue_id, args.round_no, wait=args.wait, timeout=args.timeout)
         if args.command == "issue-release":
-            return platform.release(c, args.issue_id, args.request_id)
+            return platform.release(c, args.issue_id, args.request_key)
         if args.command == "issue-submit-summary":
-            return platform.summarize(c, args.issue_id, args.summary_file, args.request_id)
+            return platform.summarize(c, args.issue_id, args.summary_file, args.request_key)
         if args.command == "issue-detail":
             return platform.issue_detail(c, args.issue_id)
         if args.command == "issue-tasks":
@@ -472,12 +455,8 @@ def main():
         )
         return result["verification"]
     workflow_jobs.local_preflight(
-        "deploy" if args.command == "doctor" else "status" if args.command.startswith("evidence-") or args.command in ("fuzz-status", "fuzz-stop") else args.command, args.dry_run
+        "deploy" if args.command == "doctor" else "status" if args.command.startswith("evidence-") else args.command, args.dry_run
     )
-    if args.command in ("fuzz-status", "fuzz-stop"):
-        directory = str(workflow_common.remote_job(c, args.job))
-        code = "import sys,json; sys.path.insert(0,sys.argv[1]); from afxx.afx.fuzz import control; print(json.dumps(control(sys.argv[1],sys.argv[2])))"
-        return workflow_jobs.remote(c, ["python3", "-c", code, directory, args.command.split("-", 1)[1]])
     if args.command == "doctor":
         return {
             "config": "valid",
@@ -529,22 +508,12 @@ def main():
         "seeds": values,
         "batch": bool(args.seeds_file),
         "deployment": args.deployment,
-        "upload": args.upload,
     }
     if args.command == "replay":
         request.pop("deployment")
         return replay_runs.submit(c, request, args.request_id or uuid.uuid4().hex, args.dry_run)
-    if args.command == "fuzz-run":
-        for name in ("count", "workers", "compile_threads"):
-            value = getattr(args, name)
-            workflow_common.require_code(value is None or value > 0, "INVALID_ARGUMENT", f"--{name.replace('_', '-')} must be positive")
-        request["fuzz"] = {key: getattr(args, key) for key in
-                           ("count", "workers", "compile_threads", "device", "backend", "ops")}
     if args.command == "deploy" and args.coordinate_client:
         request["coordinate_client"] = True
-    if args.command == "deploy" and args.issue_id:
-        lease = platform.claimed(c, args.issue_id)
-        request["issue"] = {key: lease[key] for key in ("id", "lease_id")}
     if args.command == "update":
         from afxx.environment.python import validate_selection
         request["updates"] = validate_selection({key: getattr(args, key) for key in
@@ -626,7 +595,7 @@ def cli():
         mcp_main(sys.argv[2:])
         return 0
     command = sys.argv[1] if len(sys.argv) > 1 else None
-    if command in ("issue", "execution", "config", "evidence", "fuzz", "skills", "client", "case", "platform", "retest", "replay", "deploy") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
+    if command in ("issue", "config", "evidence", "skills", "client", "case", "platform", "retest", "replay", "deploy") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()

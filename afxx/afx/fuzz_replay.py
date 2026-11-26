@@ -15,8 +15,8 @@ from afxx.afx import replay
 
 
 def validate_options(c, request):
-    common.require_code(request.get('upload') in (None, True, False), 'INVALID_ARGUMENT',
-                        'upload must be a boolean')
+    common.require_code('upload' not in request and 'upload' not in c, 'INVALID_ARGUMENT',
+                        'replay always uploads; remove the upload option')
 
 
 def command(interpreter, seed, device=None, compile_threads=None, dump=False):
@@ -175,7 +175,7 @@ def execute(job):
     home = Path(selected['home']) if selected else data_home()
     # Route through the unique live client even if active-home points elsewhere.
     os.environ['AUTOFUSEX_HOME'] = str(home)
-    enabled = c['upload']['enabled'] if request.get('upload') is None else request['upload']
+    validate_options(c, request)
     active = []
     if selected:
         state = public(['daemon', 'status', '--data-dir', str(home)])
@@ -184,20 +184,20 @@ def execute(job):
         for run in active:
             spec = public(['task', 'inspect', run['id'], '--data-dir', str(home)]).get('spec', {})
             spec = spec.get('spec', spec)
-            common.require_code(spec.get('results', {}).get('upload', True) == enabled,
+            common.require_code(spec.get('results', {}).get('upload', True) is True,
                                 'UPLOAD_POLICY_CONFLICT',
-                                'active AFX session upload policy differs from replay; change the session policy first')
-    if enabled and not active:
+                                'active AFX session has upload disabled; enable session upload before replay')
+    if not active:
         settings = config.platform_settings(c)
         common.require_code(Path(settings.get('client_token_file') or settings['remote_token_file']).is_file(),
                             'PLATFORM_CREDENTIAL_MISSING',
-                            'standalone upload requires platform.client_token_file; use --no-upload for offline replay')
+                            'standalone upload requires platform.client_token_file')
     results = Path(c['replay']['results_dir']) / common.execution_id(job)
     results.mkdir(parents=True, exist_ok=True)
     dump = c['replay']['dump']
     before = dump_directories(home) if dump else {}
     common.update_record(job / 'result.json', execution_mode='fuzz_replay', client_home=str(home),
-        results_dir=str(results), upload={'enabled': enabled, 'state': 'awaiting_execution' if enabled else 'disabled'},
+        results_dir=str(results), upload={'enabled': True, 'state': 'awaiting_execution'},
         references=[], attempts=[], dump_enabled=dump)
     normalized = replay.normalized_seeds(common.capture(replay.seed_command(sys.executable, request['seeds'])))
     references, attempts, errors = [], [], []
@@ -236,11 +236,10 @@ def execute(job):
                 client_attempt_ids.extend(identities)
             else:
                 standalone_attempts.extend(current)
-            if enabled:
-                common.update_record(job / 'result.json', upload={
-                    'enabled': True, 'owner': 'client' if not standalone_attempts else 'afxx' if not client_attempt_ids else 'mixed',
-                    'state': 'delegated' if not standalone_attempts else 'pending',
-                    'client_attempt_ids': client_attempt_ids, 'server_confirmation': 'not_checked'})
+            common.update_record(job / 'result.json', upload={
+                'enabled': True, 'owner': 'client' if not standalone_attempts else 'afxx' if not client_attempt_ids else 'mixed',
+                'state': 'delegated' if not standalone_attempts else 'pending',
+                'client_attempt_ids': client_attempt_ids, 'server_confirmation': 'not_checked'})
             if code != 0 and 'task_ids' not in receipt:
                 errors.append('AFX replay failed: ' + seed)
             common.update_record(job / 'result.json', references=references, attempts=attempts)
@@ -249,7 +248,7 @@ def execute(job):
         report['passed'] = not report['errors']
         report['execution_environments'] = {a['id']: a.get('contexts', {}).get('environment', {}) for a in attempts}
         common.update_record(job / 'result.json', **report)
-        if enabled and standalone_attempts:
+        if standalone_attempts:
             common.phase(job, 'replay_upload')
             try:
                 receipt = upload_results(c, standalone_attempts)

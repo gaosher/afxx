@@ -156,7 +156,7 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
 
     def cli(command, *args):
         monkeypatch.setattr(
-            sys, "argv", ["afxx", *command.split(), "--issue-id", number, *args]
+            sys, "argv", ["afxx", *command.split(), *([] if command == "deploy" else ["--issue-id", number]), *args]
         )
         return afxx.cli.main()
 
@@ -174,7 +174,7 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     monkeypatch.setattr(jobs, "local_preflight", lambda *args: None)
     monkeypatch.setattr(jobs, "submit", lambda c, request, *args: request)
     request = cli("deploy", "--detach")
-    assert request["issue"] == {"id": number, "lease_id": first["lease_id"]}
+    assert "issue" not in request
     workflow_common.write(candidate / "request.json", request)
 
     def remote(c, argv):
@@ -197,7 +197,7 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     assert len(tasks["tasks"]) == 1 and tasks["tasks"][0]["case_key"] == "E" + "0" * 25 + "1"
     preview = cli("issue regression-preview")
     assert preview["issue_id"] == number and "cases" in preview
-    monkeypatch.setattr(sys, "argv", ["afxx", "execution", "show", "--exec-uuid", "exec-0001"])
+    monkeypatch.setattr(sys, "argv", ["afxx", "case", "execution", "--exec-uuid", "exec-0001"])
     execution = afxx.cli.main()
     assert execution["log"] == "schedule failed: test execution log"
     assert execution["log_truncated"] is False
@@ -213,11 +213,11 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     summary_fields = filled_summary(number)
     summary.write_text(yaml.safe_dump(summary_fields, allow_unicode=True, sort_keys=False))
     with pytest.raises(workflow_common.WorkflowError, match="summary response lost"):
-        cli("issue submit-summary", "--summary-file", str(summary), "--request-id", "summary-1")
+        cli("issue submit-summary", "--summary-file", str(summary), "--request-key", "summary-1")
     assert issues.issue_detail(store, number)["status"] == "resolved"
-    published = cli("issue submit-summary", "--summary-file", str(summary), "--request-id", "summary-1")
+    published = cli("issue submit-summary", "--summary-file", str(summary), "--request-key", "summary-1")
     assert published["status"] == "resolved" and published["knowledge_id"].startswith("K")
-    assert cli("issue submit-summary", "--summary-file", str(summary), "--request-id", "summary-1") == published
+    assert cli("issue submit-summary", "--summary-file", str(summary), "--request-key", "summary-1") == published
     assert summary_keys == ["summary-1", "summary-1"]
     from autofusex.server import knowledge
     with store.connect() as conn:
@@ -226,22 +226,6 @@ def test_numbered_issue_workflow(afx, platform_cfg, candidate, monkeypatch, tmp_
     assert saved["evidence"]["fix_ref"] == summary_fields["fix_ref"]
 
 
-def test_official_fuzz_command_contract(afx, cfg, tmp_path):
-    import argparse
-    from afxx.afx import fuzz
-    from autofusex.workloads.fuzz.scheduling.cli import register
-
-    parser = argparse.ArgumentParser()
-    sub = parser.add_subparsers(dest="command")
-    maintenance = sub.add_parser("maintenance").add_subparsers()
-    register(sub, maintenance)
-    argv = fuzz.command(cfg, tmp_path, {"count": 5, "device": ["npu:0", "npu:1"], "workers": 2, "compile_threads": 4, "ops": "add,sum", "backend": ["eager-npu"]})
-    args = parser.parse_args(argv[4:])
-    assert args.foreground and args.save and args.count == 5
-    assert args.device == ["npu:0", "npu:1"]
-    assert args.database == str(tmp_path / "results/results.sqlite")
-    for action in ("status", "stop"):
-        assert parser.parse_args([action, "--data-dir", str(tmp_path)]).command == action
 
 
 def test_fuzz_replay_command_contract(afx, tmp_path):

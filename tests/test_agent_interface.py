@@ -23,7 +23,6 @@ def request(command="check"):
         "seeds": [],
         "batch": False,
         "deployment": None,
-        "upload": None,
     }
 
 
@@ -547,7 +546,7 @@ def test_numbered_claim_displays_summary_and_keeps_full_receipt():
     assert receipt["repro"]["cases"] == [{"case_key": "seed"}]
 
 
-@pytest.mark.parametrize('command', ['deploy','replay','check','init','update','fuzz-run'])
+@pytest.mark.parametrize('command', ['deploy','replay','check','init','update'])
 def test_job_id_is_request_id(cfg, command):
     identity='F152-'+command+'-001'
     result=workflow_jobs.submit(cfg,request(command),identity,True)

@@ -52,8 +52,8 @@ def test_typed_replay_and_generic_have_same_invocation(monkeypatch):
     monkeypatch.setattr(m, 'invoke', invoke)
     monkeypatch.setattr(op, 'submit', lambda *a: pytest.fail('replay must not reuse MCP receipt'))
     server=m.create_server('/config')
-    call(server,'afxx_replay',dict(request_id='r',seed='ABC',dump=True,upload=False))
-    call(server,'afxx_run',dict(command='replay',request_id='r',arguments=['--seed','ABC','--dump','--no-upload']))
+    call(server,'afxx_replay',dict(request_id='r',seed='ABC',dump=True))
+    call(server,'afxx_run',dict(command='replay',request_id='r',arguments=['--seed','ABC','--dump']))
     assert seen[0]==seen[1]
     assert seen[0][-2:]==['--request-id','r']
 
@@ -200,7 +200,7 @@ print(o.submit('deploy',['deploy'],None,'outlive')['data']['state'],flush=True)
 
 
 @pytest.mark.parametrize('tool,arguments,tokens', [
-    ('afxx_issue', {'action':'release','issue_id':'F152','request_id':'release-1'}, ['issue','release','--config','/config','--issue-id','F152','--request-id','release-1']),
+    ('afxx_issue', {'action':'release','issue_id':'F152','request_key':'release-1'}, ['issue','release','--config','/config','--issue-id','F152','--request-key','release-1']),
     ('afxx_case', {'action':'spec','case_key':'seed'}, ['case','spec','--config','/config','--case-key','seed']),
     ('afxx_case', {'action':'history','case_key':'seed','after':42,'limit':2}, ['case','history','--config','/config','--case-key','seed','--limit','2','--after','42']),
     ('afxx_evidence_list', {'request_id':'repair','run':2}, ['evidence','list','--config','/config','--request-id','repair','--offset','0','--run','2']),
@@ -226,7 +226,7 @@ def test_case_list_generic_mcp(monkeypatch):
 
 
 @pytest.mark.parametrize('tool,arguments,tokens', [
-    ('afxx_execution_show', {'exec_uuid':'exec-0001'}, ['execution','show','--exec-uuid','exec-0001']),
+    ('afxx_case_execution', {'exec_uuid':'exec-0001'}, ['case','execution','--exec-uuid','exec-0001']),
     ('afxx_issue_status', {'issue_id':'F152','round_no':2,'include_tasks':True}, ['issue','status','--issue-id','F152','--round-no','2','--include-tasks']),
     ('afxx_evidence_list', {'request_id':'a'*32,'offset':10}, ['evidence','list','--request-id','a'*32,'--offset','10']),
     ('afxx_evidence_read', {'request_id':'a'*32,'path':'/remote/dump/a b.mlir'}, ['evidence','read','--request-id','a'*32,'--path','/remote/dump/a b.mlir','--offset','0','--limit','8192']),
@@ -243,7 +243,7 @@ def test_diagnostic_tools_share_cli(monkeypatch, tool, arguments, tokens):
 
 
 @pytest.mark.parametrize('tool,args', [
-    ('afxx_execution_show', {'exec_uuid':'123'}),
+    ('afxx_case_execution', {'exec_uuid':'123'}),
     ('afxx_issue_status', {'issue_id':'F152','round_no':0}),
     ('afxx_issue_status', {'issue_id':'../F152','round_no':1}),
     ('afxx_evidence_list', {'request_id':'../bad'}),
@@ -311,7 +311,7 @@ def test_issue_requires_explicit_identity(monkeypatch,action):
 
 
 @pytest.mark.parametrize('args', [
-    {'action':'claim'}, {'action':'release'},
+    {'action':'claim'},
     {'action':'verify','deploy_job_id':'a'*32},
     {'action':'preview','request_id':'r'}, {'action':'preview','deploy_job_id':'a'*32},
     {'action':'claim','request_id':'r','full':False},
@@ -438,3 +438,62 @@ def test_replay_and_status_reject_conflicting_group(monkeypatch, command):
 def test_mcp_deploy_always_detaches(arguments):
     args, _ = m.prepare('deploy', arguments, None, '/config')
     assert args.count('--detach') == 1
+
+
+def test_deploy_schema_has_no_issue_binding():
+    tools = asyncio.run(m.create_server().list_tools())
+    deploy = next(tool for tool in tools if tool.name == "afxx_deploy")
+    assert "issue_id" not in deploy.inputSchema["properties"]
+
+
+def test_summary_mcp_forwards_optional_override(monkeypatch):
+    seen = []
+    async def invoke(args):
+        seen.append(args)
+        return 0, json.dumps({'ok': True, 'data': {}, 'error': None})
+    monkeypatch.setattr(m, 'invoke', invoke)
+    server = m.create_server('/config')
+    base = dict(command='issue submit-summary', arguments=['--issue-id', 'F152', '--summary-file', '/summary.yaml'])
+    assert not call(server, 'afxx_run', base).isError
+    assert '--request-id' not in seen[0]
+    assert not call(server, 'afxx_run', dict(base, request_key='manual-summary')).isError
+    assert seen[1][-2:] == ['--request-key', 'manual-summary']
+
+
+def test_case_execution_tool_replaces_execution_show(monkeypatch):
+    server = m.create_server("/explicit")
+    names = {tool.name for tool in asyncio.run(server.list_tools())}
+    assert "afxx_case_execution" in names
+    assert "afxx_execution_show" not in names
+    async def invoke(args):
+        assert args == ["case", "execution", "--config", "/explicit", "--exec-uuid", "exec-0001"]
+        return 0, json.dumps({"ok": True, "data": {"exec_uuid": "exec-0001"}})
+    monkeypatch.setattr(m, "invoke", invoke)
+    result = call(server, "afxx_run", {"command": "case execution", "arguments": ["--exec-uuid", "exec-0001"]})
+    assert result.structuredContent["data"]["exec_uuid"] == "exec-0001"
+
+
+@pytest.mark.parametrize('action,arguments', [
+    ('issue release', {'request_id':'old'}),
+    ('issue submit-summary', {'request_id':'old'}),
+    ('case history', {'request_key':'wrong'}),
+    ('issue release', {'request_key':'one', 'arguments':['--request-key','two']}),
+])
+def test_mcp_mutation_key_rejects_wrong_scope_or_conflict(monkeypatch, action, arguments):
+    async def forbidden(*args): pytest.fail('must not invoke CLI')
+    monkeypatch.setattr(m, 'invoke', forbidden)
+    assert call(m.create_server(), 'afxx_run', dict(command=action, **arguments)).isError
+
+
+def test_mcp_release_key_optional(monkeypatch):
+    async def invoke(args):
+        assert '--request-key' not in args and '--request-id' not in args
+        return 0, json.dumps({'ok':True,'data':{},'error':None})
+    monkeypatch.setattr(m, 'invoke', invoke)
+    assert not call(m.create_server(), 'afxx_issue', {'action':'release','issue_id':'F152'}).isError
+
+
+def test_mcp_replay_has_no_upload_switch():
+    tools = asyncio.run(m.create_server().list_tools())
+    replay = next(t for t in tools if t.name == 'afxx_replay')
+    assert 'upload' not in replay.inputSchema['properties']

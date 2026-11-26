@@ -52,7 +52,6 @@ def cfg(tmp_path):
             "batch_timeout_seconds": 300,
             "dump": False,
         },
-        "upload": {"enabled": False},
     }
     source = Path(c["local"]["source_dir"])
     source.mkdir()

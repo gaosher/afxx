@@ -5,12 +5,10 @@ from afxx import common as workflow_common
 from afxx import config as workflow_config
 from afxx.environment import runtime as workflow_runtime
 
-import contextlib
 import json
 import math
 from pathlib import Path
 import re
-import threading
 import time
 import urllib.error
 import urllib.parse
@@ -150,10 +148,17 @@ def claim(c, request_key, *, issue_id=None):
     return value
 
 
-def summarize(c, issue_id, summary_file, request_id):
+def mutation_request_key(operation, issue_id, context, payload, request_key=None):
+    """Stable platform mutation key; explicit overrides bind to the same payload."""
+    workflow_common.require_code(request_key is None or (isinstance(request_key, str)
+                            and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_key)),
+                            "INVALID_ARGUMENT", "invalid request-key: use 1-128 letters, digits, _, . or -")
+    return request_key if request_key is not None else operation + "-" + workflow_common.digest({
+        "operation": operation, "issue_id": issue_id, "context": context, "payload": payload})
+
+
+def summarize(c, issue_id, summary_file, request_key=None):
     validate_issue_id(issue_id)
-    workflow_common.require(isinstance(request_id, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id),
-                            "summarize requires a valid request-id")
     try:
         knowledge = workflow_config.read_config(summary_file)
     except (OSError, ValueError, TypeError) as error:
@@ -167,14 +172,16 @@ def summarize(c, issue_id, summary_file, request_id):
         "SUMMARY_INVALID", "summary must contain kind/title/symptom/root_cause/solution and only supported knowledge fields",
     )
     lease = claimed(c, issue_id)
-    body = {"request_key": request_id, "lease_id": lease["lease_id"], "knowledge": knowledge}
     context = {"platform_url": workflow_config.platform_settings(c)["url"], "agent_id": c["platform"]["agent_id"]}
-    path = record_path(c, issue_id).with_suffix("") / "summaries" / (workflow_common.digest(request_id) + ".json")
+    body = {"lease_id": lease["lease_id"], "knowledge": knowledge}
+    request_key = mutation_request_key("summary", issue_id, context, body, request_key)
+    body["request_key"] = request_key
+    path = record_path(c, issue_id).with_suffix("") / "summaries" / (workflow_common.digest(request_key) + ".json")
     with workflow_common.lock(path.with_suffix(".lock")):
         state = workflow_common.read(path) if path.exists() else {}
         if state:
             workflow_common.require_code(state["body"] == body and state["context"] == context,
-                                         "REQUEST_CONFLICT", "summary request-id already binds another summary, lease or platform")
+                                         "REQUEST_CONFLICT", "summary request-key already binds another summary, lease or platform")
             if state["state"] == "submitted":
                 return state["response"]
         else:
@@ -255,33 +262,6 @@ def renew(c, lease, *, remote=False):
         body,
         remote=remote,
     )
-
-
-@contextlib.contextmanager
-def deployment_lease(c, job):
-    request = workflow_common.read(job / "request.json")
-    lease = request.get("issue")
-    if not lease:
-        yield
-        return
-    workflow_config.platform_settings(c)
-    renew(c, lease, remote=True)
-    stopped = threading.Event()
-
-    def keep_alive():
-        while not stopped.wait(30):
-            try:
-                renew(c, lease, remote=True)
-            except Exception:
-                print("平台租约续期失败，提交前将再次检查", flush=True)
-
-    thread = threading.Thread(target=keep_alive, daemon=True)
-    thread.start()
-    try:
-        yield
-    finally:
-        stopped.set()
-        thread.join(timeout=35)
 
 
 def submit_issue_round(c, path, state, lease, package):
@@ -492,20 +472,20 @@ def retry_remote(job, lease=None):
         }
 
 
-def release(c, issue_id, request_id):
+def release(c, issue_id, request_key=None):
     """Release the claimed lease; retain the successful receipt for safe retries."""
-    workflow_common.require(isinstance(request_id, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", request_id),
-                            "release requires a valid request-id")
     path = record_path(c, issue_id)
     with workflow_common.lock(path.with_suffix(".lock")):
         lease = claimed(c, issue_id, allow_released=True)
-        receipt = path.with_suffix("") / "releases" / (workflow_common.digest(request_id) + ".json")
-        body = {"lease_id": lease["lease_id"], "request_key": request_id}
         context = {key: lease[key] for key in ("platform_url", "agent_id")}
+        body = {"lease_id": lease["lease_id"]}
+        request_key = mutation_request_key("release", issue_id, context, body, request_key)
+        body["request_key"] = request_key
+        receipt = path.with_suffix("") / "releases" / (workflow_common.digest(request_key) + ".json")
         state = workflow_common.read(receipt) if receipt.exists() else {}
         if state:
             workflow_common.require_code(state["body"] == body and state["context"] == context,
-                                         "REQUEST_CONFLICT", "release request-id belongs to another lease or platform")
+                                         "REQUEST_CONFLICT", "release request-key belongs to another lease or platform")
         else:
             workflow_common.require_code(not lease.get("release"), "ISSUE_RELEASED", "lease already released")
             state = {"body": body, "context": context}
@@ -517,7 +497,7 @@ def release(c, issue_id, request_id):
                                          "PLATFORM_RESPONSE_INVALID", "invalid release response")
             state["response"] = value
             workflow_common.write(receipt, state)
-        lease["release"] = {"request_id": request_id, "response": state["response"]}
+        lease["release"] = {"request_key": request_key, "response": state["response"]}
         workflow_common.write(path, lease)
         return state["response"]
 

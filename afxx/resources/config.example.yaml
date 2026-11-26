@@ -42,4 +42,4 @@ platform:
   remote_token_file: null # 默认 <workflow_root>/auth/afx.token
   client_token_file: null # 首次创建 client 时默认复用 remote_token_file，需 upload/retest 权限
 
-# replay 默认上传本轮结果；离线运行使用 --no-upload，或添加 upload: {enabled: false}。
+# replay 统一上传本轮结果；不提供上传开关。

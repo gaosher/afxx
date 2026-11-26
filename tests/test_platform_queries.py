@@ -9,7 +9,7 @@ CASES = [
     (["issue", "detail", "--issue-id", "F152"], "/api/issues/F152", {"issue_id": "F152", "rounds": [], "events": []}),
     (["issue", "tasks", "--issue-id", "F152", "--round-no", "2"], "/api/issues/F152/rounds/2/tasks", [{"task_id": 1, "result": "fail", "detail": "compile error"}]),
     (["issue", "regression-preview", "--issue-id", "F152"], "/api/regression/preview?issue_id=F152", {"issue_id": "F152", "cases": [], "budget": 200}),
-    (["execution", "show", "--exec-uuid", "exec-0001"], "/api/executions/exec-0001", {"exec_uuid": "exec-0001", "log": "failure", "log_truncated": True}),
+    (["case", "execution", "--exec-uuid", "exec-0001"], "/api/executions/exec-0001", {"exec_uuid": "exec-0001", "log": "failure", "log_truncated": True}),
 ]
 
 
@@ -31,13 +31,15 @@ def test_queries_are_local_read_only_without_claim(platform_cfg, monkeypatch, ca
 
 
 @pytest.mark.parametrize("args", [
+    ["execution", "show", "--exec-uuid", "exec-0001"],
+    ["case", "execution"],
     ["issue", "detail", "--issue-id", "../F152"],
     ["issue", "tasks", "--issue-id", "F152", "--round-no", "0"],
     ["issue", "tasks", "--issue-id", "F152", "--round-no", "1000000"],
     ["issue", "tasks", "--issue-id", "F152"],
-    ["execution", "show", "--exec-uuid", "../exec-0001"],
-    ["execution", "show", "--exec-uuid", "exec-0001?secret"],
-    ["execution", "show", "--exec-uuid", "123"],
+    ["case", "execution", "--exec-uuid", "../exec-0001"],
+    ["case", "execution", "--exec-uuid", "exec-0001?secret"],
+    ["case", "execution", "--exec-uuid", "123"],
 ])
 def test_invalid_query_never_reaches_platform(platform_cfg, monkeypatch, capsys, args):
     monkeypatch.setattr(sys, "argv", ["afxx", *args])
@@ -117,7 +119,7 @@ def test_new_queries(platform_cfg, monkeypatch, capsys, args, path, data):
     ["case", "history", "--case-key", "seed", "--limit", "201"],
     ["case", "history", "--case-key", "seed", "--after", "-1"],
     ["case", "spec", "--case-key", ".."],
-    ["issue", "release", "--issue-id", "F152"],
+    ["issue", "release", "--issue-id", "F152", "--request-id", "old"],
 ])
 def test_invalid_new_queries(platform_cfg, monkeypatch, capsys, args):
     test_invalid_query_never_reaches_platform(platform_cfg, monkeypatch, capsys, args)
@@ -161,7 +163,7 @@ def test_new_query_invalid_response(platform_cfg, monkeypatch, query, args):
 
 
 def test_release_cli_uses_local_lease(platform_cfg, monkeypatch, capsys):
-    monkeypatch.setattr(sys, "argv", ["afxx", "issue", "release", "--issue-id", "F152", "--request-id", "release-1"])
+    monkeypatch.setattr(sys, "argv", ["afxx", "issue", "release", "--issue-id", "F152", "--request-key", "release-1"])
     monkeypatch.setattr(config, "config", lambda _: platform_cfg)
     monkeypatch.setattr(jobs, "local_preflight", lambda *a: pytest.fail("must not use NPU"))
     common.write(p.record_path(platform_cfg, "F152"), dict(id="F152", lease_id="lease", platform_url=platform_cfg["platform"]["url"], agent_id="agent-1"))
@@ -317,3 +319,50 @@ def test_verify_check_cli_readonly(platform_cfg,monkeypatch,capsys):
     monkeypatch.setattr(p,'verify_check',check)
     assert cli.cli()==0
     assert json.loads(capsys.readouterr().out)['data']['timed_out']
+
+
+def test_release_automatic_key_retry_and_new_lease(platform_cfg, monkeypatch):
+    path = p.record_path(platform_cfg, "F152")
+    lease = dict(id="F152", lease_id="lease", platform_url=platform_cfg["platform"]["url"], agent_id="agent-1")
+    common.write(path, lease)
+    bodies = []
+    def api(c, method, target, body):
+        bodies.append(body.copy())
+        if len(bodies) == 1:
+            raise common.WorkflowError("PLATFORM_UNAVAILABLE", "lost response")
+        return dict(issue_id="F152", status="open")
+    monkeypatch.setattr(p, "call", api)
+    with pytest.raises(common.WorkflowError):
+        p.release(platform_cfg, "F152")
+    p.release(platform_cfg, "F152")
+    p.release(platform_cfg, "F152")
+    assert len(bodies) == 2 and bodies[0] == bodies[1]
+    assert bodies[0]["request_key"].startswith("release-")
+    common.write(path, dict(lease, lease_id="new-lease"))
+    p.release(platform_cfg, "F152")
+    assert bodies[-1]["request_key"] != bodies[0]["request_key"]
+
+
+@pytest.mark.parametrize('key', ['', 'bad/key', 'x'*129, 123])
+def test_mutation_key_validation(key):
+    with pytest.raises(common.WorkflowError):
+        p.mutation_request_key('release', 'F152', {}, {}, key)
+
+
+def test_mutation_key_identity():
+    key = p.mutation_request_key('release', 'F152', {'platform_url':'a'}, {'lease_id':'l'})
+    assert key != p.mutation_request_key('summary', 'F152', {'platform_url':'a'}, {'lease_id':'l'})
+    assert key != p.mutation_request_key('release', 'F152', {'platform_url':'b'}, {'lease_id':'l'})
+    assert p.mutation_request_key('release', 'F152', {}, {}, 'manual') == 'manual'
+
+
+def test_release_cli_default_key(platform_cfg, monkeypatch, capsys):
+    common.write(p.record_path(platform_cfg, "F152"), dict(id="F152", lease_id="lease", platform_url=platform_cfg["platform"]["url"], agent_id="agent-1"))
+    monkeypatch.setattr(sys, "argv", ["afxx", "issue", "release", "--issue-id", "F152"])
+    monkeypatch.setattr(config, "config", lambda _: platform_cfg)
+    def api(c, method, target, body):
+        assert body["request_key"].startswith("release-")
+        return dict(issue_id="F152", status="open")
+    monkeypatch.setattr(p, "call", api)
+    assert cli.cli() == 0
+    assert json.loads(capsys.readouterr().out)["ok"]

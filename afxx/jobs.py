@@ -64,7 +64,7 @@ def worker(job):
         c = workflow_config.validate_config(workflow_common.read(job / "config.yaml"))
         request = workflow_common.read(job / "request.json")
         workflow_common.require_code(
-            request.get("command") in ("deploy", "init", "update", "replay", "check", "fuzz-run"),
+            request.get("command") in ("deploy", "init", "update", "replay", "check"),
             "INVALID_ARGUMENT", "unsupported worker command",
         )
         source = Path(c["remote"]["source_dir"]).resolve()
@@ -87,9 +87,7 @@ def worker(job):
             )
         workflow_common.phase(job, "starting")
         if request["command"] == "deploy":
-            from afxx.afx import platform as platform_adapter
-            with platform_adapter.deployment_lease(c, job):
-                workflow_execution.deploy(c, job)
+            workflow_execution.deploy(c, job)
         elif request["command"] in ("init", "update"):
             workflow_common.phase(job, request["command"])
             from afxx.environment import bootstrap
@@ -107,8 +105,6 @@ def worker(job):
                 ],
                 cwd=job,
             )
-        elif request["command"] == "fuzz-run":
-            workflow_execution.fuzz(c, job, request)
         elif request["command"] == "replay":
             workflow_execution.replay(c, job, request)
         else:
@@ -136,7 +132,6 @@ def worker(job):
                             "update": "result.json",
                             "deploy": "result.json",
                             "replay": "result.json",
-                            "fuzz-run": "result.json",
                             "check": "environment.json",
                         }[request["command"]]
                     )

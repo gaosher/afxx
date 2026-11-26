@@ -25,6 +25,9 @@ def test_exact_attempts_no_forced_database(cfg, tmp_path, monkeypatch, failure):
     monkeypatch.setitem(sys.modules, paths.__name__, paths)
     from afxx.afx import managed_client
     monkeypatch.setattr(managed_client,'selected_client',lambda:None)
+    token=tmp_path/'token';token.write_text('test-only')
+    monkeypatch.setattr(m.config,'platform_settings',lambda c:{'client_token_file':str(token)})
+    monkeypatch.setattr(m,'upload_results',lambda c, rows:{'receipt':{'uploaded':len(rows)}})
     cfg['replay'].update(devices='auto',results_dir=str(tmp_path/'results'),dump=True)
     common.write(job/'config.yaml',cfg)
     common.write(job/'request.json',{'seeds':['short-seed']})
@@ -47,7 +50,7 @@ def test_exact_attempts_no_forced_database(cfg, tmp_path, monkeypatch, failure):
     else:
         m.execute(job)
         report=common.read(job/'result.json')
-        assert report['passed'] and report['upload']['state']=='disabled'
+        assert report['passed'] and report['upload']['state']=='synced'
         assert len(report['execution_environments'])==2
     assert not (tmp_path/'results/job/results.sqlite').exists()
     if failure=='timeout':
@@ -93,8 +96,7 @@ def test_timeout_stops_cli_group(monkeypatch,tmp_path):
     assert signals==[(123,m.signal.SIGTERM)]
 
 
-@pytest.mark.parametrize('override,configured,expected', [(None,True,True),(False,True,False),(True,False,True)])
-def test_upload_precedence_and_failed_results(cfg,tmp_path,monkeypatch,override,configured,expected):
+def test_failed_results_are_uploaded(cfg,tmp_path,monkeypatch):
     monkeypatch.setenv('AUTOFUSEX_HOME',str(tmp_path))
     paths=types.ModuleType('autofusex.client.paths')
     paths.data_home=lambda:tmp_path
@@ -104,10 +106,9 @@ def test_upload_precedence_and_failed_results(cfg,tmp_path,monkeypatch,override,
     monkeypatch.setattr(managed_client,'selected_client',lambda:None)
     token=tmp_path/'token';token.write_text('test-only')
     monkeypatch.setattr(m.config,'platform_settings',lambda c:{'client_token_file':str(token)})
-    cfg['upload']['enabled']=configured
     cfg['replay']['results_dir']=str(tmp_path/'results')
     job=tmp_path/'job';job.mkdir()
-    common.write(job/'config.yaml',cfg);common.write(job/'request.json',{'seeds':['seed'],'upload':override})
+    common.write(job/'config.yaml',cfg);common.write(job/'request.json',{'seeds':['seed']})
     monkeypatch.setattr(common,'capture',lambda *a:'[["123",1]]')
     monkeypatch.setattr(m,'invoke',lambda *a:(0,[{'attempts':[{'attempt_id':'cpu'},{'attempt_id':'af-mlir'}]}]))
     def read(database,identity):
@@ -121,11 +122,11 @@ def test_upload_precedence_and_failed_results(cfg,tmp_path,monkeypatch,override,
         return {'receipt':{'uploaded':2}}
     monkeypatch.setattr(m,'upload_results',upload)
     with pytest.raises(common.WorkflowError,match='fuzz replay failed'):m.execute(job)
-    assert bool(uploads) is expected
-    assert common.read(job/'result.json')['upload']['enabled'] is expected
+    assert len(uploads) == 1
+    assert common.read(job/'result.json')['upload']['enabled'] is True
 
 
-def test_no_upload_conflict_is_rejected_before_submission(cfg,tmp_path,monkeypatch):
+def test_disabled_session_upload_is_rejected_before_submission(cfg,tmp_path,monkeypatch):
     monkeypatch.setenv('AUTOFUSEX_HOME',str(tmp_path))
     paths=types.ModuleType('autofusex.client.paths')
     paths.data_home=lambda:tmp_path
@@ -135,11 +136,11 @@ def test_no_upload_conflict_is_rejected_before_submission(cfg,tmp_path,monkeypat
     monkeypatch.setattr(managed_client,'selected_client',lambda:{'home':str(tmp_path)})
     def public(args):
         if args[0]=='daemon':return {'runs':[{'id':'r','state':'running'}]}
-        return {'spec':{'spec':{'results':{'upload':True}}}}
+        return {'spec':{'spec':{'results':{'upload':False}}}}
     monkeypatch.setattr(m,'public',public)
     monkeypatch.setattr(m,'invoke',lambda *a:pytest.fail('must not submit'))
     job=tmp_path/'job';job.mkdir()
-    common.write(job/'config.yaml',cfg);common.write(job/'request.json',{'seeds':['s'],'upload':False})
+    common.write(job/'config.yaml',cfg);common.write(job/'request.json',{'seeds':['s']})
     with pytest.raises(common.WorkflowError,match='active AFX session'):m.execute(job)
 
 
@@ -169,7 +170,7 @@ def test_client_owned_upload_never_resynced(cfg,tmp_path,monkeypatch,modes):
         return {'spec':{'spec':{'results':{'upload':True}}}}
     monkeypatch.setattr(m,'public',public)
     monkeypatch.setattr(m.config,'platform_settings',lambda c:pytest.fail('client owns credentials'))
-    cfg['upload']['enabled']=True;cfg['replay']['results_dir']=str(tmp_path/'results')
+    cfg['replay']['results_dir']=str(tmp_path/'results')
     job=tmp_path/'job';job.mkdir()
     common.write(job/'config.yaml',cfg);common.write(job/'request.json',{'seeds':[str(i) for i in range(len(modes))]})
     monkeypatch.setattr(common,'capture',lambda *a:json.dumps([[str(i+123),1] for i in range(len(modes))]))

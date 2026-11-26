@@ -255,31 +255,20 @@ def test_issue_cli_uses_http_without_npussh(platform_cfg, monkeypatch):
     assert afxx.cli.main()["issue_id"] == REPAIR
 
 
-def test_deploy_cli_freezes_issue_lease(platform_cfg, monkeypatch):
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "afxx/cli.py",
-            "deploy",
-            "--issue-id",
-            REPAIR,
-            "--request-id",
-            "deploy-1",
-            "--dry-run",
-        ],
-    )
+def test_deploy_does_not_require_issue_lease(platform_cfg, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["afxx", "deploy", "--request-id", "repair", "--dry-run"])
     monkeypatch.setattr(workflow_config, "config", lambda path: platform_cfg)
     monkeypatch.setattr(workflow_jobs, "local_preflight", lambda *a: None)
-    monkeypatch.setattr(p, "claimed", lambda *a: dict(LEASE, extra="unused"))
+    monkeypatch.setattr(p, "claimed", lambda *a: pytest.fail("deploy must not read lease"))
+    monkeypatch.setattr(p, "renew", lambda *a, **kw: pytest.fail("deploy must not renew"))
     requests = []
-    monkeypatch.setattr(
-        workflow_jobs,
-        "submit",
-        lambda c, r, *a: requests.append(r) or {"state": "prepared"},
-    )
+    monkeypatch.setattr(workflow_jobs, "submit", lambda c, request, *a: requests.append(request) or {"state": "prepared"})
     afxx.cli.main()
-    assert requests[0]["issue"] == LEASE
+    assert "issue" not in requests[0]
+    monkeypatch.setattr(sys, "argv", ["afxx", "deploy", "--issue-id", "F152"])
+    with pytest.raises(workflow_common.WorkflowError) as error:
+        afxx.cli.parse_arguments()
+    assert error.value.code == "INVALID_ARGUMENT"
 
 
 def test_retry_cli_returns_remote_receipt(platform_cfg, monkeypatch):
