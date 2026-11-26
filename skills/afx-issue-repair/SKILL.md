@@ -5,7 +5,7 @@ description: 使用 AFXX 领取 AFX 平台 issue，复现并定位 graph-autofus
 
 # AFX Issue 修复
 
-目标：claim → 复现与定位 → 修改 → deploy → verify → 回归 → 总结、commit、待检视。失败时依据证据返回定位；环境或权限阻塞单独报告。创建/讨论 workflow 本身不代表要立即领取问题。
+目标：claim → 复现与定位 → 修改 → deploy → verify → 回归 → 总结、commit、待检视。原问题仍失败时依据证据返回定位；错误原因改变时按下述停止条件收尾，环境或权限阻塞单独报告。创建/讨论 workflow 本身不代表要立即领取问题。
 
 ## 执行约定
 
@@ -120,6 +120,14 @@ afxx evidence read --config "$TASK_CONFIG" --request-id <流程request-id> --run
 
 ## 3. 实施修改
 
+代码修改仅限本次 graph-autofusion 仓库或其修复 worktree，包括必要测试和文档。不得为完成该 issue 修改 AFXX、AFX、torch_npu、CANN/已安装 site-packages 或其他仓库源码；问题落在仓外时记录证据和遗留问题，不越界修复。正常的任务配置、构建、安装、复跑及证据/总结输出仍按已有授权执行。
+
+### 本次修复的停止条件
+
+对同一原始 seed、输入和后端进行有效复跑后，若原错误已不再出现、实际错误原因变为另一个问题，当前按“本次修复可接受”处理：记录原错误、新错误和对应执行证据，不继续追查新问题，不因此开启新的修改/部署循环。仅报错文本、PID、路径变化不算原因改变；未执行、超时、缺失结果、环境阻塞或无覆盖 skip 也不能作为原问题已解决的证据。
+
+批量用例逐例判断：通过或错误原因改变的用例结束追查，原问题仍出现的用例继续在仓内修复；待确认用例保持待确认。目标用例均满足上述接受条件、相关单测完成后，可转第 7 步总结并 commit，不必为了消除新错误无限追查或重复提交 verify。若已提交平台验证，如实记录其状态，不将 failed/skip 改写为 passed。交接结论明确区分“本次修复可接受（错误原因改变）”与“全部用例/平台验证通过”。
+
 以复现证据形成根因假设，定位到源码后实施最小完整修复。依据目标仓库规范增加或调整能表达该缺陷的测试，先执行相关验证。区分算法/编译问题和环境、资源、任务缺失问题。
 
 每轮记录“新证据 → 修改原因 → 预期改变”。不要仅为某个 seed 硬编码，不修改平台验收标准。连续重复同一失败而没有新证据时，停止盲目部署，先补定位信息；需要外部权限、资源或行为决策时报告阻塞点。
@@ -172,7 +180,7 @@ agent 使用 issue verify-check 等待原验证轮次；MCP 调用 afxx_issue(ac
 只有 reason=no_regression_candidates 才记录平台未选择回归。只在阶段变化、新失败或完成时汇报。
 
 - verification 未结束：继续等待。
-- verification.outcome=failed：读取该轮失败任务与执行证据，回到第 2/3 步；修改后经过新的 deploy 和 verify。
+- verification.outcome=failed：读取失败证据并按第 3 步停止条件分类；原错误仍存在才返回第 2/3 步。错误原因改变则记录遗留问题并收尾，不继续追查新错误。
 - state=invalid：优先排查包身份、结果缺失和执行环境，不等同于代码缺陷。
 - verification.outcome=passed：转第 6 步；不能提前 commit 为已验证修复。
 
@@ -185,7 +193,7 @@ agent 使用 issue verify-check 等待原验证轮次；MCP 调用 afxx_issue(ac
 平台在 verify 通过后自动选择并执行回归，无需再次提交 verify 来“触发回归”。继续查询同一个 verify round_no；AFXX 返回其 verification 和关联 regression。
 
 - regression 存在且未结束：继续等待。
-- regression.outcome=failed：提取新增失败用例和证据，回到第 2/3 步；保留原问题 seed 和本次回归失败用例作为后续验证目标。
+- regression.outcome=failed：记录失败用例和证据；属于原问题且仍未解决时回到第 2/3 步，其他新错误按第 3 步的范围与停止条件记录为遗留，不自动扩展修复目标。
 - regression.outcome=invalid：处理执行环境和证据问题后再决定重试，不能计为通过。
 - state=passed 且 regression.outcome=passed：转第 7 步。
 - regression=null：继续使用 verify-check；仅 state=passed 且 reason=no_regression_candidates 时记录“平台未选择回归候选”，而非“回归用例全部通过”。running 继续等待，attention 检查证据；若用户要求必须执行回归，则报告缺口并补足要求后再完成。
@@ -195,7 +203,7 @@ agent 使用 issue verify-check 等待原验证轮次；MCP 调用 afxx_issue(ac
 ## 7. commit、总结交接、等待检视
 
 1. 核对将提交的源码与已验证部署一致；影响产物的代码若再次变化，重新部署验证。
-2. 遵循目标仓库规范，只提交本次修复和必要测试/文档，记录完整 SHA。用户要求仅出补丁或不提交时遵循该要求。
+2. 遵循目标仓库规范，只提交 graph-autofusion 仓内本次修复和必要测试/文档，记录完整 SHA。用户要求仅出补丁或不提交时遵循该要求。
 3. 读取并使用 [afx-issue-summary](../afx-issue-summary/SKILL.md) 生成可提交的 summary.yaml。交接 issue、源码仓库、基线与修复 commit、已有 IR/日志/测试证据位置、平台 verify/回归轮次、任务配置及输出路径 `<local.state_dir>/issues/<issue-id>/summary.yaml`。直接沿用已有任务上下文，不另建交接文件；本地路径用于取证，不进入总结正文。
 4. 向用户交付修复 commit、summary.yaml 绝对路径和验证结论，等待人工检视。总结规则与模板由 afx-issue-summary 维护，不在这里重复。
 
