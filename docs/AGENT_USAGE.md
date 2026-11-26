@@ -11,14 +11,12 @@ MCP 优先使用结构化工具。长操作先选定 request_id，再提交并�
 | doctor | 本地校验配置、工具和 npussh 登录 | 检查通过 |
 | init / update | 提交远端任务，默认跟随日志；支持 --detach | 远端任务 success，环境清单 ready |
 | deploy | 提交远端任务，返回 job ID | status 为 success，result.json 有效 |
-| fuzz run | 远端 job 调用官方 AFX，返回 job ID | status 为 success 仅代表进程正常结束；用 fuzz status 查询用例结果 |
-| fuzz status / fuzz stop | 调用该 job 的 AFX 官方命令 | status 返回队列信息；stop 仅确认停止请求，随后轮询任务终态 |
 | evidence list / evidence read | 本地通过 npussh 只读远端证据 | ok=true；按 next_offset 续读，检查 sha256 和未关联标记 |
 | replay | 每次提交新 run，返回 request_id/run | replay show 的 data.state=success 且 data.passed=true |
 | check | 提交远端依赖检查 | 任务 success、依赖检查通过 |
 | status | 查询远端 job | 查询成功后继续检查返回的任务 state |
 | issue claim / issue preview / issue renew | 本地直接调用平台 HTTPS | 保存领取响应、预览或续租到期时间 |
-| issue detail / issue tasks / issue regression-preview / execution show | 本地只读查询平台，不要求租约或 NPU 连接 | ok=true 后读取 data；空 tasks/cases 不代表通过 |
+| issue detail / issue tasks / issue regression-preview / case execution | 本地只读查询平台，不要求租约或 NPU 连接 | ok=true 后读取 data；空 tasks/cases 不代表通过 |
 | issue submit-summary | 本地显式发布已检视总结；不创建远端 job | 返回 status=resolved 和 knowledge_id |
 | issue verify | 通过 npussh 在远端提交平台请求 | 返回 state=submitted，保存 round_no |
 | issue status | 本地查询平台指定验证轮次 | 检查 terminal 和 outcome |
@@ -26,7 +24,7 @@ MCP 优先使用结构化工具。长操作先选定 request_id，再提交并�
 
 fuzz 使用固定的 `<workflow_root>/fuzz/`，一次只允许一个运行。重复启动的任务报 `FUZZ_ALREADY_RUNNING`；`FUZZ_JOB_REPLACED` 表示该目录已由新 job 接管，应使用新 job ID 控制。历史记录仍用普通 status 查询。
 
-deploy/replay 使用修复分组 request_id 和各自自动递增的 run，通过 deploy/replay list/show 查询。issue verify 使用 --request-id 和 --issue-id，验证当前包；平台查询使用 --round-no。env/fuzz 独立执行通过 status 查询。各命令的 --help 列出接受的参数。
+deploy/replay 使用修复分组 request_id 和各自自动递增的 run，通过 deploy/replay list/show 查询。issue verify 使用 --request-id 和 --issue-id，验证当前包；平台查询使用 --round-no。env 独立执行通过 status 查询。各命令的 --help 列出接受的参数。
 
 所有公共命令 stdout 返回一个 JSON 对象，日志走 stderr。--help 返回帮助文本。
 
@@ -47,7 +45,7 @@ afxx deploy --request-id deploy-001
 afxx status --request-id <job-id>
 ```
 
-提交前生成并保存 request-id，允许 1–128 位字母、数字、下划线、点或连字符。init/update/deploy/replay/check/fuzz run 支持此参数。省略时自动生成，但若整个响应丢失，将无法从响应取回该值。
+提交前生成并保存 request-id，允许 1–128 位字母、数字、下划线、点或连字符。init/update/deploy/replay/check 支持此参数。省略时自动生成，但若整个响应丢失，将无法从响应取回该值。
 
 任务状态包括 prepared、queued、running、success、failed、unknown。prepared 为 dry-run 本地产物。非 replay 终态的 status 返回概要；replay 终态自动下载全量证据，单个执行使用 status --attempt --fields。等待任务使用 status --wait --since，避免重复概要进入上下文；阶段变化或到达终态时汇报。unknown 时检查进程和日志。
 
@@ -55,7 +53,7 @@ init/update 默认跟随远端日志，Ctrl+C 停止本地查看，任务仍可�
 
 ## Replay 分组
 
-AFXX 使用 AFX 0.4.1+ 的 `afx fuzz replay <seed> --save`，不强制指定数据库。有存活 client 时复用其 home 和队列，无 client 时由 AFX 独立执行；无需本机 seed 历史。默认开启 upload，只上传本轮明确关联的 attempt；`--no-upload` 可关闭，但正在自动上传的共享 session 会被明确拒绝，需先停止该 session。
+AFXX 使用 AFX 0.4.1+ 的 `afx fuzz replay <seed> --save`，不强制指定数据库。有存活 client 时复用其 home 和队列，无 client 时由 AFX 独立执行；无需本机 seed 历史。统一上传本轮明确关联的 attempt；现有会话关闭上传时返回 UPLOAD_POLICY_CONFLICT，需先启用会话上传。
 
 `--dump` 或 `replay.dump: true` 传递给 AFX 逐任务开启采集。使用 `evidence list/read --request-id ID --run N` 按需读取远端产物；不自动复制整个共享 dump 目录。新增或发生文件变化的 worker 目录仅标为候选证据，只有诊断中的明确路径才能关联到 attempt；文件种类及保留期限由 AFX 管理，缺少 IR/kernel 时仍需报告证据缺口。
 
@@ -77,7 +75,7 @@ AFXX 使用 AFX 0.4.1+ 的 `afx fuzz replay <seed> --save`，不强制指定数�
 afxx issue claim --issue-id F152 --request-id claim-001
 afxx issue preview --issue-id F152
 afxx issue renew --issue-id F152
-afxx deploy --issue-id F152 --request-id deploy-001
+afxx deploy --request-id deploy-001
 afxx status --request-id <job-id>
 afxx issue verify --issue-id F152 --job-id <job-id>
 afxx issue verify-check --issue-id F152 --round-no <round_no> --wait --timeout 30
@@ -130,7 +128,7 @@ deploy/replay/check 保留提交配置，并将现场采集的 Python 包版本�
 - `issue detail --issue-id F152`：返回完整 issue 详情，包含 status、租约、rounds 和 events。
 - `issue tasks --issue-id F152 --round-no 2`：返回 `{issue_id, round_no, tasks}`；round_no 为实际 verify 或 regress 轮次，范围 1–999999。不要总用 verify 的轮次查询回归失败。
 - `issue regression-preview --issue-id F152`：平台当前预测的回归集合，实际执行集以轮次 tasks 为准。
-- `execution show --exec-uuid exec-0001`：读取执行详情、环境、Shape 和日志。AFX 的执行 UUID 是 8–64 位字母、数字、下划线或连字符；不是数据库数值 exec_id，也不要求标准 UUID 格式。
+- `case execution --exec-uuid exec-0001`：读取执行详情、环境、Shape 和日志。AFX 的执行 UUID 是 8–64 位字母、数字、下划线或连字符；不是数据库数值 exec_id，也不要求标准 UUID 格式。
 
 四个命令均复用本地 platform.token_file 和统一 JSON/错误码，不创建远端 job，不改变 issue 状态。MCP 使用相同命令路径，例如 `afxx_run({"command":"issue tasks","arguments":["--issue-id","F152","--round-no","2"]})`。404 返回 PLATFORM_NOT_FOUND；异常成功响应返回 PLATFORM_RESPONSE_INVALID。
 
@@ -140,7 +138,7 @@ deploy/replay/check 保留提交配置，并将现场采集的 Python 包版本�
 
 ## 独立总结提交
 
-`issue submit-summary --issue-id F152 --summary-file /absolute/path/summary.yaml --request-id summary-F152-001` 读取 YAML 知识字段，使用本地平台 token 和领取记录中的租约提交。MCP 命令路径为 `issue submit-summary`，参数与 CLI 一致。仅在用户明确要求提交已检视总结时调用，不从修复循环自动发布。
+`issue submit-summary --issue-id F152 --summary-file /absolute/path/summary.yaml --request-key summary-F152-001` 读取 YAML 知识字段，使用本地平台 token 和领取记录中的租约提交。MCP 命令路径为 `issue submit-summary`，参数与 CLI 一致。仅在用户明确要求提交已检视总结时调用，不从修复循环自动发布。
 
 本地必需 kind、title、symptom、root_cause、solution 五个非空字符串；未知字段拒绝，平台继续校验字段类型、长度、状态及权限。文件必须是 YAML，不能仅传自由文本 Markdown。body_md 可作为 YAML 多行字段携带完整正文。 `afx-issue-repair` 完成修复后交给独立的 [afx-issue-summary](../skills/afx-issue-summary/SKILL.md)，后者使用 [summary.yaml 模板](../skills/afx-issue-summary/assets/summary.yaml)，在 body_md 中保留完整证据链，供人工检视及后续知识检索；这是修复交付约定，不改变平台字段必填规则。
 
@@ -150,7 +148,7 @@ deploy/replay/check 保留提交配置，并将现场采集的 Python 包版本�
 
 人工检视部分列具体代码语义及受影响分支；同类问题定位部分写识别信号、排查方法、预期观察和适用边界。总结应独立可读，正文包含理解结论所需的实际片段与分析，不包含本地或远端机器的绝对路径。源码与测试使用仓库相对路径和符号名，由 fix_ref 固定版本；外部引用仅保留可共享的平台记录或归档附件。没有可共享引用时说明产物类型（如“基线 AFIR dump”），原始路径留在任务记录；缺失证据明确说明，不自动上传附件。
 
-记录存于 local.state_dir/issues/<issue-id>/summaries/<request-id摘要>.json，保存固定请求及成功回执，不保存 token。响应不确定时重试原命令；即使平台已变为 resolved，也会复用相同请求，避免重复发布。成功的本地重试直接返回回执。修改总结、租约或平台后重用同一 request-id 返回 REQUEST_CONFLICT；不要通过更换键盲目重试已发布总结。
+记录存于 local.state_dir/issues/<issue-id>/summaries/<request-key摘要>.json，保存固定请求及成功回执，不保存 token。响应不确定时重试原命令；即使平台已变为 resolved，也会复用相同请求，避免重复发布。成功的本地重试直接返回回执。修改总结、租约或平台后重用同一 request-key 返回 REQUEST_CONFLICT；不要通过更换键盲目重试已发布总结。
 
 SUMMARY_INVALID 表示本地文件或字段有误；PLATFORM_WRONG_STATE、PLATFORM_LEASE_LOST、PLATFORM_UNAUTHORIZED 等平台错误保持透传。平台检查失败不视为归档成功，不自动释放租约或修改 issue 状态。
 
@@ -205,11 +203,11 @@ status 的公开参数和输出使用 request_id；replay 查询使用 request_i
 
 使用 `client status/start/stop/restart` 管理远端唯一 client，CLI/MCP 行为一致。部署前先查状态，需要暂停或刷新时在已有授权范围内调用 stop/restart；不要通过 SSH 拼接 kill 或启动第二个 client。stop 超时先查 status，不把请求已接受视为退出完成。start 可能启动 fuzz，平台派发问题仍待定位；保留操作前状态，按用户约定恢复。详见 [生命周期接口](afxx-commands.md#client-生命周期)。
 
-平台定位补充入口：`case spec --case-key <seed>` 读取图元数据，`case history --case-key <seed>` 分页读取执行历史，再用 `execution show` 读取具体执行日志。`retest list` 查询当前用户手动复测批次（不含 issue verify；后者使用 `issue status/tasks`）。这些都是本机 HTTP 查询，不需要启动远端 client。
+平台定位补充入口：`case spec --case-key <seed>` 读取图元数据，`case history --case-key <seed>` 分页读取执行历史，再用 `case execution` 读取具体执行日志。`retest list` 查询当前用户手动复测批次（不含 issue verify；后者使用 `issue status/tasks`）。这些都是本机 HTTP 查询，不需要启动远端 client。
 
-用户明确要求退出已领取的 issue 时，使用 `issue release --issue-id <id> --request-id <稳定请求键>`；失败重试沿用该键，成功后本地租约不可再用，重新领取使用新的请求键。释放不等于取消已提交的执行。对应 MCP：`afxx_issue(action="release")`、`afxx_case(action="spec")`、`afxx_case(action="history")`、`afxx_run(command="retest list")`，参数与 CLI 对齐，均支持可选 `config`。
+用户明确要求退出已领取的 issue 时，使用 `issue release --issue-id <id> --request-key <稳定请求键>`；失败重试沿用该键，成功后本地租约不可再用，重新领取使用新的请求键。释放不等于取消已提交的执行。对应 MCP：`afxx_issue(action="release")`、`afxx_case(action="spec")`、`afxx_case(action="history")`、`afxx_run(command="retest list")`，参数与 CLI 对齐，均支持可选 `config`。
 
-定位时优先使用结构化 MCP `afxx_issue_status(issue_id, round_no, include_tasks=True)` 找到失败执行，再用 `afxx_execution_show(exec_uuid)` 读取平台详情。远端 dump 使用 `afxx_evidence_list(request_id=..., run=..., offset=...)` 和 `afxx_evidence_read(request_id=..., run=..., path=..., offset=..., limit=..., sha256=...)`；list offset 为文件游标，read offset/limit 为字节。工具直接返回 CLI 结果及错误，无须查询 operation_status。所有工具支持可选 config，且保留 afxx_run 通用调用方式。
+定位时优先使用结构化 MCP `afxx_issue_status(issue_id, round_no, include_tasks=True)` 找到失败执行，再用 `afxx_case_execution(exec_uuid)` 读取平台详情。远端 dump 使用 `afxx_evidence_list(request_id=..., run=..., offset=...)` 和 `afxx_evidence_read(request_id=..., run=..., path=..., offset=..., limit=..., sha256=...)`；list offset 为文件游标，read offset/limit 为字节。工具直接返回 CLI 结果及错误，无须查询 operation_status。所有工具支持可选 config，且保留 afxx_run 通用调用方式。
 
 验证闭环优先使用 issue verify-check，MCP 为 afxx_issue(action="verify-check", issue_id=..., round_no=..., wait=true, timeout=30)。直接返回聚合结果，无 operation 回执；timed_out 不代表任务失败，继续查询原轮次。该命令不续租、不重启、不提交，不将 skip/invalid 算通过。claim 现在 CLI/MCP 均必须指定 issue_id。
 

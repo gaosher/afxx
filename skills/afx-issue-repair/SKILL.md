@@ -14,7 +14,7 @@ description: 使用 AFXX 领取 AFX 平台 issue，复现并定位 graph-autofus
 - 启动时将选定配置展开为绝对路径，展示配置路径、connection.environment、workflow_root、local.source_dir 和平台地址（不输出 token）。默认配置不存在时提示 `afxx config init --source <源码目录>` 或请求已有配置路径，不搜索环境变量或当前目录。领取阶段示例使用默认配置；用户指定其他配置时追加 `--config <绝对路径>`。创建 worktree 任务配置后，按第 2 步切换，后续示例显式携带该配置（MCP 传 `config`）。
 - 从配置定位 `local.source_dir`，在目标源码仓库读取 AGENTS.md，遵循其开发、测试、构建和提交要求。先记录原有修改，不覆盖或提交用户无关改动。
 - 用户要求执行完整修复流程时，按授权范围领取、部署、verify 和本地 commit；已有授权不重复询问。只做诊断或讨论时不发起这些写操作。不自动 push、合并或关闭 issue。
-- 远端 verify/续租使用 `platform.remote_token_file`，AFX client 使用 `platform.client_token_file`。配置 platform 后，env init 会复用或隐藏输入本地 token，并在环境成功后同步；异步 init 用 status/wait 完成同步。修复时复用已有凭据，遇到缺失或鉴权错误报告具体字段；不要为领取问题重建环境或重新签发 token。
+- 远端 verify 使用 `platform.remote_token_file`，AFX client 使用 `platform.client_token_file`。配置 platform 后，env init 会复用或隐藏输入本地 token，并在环境成功后同步；异步 init 用 status/wait 完成同步。修复时复用已有凭据，遇到缺失或鉴权错误报告具体字段；不要为领取问题重建环境或重新签发 token。
 - 每个目标 NPU 环境只维护一个 AFX client，跨 issue、worktree 和部署轮次复用同一 client home 与身份。不要为单个问题初始化新 client、生成新 source_id 或另起旧版客户端；发现重复身份时先核对已有进程和平台记录，不自动删除平台记录。
 - 一个问题的工作记录保留 issue_id、租约到期时间、基线/候选 deploy run、request-id、verify round_no、AF 包身份及证据路径。复用任务已有笔记或修复总结，不另造状态数据库、不复制 wheel/源码快照。
 - 使用 MCP 时优先调用结构化工具。deploy、client start/stop/restart 和 issue verify 等长操作先选定工具级 request_id，提交后用 afxx_operation_status 查询返回的回执 ID（deploy/verify 自动分配，区别于修复分组）；completed 只表示 CLI 调用结束，必须检查 data.result.ok，再从其中取得 request_id/run 或 round_no 或 client running 状态。MCP 断开后继续查询原 request_id；unknown 时先核对远端，不换键盲目重试。restart 的调用记录成功后才进入 verify，不因收到 pending 回执就继续。
@@ -51,14 +51,14 @@ TASK_CONFIG="/absolute/path/to/task-config.yaml"
 
 以下示例按 worktree 任务配置编写；未创建任务配置且使用默认配置时，省略 `--config "$TASK_CONFIG"`。
 
-基线和候选复现均使用 `replay --dump`，通过 `afx fuzz replay` 复用现有队列。默认上传本轮结果，离线复现明确传 --no-upload。读取 [复现证据清单](references/replay-evidence.md)，仅把明确路径关联的 dump 当作本轮证据；不自动重启 client 开启全局 dump。
+基线和候选复现均使用 `replay --dump`，通过 `afx fuzz replay` 复用现有队列。复跑结果统一上传。读取 [复现证据清单](references/replay-evidence.md)，仅把明确路径关联的 dump 当作本轮证据；不自动重启 client 开启全局 dump。
 
 ### 2.1 Deploy 主线基线
 
 修改源码前，先部署上述主线 worktree。deploy 会同步未提交修改，提交前必须确认 worktree 干净，不包含会被同步的额外源码文件。基线与每轮候选 deploy 前均执行[部署期间的客户端协调](references/platform-evidence.md#部署期间的客户端协调)，确认允许协调目标客户端；由 deploy 在包准备好之后停止并恢复，不能只在候选部署时处理。
 
 ```bash
-afxx deploy --config "$TASK_CONFIG" --coordinate-client --issue-id <issue-id> --request-id <修复流程ID>
+afxx deploy --config "$TASK_CONFIG" --coordinate-client --request-id <修复流程ID>
 ```
 
 记录返回的 `request_id/run` 为基线部署记录，并保存对应的主线 SHA。这个步骤仅部署，不提交平台 verify。
@@ -100,7 +100,7 @@ afxx evidence read --config "$TASK_CONFIG" --request-id <流程request-id> --run
   --path <list返回的远端文件路径> --offset 0 --limit 8192
 ```
 
-省略 --run 时查询最新一次，但翻页、续读和对比时必须固定首次返回的 run；不要在出现新复跑后混读另一轮。read 续读传 next_offset 和上次 sha256。MCP 使用 afxx_evidence_list/read(request_id=..., run=...)，定位 replay 设置 dump=true。默认上传，无需额外传 --upload。
+省略 --run 时查询最新一次，但翻页、续读和对比时必须固定首次返回的 run；不要在出现新复跑后混读另一轮。read 续读传 next_offset 和上次 sha256。MCP 使用 afxx_evidence_list/read(request_id=..., run=...)，定位 replay 设置 dump=true。复跑结果统一上传。
 
 非 nnsmith 用例使用平台给出的复现方式和目标环境，不强行传入 AFXX seed 接口。失败无法复现时，先比较环境、包版本和用例条件；明确“未复现”及缺失证据，不直接宣称修复。
 
@@ -115,7 +115,7 @@ afxx evidence read --config "$TASK_CONFIG" --request-id <流程request-id> --run
 每轮部署使用 `--coordinate-client`，执行前阅读[部署期间的客户端协调](references/platform-evidence.md#部署期间的客户端协调)。由远端 worker 在编包完成后停止客户端、安装并恢复；agent 不再拆开执行 stop/deploy/start。
 
 ```bash
-afxx deploy --config "$TASK_CONFIG" --coordinate-client --issue-id <issue-id> --request-id <修复流程ID>
+afxx deploy --config "$TASK_CONFIG" --coordinate-client --request-id <修复流程ID>
 afxx deploy show --config "$TASK_CONFIG" --request-id <修复流程ID> --run <候选run>
 ```
 

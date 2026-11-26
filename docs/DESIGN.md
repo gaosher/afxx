@@ -131,7 +131,7 @@ pytest 以临时仓库和目录验证 Git/rsync 行为，通过构建、网络�
 
 主入口命令包括 init、update、deploy、replay、check、status、doctor、issue <操作>。stdout 为 schema_version=1 的 JSON envelope，退出码为 0 或 2。异步任务查询 state，平台查询 terminal/outcome；完整字段及错误码见 [AGENT_USAGE](AGENT_USAGE.md)。
 
-deploy 可关联 issue 并续租，安装完成后返回部署状态。issue verify 在远端使用已冻结配置和候选身份提交，重试复用 platform.json 中的请求。issue wait 使用 round_no 定位验证及其后续回归，不混入其他修复轮次。
+deploy 仅负责同步、构建和安装，不关联 issue 或自动续租；租约由 issue 命令管理。issue verify 在远端使用已冻结配置和候选身份提交，重试复用 platform.json 中的请求。issue wait 使用 round_no 定位验证及其后续回归，不混入其他修复轮次。
 
 ### 接口检查项
 

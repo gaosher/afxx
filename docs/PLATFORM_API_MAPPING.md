@@ -21,7 +21,7 @@
 | `GET /api/cases` | Cases | 已封装 | `case list` | 仅通过 `afxx_run` | 筛选或精确查询、整数游标分页，返回 groups 和 next_cursor。 |
 | `GET /api/cases/{case_key}/history` | Case History | 已封装 | `case history` | `afxx_case(action="history")` + `afxx_run` | 分页执行历史，保留 head/stale_graph。 |
 | `GET /api/cases/{case_key}/spec` | Case Spec | 已封装 | `case spec` | `afxx_case(action="spec")` + `afxx_run` | 仅图元数据；空对象表示无已存 spec。 |
-| `GET /api/executions/{exec_uuid}` | Execution | 已封装 | `execution show` | `afxx_execution_show` + `afxx_run` | 结构化参数 exec_uuid；平台详情与日志，保留缺失/截断标记，无需 NPU。 |
+| `GET /api/executions/{exec_uuid}` | Execution | 已封装 | `case execution` | `afxx_case_execution` + `afxx_run` | 结构化参数 exec_uuid；平台详情与日志，保留缺失/截断标记，无需 NPU。 |
 | `GET /api/clients` | Clients | 未封装 | — | — | 全平台客户端注册列表；当前修复工作流不需要，已移除封装。 |
 | `GET /api/settings` | Settings | 未封装 | — | — | 按需评估，不列入当前修复工作流必需项。 |
 | `GET /api/search/fields` | Search Fields | 未封装 | — | — | 按需评估，不列入当前修复工作流必需项。 |
@@ -30,7 +30,7 @@
 | `GET /api/issues/{issue_id}` | Issue Detail | 已封装 | `issue detail` | 仅通过 `afxx_run` | 实时详情；另被 status/wait 聚合使用。 |
 | `GET /api/issues/{issue_id}/cases` | Issue Cases | 已封装 | `issue cases` | 仅通过 `afxx_run` | affected/regression、整数游标；不提供 limit；preview 也会内部调用。 |
 | `GET /api/issues/{issue_id}/rounds/{round_no}/tasks` | Round Tasks | 已封装 | `issue tasks` | `afxx_issue_status(include_tasks=True)` + `afxx_run` | MCP 经 issue status 聚合验证及关联回归任务；CLI issue tasks 可单独查询指定轮次。 |
-| `POST /api/issues/{issue_id}/renew` | Renew | 已封装 | `issue renew` | 仅通过 `afxx_run` | 续租；deploy 期间也会自动续租。 |
+| `POST /api/issues/{issue_id}/renew` | Renew | 已封装 | `issue renew` | 仅通过 `afxx_run` | 显式续租；deploy 不参与租约管理。 |
 | `POST /api/issues/{issue_id}/release` | Release | 已封装 | `issue release` | `afxx_issue(action="release")` + `afxx_run` | 幂等释放并停用本地租约；不取消执行任务。 |
 | `POST /api/issues/{issue_id}/verify` | Verify | 已封装 | `issue verify` | `afxx_issue(action="verify")` + `afxx_run` | 引用 deploy job 提交候选包验证；不自动 restart client。 |
 | `POST /api/issues/{issue_id}/regression-cases` | Issue Pins | 未封装 | — | — | 按需评估，不列入当前修复工作流必需项。 |
@@ -98,7 +98,6 @@
 | `replay list/show/compare` | `afxx_run` | 本地流程索引与远端执行记录查询、按 seed/backend/shape 对比；不调用平台 API |
 | `status` | `afxx_job_status` + `afxx_run` | 查询 AFXX 远端 job、attempt/fields 或等待变化，不查询平台 model job |
 | `env init/update/check`、`doctor` | 仅通过 `afxx_run` | 环境初始化、更新和检查 |
-| `fuzz run/status/stop` | 仅通过 `afxx_run` | AFX 随机测试执行与控制 |
 | `evidence list` | `afxx_evidence_list` + `afxx_run` | 按 request_id/run 选择复跑，按文件游标列出远端产物与失败关联 |
 | `evidence read` | `afxx_evidence_read` + `afxx_run` | 按 request_id/run 选择复跑，按字节偏移/长度读取远端证据；可传 sha256 拒绝变化内容 |
 | `config init` | 仅通过 `afxx_run` | 本地 AFXX 配置，不是 /api/config/me |

@@ -44,7 +44,6 @@ afxx config init --source /absolute/path/graph-autofusion --output ~/.config/afx
 | `replay.devices` / `workers` | auto，查询可见逻辑 NPU，每卡一个 worker |
 | `replay.compile_threads` / `batch_timeout_seconds` / `dump` | 4 / 300 / false |
 | `sync.include_ignored_paths` / `exclude_paths` | 空列表，相对于源码根目录的精确路径 |
-| `upload.enabled` | false；fuzz replay 仅保存本地结果，不接受上传覆盖 |
 
 Python 3.11 由工具自动准备；LLVM 和 LLD 仍由远端提供。修改 workflow_root 只影响路径推导；创建新环境应使用新目录，已有 venv 和编译缓存包含绝对路径。
 
@@ -152,7 +151,7 @@ MCP 默认读取同一固定配置；需要覆盖时，通过调用的 `config` 
 
 ## Fuzz replay 与定位证据
 
-AFXX 使用 AFX 0.4.1+ 的 `afx fuzz replay <seed> --save`，不强制指定数据库。有存活 client 时复用其 home 和队列，无 client 时由 AFX 独立执行；无需本机 seed 历史。默认开启 upload，只上传本轮明确关联的 attempt；`--no-upload` 可关闭，但正在自动上传的共享 session 会被明确拒绝，需先停止该 session。
+AFXX 使用 AFX 0.4.1+ 的 `afx fuzz replay <seed> --save`，不强制指定数据库。有存活 client 时复用其 home 和队列，无 client 时由 AFX 独立执行；无需本机 seed 历史。统一上传本轮明确关联的 attempt；现有会话关闭上传时返回 UPLOAD_POLICY_CONFLICT，需先启用会话上传。
 
 AFXX request_id/run 保存队列路径、task ID、attempt ID、结果摘要和日志，不复制共享数据库。结果通过 `afx results list <database> --attempt <id>` 精确读取；task→attempt 尚无公开查询接口，仅在适配层只读查询队列表。队列任务由 client 上传，AFXX 标记 upload.owner=client、state=delegated，不再执行整批补传；delegated 不等于服务端已确认。仅独立执行的 attempt 由 AFXX 通过临时数据库调用 `afx sync once`，结束即清理。
 
@@ -177,15 +176,13 @@ init 提交前复用本地 token；文件不存在时仅在交互终端隐藏输
 
 成功结果的 auth.state 为 ready。凭据同步失败时返回 PLATFORM_CREDENTIAL_SYNC_FAILED 或 PLATFORM_CREDENTIAL_CONFLICT，并保留 job_id、environment_state=success；修正文件/权限后查询同一 init job 重试，不重新初始化 venv。续查使用本地 job 的冻结配置定位凭据文件，重复同步不会重写相同内容。不要把另一环境的配置用于恢复本任务。
 
-### Fuzz 目录与资源
-
-`afxx fuzz run` 复用 connection、runtime.venv_dir 和 runtime.install_root，不需要新增配置节。AFX home 固定为 `<workflow_root>/fuzz/`，结果为其下 `results/results.sqlite`，队列为 `tasks/tasks.sqlite`。`replay.results_dir` 和 `replay` 的资源参数仅影响 replay；fuzz 默认由 AFX 自动发现可见 NPU 并选择资源预算，单次覆盖通过 fuzz run 的命令行参数指定。控制现有 fuzz job 时使用该 job 冻结的环境配置，并核对共享目录的归属。已有运行时新任务失败；旧 job ID 不能控制接管后的新运行。
-
 ### Replay 一次性上传
 
-`upload.enabled: true` 或 replay 的 `--upload` 使用 `afx platform client once`，读取本次 `results.sqlite`，将上传游标保存在同目录的 `platform-sync.sqlite`。凭据使用远端 `platform.client_token_file`，未指定时回退到 `platform.remote_token_file`；本地 `platform.token_file` 不作为远端凭据。token 需具备上传和心跳权限。`--no-upload` 覆盖默认配置。
+复跑结果统一上传，不再接受 `upload` 配置节或 `--upload` / `--no-upload` 参数。已有配置中的 `upload` 节需删除。
 
-移除配置中旧的 `upload.sync_config_path`，不再使用 sync.json。此操作不启动常驻进程、不执行复测或自动更新。上传命令失败会使 replay job 失败，完整复现证据仍保留。`upload=completed` 仅表示官方命令及回执检查完成，回执 uploaded 计数不保证所有记录被平台接收。
+进入 client 队列的结果由 client 上传，AFXX 不重复补传；`delegated` 表示已委托 client，不代表服务端已确认。现有会话关闭上传时，复跑会报 `UPLOAD_POLICY_CONFLICT`。
+
+独立执行时，AFXX 将本轮 attempt 写入临时数据库并调用 `afx sync once`，结束后清理临时数据库。凭据使用远端 `platform.client_token_file`，未指定时回退到 `platform.remote_token_file`。上传失败会使任务失败，复跑结果仍保留。
 
 AFX 仅接受 `python_env.afx.version`（默认 `latest`），不再接受 wheel 路径、URL 或用户配置的 sha256。下载包的实际哈希仍自动记录在环境清单与 environment_lock 中，用于缓存校验和冻结恢复；冻结配置将 latest 展开为实际版本。
 
