@@ -313,3 +313,22 @@ def test_mcp_environment_auto_id_not_forwarded(monkeypatch, action):
     call(mcp_server.create_server('/config'), 'afxx_run', {'command': 'env '+action})
     assert seen[0][1] is None  # Allocated atomically by the operation store.
     assert '--request-id' not in seen[0][0]
+
+
+@pytest.mark.parametrize('torch_version', ['2.10.0+cpu', '2.10.0'])
+@pytest.mark.parametrize('selection', [{'torch_npu': '20261015'}, {'afx': 'latest'}])
+def test_update_uses_installed_torch_index(env_cfg, tmp_path, torch_version, selection):
+    import copy
+    from afxx import config
+    before, _ = managed(env_cfg, tmp_path)
+    before['packages']['torch'] = torch_version
+    before['stable_requirements'] = ['torch==' + torch_version, 'numpy']
+    original = copy.deepcopy(env_cfg)
+    result = env.update_config(env_cfg, before, selection)['python_env']
+    assert result['torch_index_url'] == (config.package_source('torch_cpu_index') if torch_version.endswith('+cpu') else None)
+    assert result['stable_requirements'] == before['stable_requirements']
+    if 'torch_npu' in selection:
+        assert result['torch_npu']['version'] == '2.10.0'
+        assert result['torch_npu']['date'] == '20261015'
+        assert result['afx'] == before['artifacts']['afx']['source']
+    assert env_cfg == original

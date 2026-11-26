@@ -12,6 +12,13 @@ import urllib.parse
 from afxx import common as workflow_common
 
 
+def package_source(name):
+    """Shared package sources for configuration and environment updates."""
+    return workflow_common.read(
+        Path(__file__).with_name("environment") / "package_sources.json"
+    )[name]
+
+
 FIELDS = {
     "connection": {"environment"},
     "local": {"source_dir", "state_dir"},
@@ -252,11 +259,6 @@ def normalize_config(raw):
             p["remote_token_file"] = under("auth/afx.token")
         if p["client_token_file"] in (None, ""):
             p["client_token_file"] = p["remote_token_file"]
-
-    def package_source(name):
-        return workflow_common.read(
-            Path(__file__).with_name("environment") / "package_sources.json"
-        )[name]
 
     if "cann" in c:
         cann = c["cann"]
