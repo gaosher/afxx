@@ -250,6 +250,13 @@ afxx replay show --request-id repair-F001 --run 2
 # 对比两轮结果
 afxx replay compare --request-id repair-F001 --runs 1 2
 ```
+
+复跑结果分为两部分：`batch.complete` 表示本批是否取得全部用例的终态，`counts` 分别统计 pass/fail/skip。skip 不算通过；只有批次完整且全部 pass，`passed` 才为 true。
+
+- 单例精度、编译、执行失败或明确取消记 fail，`no_autofuse_coverage` 记 skip，均继续后续 seed。
+- 已有任务 ID 的等待超时记 pending；单例结果查询失败记 result_unknown。继续后续 seed，保留任务/attempt ID，批次标为不完整，不自动重复提交。
+- 未取得回执时停止提交，标记 submission_unknown；队列、鉴权或协议整体异常也停止。`batch.unsubmitted` 列出尚未提交的 seed。
+- 上传状态单独记录，不改变用例执行结论。pending/未知结果是本次收集时的状态，不代表远端任务已停止。
 `repair-F001` 的远端目录结构示意：
 ```text
 repair-F001/

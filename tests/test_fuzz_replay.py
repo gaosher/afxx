@@ -15,7 +15,7 @@ def attempt(backend='af-mlir'):
                 contexts={'environment': {'autofuse_binary': 'actual'}})
 
 
-@pytest.mark.parametrize('failure', [None, 'exit', 'missing', 'timeout', 'shape'])
+@pytest.mark.parametrize('failure', [None, 'exit', 'missing', 'timeout', 'shape', 'upload'])
 def test_exact_attempts_no_forced_database(cfg, tmp_path, monkeypatch, failure):
     monkeypatch.setenv('AUTOFUSEX_HOME', str(tmp_path))
     job=tmp_path/'job'; job.mkdir()
@@ -27,7 +27,11 @@ def test_exact_attempts_no_forced_database(cfg, tmp_path, monkeypatch, failure):
     monkeypatch.setattr(managed_client,'selected_client',lambda:None)
     token=tmp_path/'token';token.write_text('test-only')
     monkeypatch.setattr(m.config,'platform_settings',lambda c:{'client_token_file':str(token)})
-    monkeypatch.setattr(m,'upload_results',lambda c, rows:{'receipt':{'uploaded':len(rows)}})
+    def upload(c, rows):
+        if failure == 'upload':
+            raise common.WorkflowError('REPLAY_UPLOAD_FAILED', 'server unavailable')
+        return {'receipt': {'uploaded': len(rows)}}
+    monkeypatch.setattr(m, 'upload_results', upload)
     cfg['replay'].update(devices='auto',results_dir=str(tmp_path/'results'),dump=True)
     common.write(job/'config.yaml',cfg)
     common.write(job/'request.json',{'seeds':['short-seed']})
@@ -52,6 +56,13 @@ def test_exact_attempts_no_forced_database(cfg, tmp_path, monkeypatch, failure):
         report=common.read(job/'result.json')
         assert report['passed'] and report['upload']['state']=='synced'
         assert len(report['execution_environments'])==2
+    report = common.read(job/'result.json')
+    if failure == 'upload':
+        assert report['passed'] and report['batch']['complete']
+        assert report['upload']['state'] == 'failed'
+    if failure in ('missing', 'shape'):
+        assert not report['batch']['complete']
+        assert report['references'][0]['state'] == 'result_unknown'
     assert not (tmp_path/'results/job/results.sqlite').exists()
     if failure=='timeout':
         assert common.read(job/'result.json')['references'][0]['state']=='submission_unknown'
@@ -60,8 +71,8 @@ def test_exact_attempts_no_forced_database(cfg, tmp_path, monkeypatch, failure):
 def test_queue_exact_tasks_and_timeout(tmp_path):
     queue=tmp_path/'runs/run/tasks.sqlite';queue.parent.mkdir(parents=True)
     with sqlite3.connect(queue) as db:
-        db.execute('CREATE TABLE tasks(id,state,attempt_id,seed,execution)')
-        db.executemany('INSERT INTO tasks VALUES(?,?,?,?,?)', [('own','completed','a','123','{}'),('other','running',None,'456','{}')])
+        db.execute('CREATE TABLE tasks(id,state,attempt_id,seed,execution,reason)')
+        db.executemany('INSERT INTO tasks VALUES(?,?,?,?,?,?)', [('own','completed','a','123','{}',''),('other','running',None,'456','{}','')])
     checkpoints=[]
     result=m.resolve_receipt({'queue':str(queue),'task_ids':['own']},tmp_path,tmp_path/'fallback',0,checkpoints.append)
     assert result==(queue.parent/'results.sqlite',['a'])
@@ -189,3 +200,109 @@ def test_client_owned_upload_never_resynced(cfg,tmp_path,monkeypatch,modes):
     assert report['upload']['state']=='delegated'
     assert report['upload']['client_attempt_ids']==['0cpu','0af-mlir']
     assert [v['id'] for v in uploaded]==([] if len(modes)==1 else ['1cpu','1af-mlir'])
+
+
+@pytest.mark.parametrize('state,reason,skip', [
+    ('cancelled', 'no_autofuse_coverage', True),
+    ('cancelled', 'user_cancelled', False),
+    ('interrupted', 'no_autofuse_coverage', False),
+    ('failed', '', False),
+])
+def test_only_explicit_coverage_cancel_is_skip(tmp_path, monkeypatch, state, reason, skip):
+    rows = [dict(id='t', state=state, reason=reason, attempt_id='a')]
+    monkeypatch.setattr(m, 'task_rows', lambda *a: rows)
+    args = ({'queue': str(tmp_path/'tasks.sqlite'), 'task_ids': ['t']}, tmp_path, tmp_path/'db', 0, lambda rows: None)
+    if skip:
+        assert m.resolve_receipt(*args) == (tmp_path/'db', [])
+    else:
+        with pytest.raises(common.WorkflowError) as error:
+            m.resolve_receipt(*args)
+        assert error.value.code == 'AFX_REPLAY_FAILED'
+
+
+@pytest.mark.parametrize('all_skip', [False, True])
+def test_coverage_skip_continues_batch(cfg, tmp_path, monkeypatch, all_skip):
+    paths = types.ModuleType('autofusex.client.paths')
+    paths.data_home = lambda: tmp_path
+    paths.results_database = lambda home: home/'db'
+    monkeypatch.setitem(sys.modules, paths.__name__, paths)
+    from afxx.afx import managed_client
+    monkeypatch.setattr(managed_client, 'selected_client', lambda: {'home': str(tmp_path)})
+    monkeypatch.setattr(m, 'public', lambda args: {'runs': [{'id': 'r', 'state': 'running'}]} if args[0]=='daemon' else {'spec': {'results': {'upload': True}}})
+    monkeypatch.setattr(m, 'upload_results', lambda *a: pytest.fail('client owns upload'))
+    cfg['replay'].update(results_dir=str(tmp_path/'results'), dump=False)
+    job = tmp_path/'job'; job.mkdir()
+    common.write(job/'config.yaml', cfg)
+    common.write(job/'request.json', {'seeds': ['first', 'second']})
+    monkeypatch.setattr(common, 'capture', lambda *a: '[["122",1],["123",1]]')
+    submitted = []
+    def invoke(argv, *args):
+        submitted.append(argv[5])
+        return 1, [{'queue': str(tmp_path/'tasks.sqlite'), 'task_ids': [argv[5]]}]
+    monkeypatch.setattr(m, 'invoke', invoke)
+    def rows(queue, ids, home):
+        skip = ids == ['first'] or all_skip
+        return [dict(id=backend, state='cancelled' if skip else 'completed',
+                     reason='no_autofuse_coverage' if skip else '', attempt_id=backend)
+                for backend in ('cpu', 'af-mlir')]
+    monkeypatch.setattr(m, 'task_rows', rows)
+    monkeypatch.setattr(m, 'read_attempt', lambda db, identity: attempt(identity))
+    with pytest.raises(common.WorkflowError) as error:
+        m.execute(job)
+    assert error.value.code == 'REPLAY_FAILED'
+    assert submitted == ['first', 'second']
+    report = common.read(job/'result.json')
+    assert not report['passed']
+    assert report['counts'] == {'pass': 0 if all_skip else 1, 'fail': 0, 'skip': 2 if all_skip else 1}
+    assert report['references'][0]['reason'] == 'no_autofuse_coverage'
+    assert report['errors'] == []
+    assert report['upload']['state'] == 'delegated'
+
+
+@pytest.mark.parametrize('failure,expected,continues', [('task','fail',True), ('wait','pending',True), ('read','result_unknown',True), ('protocol','blocked',False), ('submit','submission_unknown',False), ('receipt_timeout','pending',True)])
+def test_batch_exception_boundaries(cfg, tmp_path, monkeypatch, failure, expected, continues):
+    paths = types.ModuleType('autofusex.client.paths')
+    paths.data_home = lambda: tmp_path
+    paths.results_database = lambda home: home/'db'
+    monkeypatch.setitem(sys.modules, paths.__name__, paths)
+    from afxx.afx import managed_client
+    monkeypatch.setattr(managed_client, 'selected_client', lambda: {'home': str(tmp_path)})
+    monkeypatch.setattr(m, 'public', lambda args: {'runs': [{'id': 'r', 'state': 'running'}]} if args[0]=='daemon' else {'spec': {'results': {'upload': True}}})
+    monkeypatch.setattr(m, 'upload_results', lambda *a: pytest.fail('client owns upload'))
+    cfg['replay'].update(results_dir=str(tmp_path/'results'), dump=False)
+    job = tmp_path/'job'; job.mkdir()
+    common.write(job/'config.yaml', cfg)
+    common.write(job/'request.json', {'seeds': ['first', 'second']})
+    monkeypatch.setattr(common, 'capture', lambda *a: '[["122",1],["123",1]]')
+    submitted = []
+    def invoke(argv, timeout, log):
+        submitted.append(argv[5])
+        receipt = {'queue': str(tmp_path/'tasks.sqlite'), 'task_ids': [argv[5]]}
+        if argv[5] == 'first' and failure in ('submit', 'receipt_timeout'):
+            if failure == 'receipt_timeout':
+                log.write_text(json.dumps(receipt))
+            raise subprocess.TimeoutExpired(argv, timeout)
+        return 0, [receipt]
+    monkeypatch.setattr(m, 'invoke', invoke)
+    def resolve(receipt, *args):
+        first = receipt['task_ids'] == ['first']
+        if first and failure in ('task', 'wait', 'protocol', 'receipt_timeout'):
+            code = {'task': 'AFX_REPLAY_FAILED', 'wait': 'REPLAY_WAIT_TIMEOUT',
+                    'protocol': 'AFX_PROTOCOL_ERROR', 'receipt_timeout': 'REPLAY_WAIT_TIMEOUT'}[failure]
+            raise common.WorkflowError(code, failure)
+        return tmp_path/'db', ['first'] if first else ['cpu', 'af-mlir']
+    monkeypatch.setattr(m, 'resolve_receipt', resolve)
+    def read(db, identity):
+        if identity == 'first':
+            raise common.WorkflowError('AFX_COMMAND_FAILED', 'result unavailable')
+        return attempt(identity)
+    monkeypatch.setattr(m, 'read_attempt', read)
+    with pytest.raises(common.WorkflowError):
+        m.execute(job)
+    report = common.read(job/'result.json')
+    assert submitted == (['first', 'second'] if continues else ['first'])
+    assert report['references'][0]['state'] == expected
+    assert report['batch']['complete'] == (failure == 'task')
+    assert report['batch']['unsubmitted'] == ([] if continues else ['second'])
+    assert report['counts'] == {'pass': int(continues), 'fail': int(failure == 'task'), 'skip': 0}
+    assert not report['passed']

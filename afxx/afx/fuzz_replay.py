@@ -78,7 +78,7 @@ def task_rows(queue, ids, home):
     with closing(sqlite3.connect(queue.as_uri() + '?mode=ro', uri=True)) as db:
         db.row_factory = sqlite3.Row
         rows = [dict(row) for identity in ids for row in db.execute(
-            'SELECT id,state,attempt_id,seed,execution FROM tasks WHERE id=?', (identity,))]
+            'SELECT id,state,attempt_id,seed,execution,reason FROM tasks WHERE id=?', (identity,))]
     common.require_code(bool(ids) and len(rows) == len(set(ids)) == len(ids), 'AFX_PROTOCOL_ERROR', 'missing or duplicate replay tasks')
     return rows
 
@@ -92,8 +92,14 @@ def resolve_receipt(receipt, home, database, deadline, checkpoint):
     while True:
         rows = task_rows(queue, receipt['task_ids'], home)
         checkpoint(rows)
-        if any(row['state'] in ('cancelled', 'interrupted', 'failed') for row in rows):
-            raise common.WorkflowError('AFX_REPLAY_FAILED', 'replay task cancelled or interrupted')
+        skipped = [row for row in rows if row['state'] == 'cancelled'
+                   and row['reason'] == 'no_autofuse_coverage']
+        terminal = all(row['state'] in ('completed', 'cancelled', 'interrupted', 'failed') for row in rows)
+        if terminal and any(row['state'] in ('cancelled', 'interrupted', 'failed') and row not in skipped for row in rows):
+            raise common.WorkflowError('AFX_REPLAY_FAILED', 'replay tasks failed: ' + json.dumps(rows))
+        if skipped and all(row in skipped or row['state'] == 'completed' for row in rows):
+            # Empty identities is reserved for an explicitly confirmed coverage skip.
+            return database, []
         if all(row['state'] == 'completed' and row['attempt_id'] for row in rows):
             return (queue.parent / 'results.sqlite' if queue.parent.parent.name == 'runs' else database,
                     [row['attempt_id'] for row in rows])
@@ -200,65 +206,116 @@ def execute(job):
         results_dir=str(results), upload={'enabled': True, 'state': 'awaiting_execution'},
         references=[], attempts=[], dump_enabled=dump)
     normalized = replay.normalized_seeds(common.capture(replay.seed_command(sys.executable, request['seeds'])))
-    references, attempts, errors = [], [], []
+    references, attempts = [], []
     standalone_attempts, client_attempt_ids = [], []
+    stopped = None
     try:
         for index, seed in enumerate(request['seeds']):
             devices = c['replay']['devices']
             device = None if devices == 'auto' else devices[index % len(devices)]
             argv = command(sys.executable, seed, device, c['replay']['compile_threads'], dump)
             log = job / ('replay-' + str(index + 1) + '.log')
-            entry = {'seed': seed, 'command': argv, 'log': str(log)}
+            entry = {'seed': seed, 'command': argv, 'log': str(log), 'state': 'submitting'}
             references.append(entry)
             common.phase(job, 'fuzz_replay', seed=seed)
-            common.update_record(job / 'result.json', references=references)
-            deadline = time.monotonic() + c['replay']['batch_timeout_seconds']
-            try:
-                code, values = invoke(argv, c['replay']['batch_timeout_seconds'], log)
-            except subprocess.TimeoutExpired:
-                entry['state'] = 'submission_unknown'
-                common.update_record(job / 'result.json', references=references)
-                raise common.WorkflowError('REPLAY_WAIT_TIMEOUT', 'CLI timed out; inspect its log before retrying') from None
-            entry['exit_code'] = code
-            receipt = next((v for v in reversed(values) if 'task_ids' in v or 'attempts' in v), None)
-            common.require_code(receipt is not None, 'AFX_PROTOCOL_ERROR', 'no task/attempt receipt; inspect ' + str(log))
-            entry['receipt'] = receipt
-            common.update_record(job / 'result.json', references=references)
             def checkpoint(rows):
                 entry['tasks'] = rows
                 common.update_record(job / 'result.json', references=references)
-            database, identities = resolve_receipt(receipt, home, results_database(home), deadline, checkpoint)
-            entry.update(database=str(database), attempt_ids=identities)
-            current = [read_attempt(database, identity) for identity in identities]
-            attempts.extend(current)
-            entry['upload_owner'] = 'client' if 'task_ids' in receipt else 'afxx'
-            if entry['upload_owner'] == 'client':
-                client_attempt_ids.extend(identities)
-            else:
-                standalone_attempts.extend(current)
-            common.update_record(job / 'result.json', upload={
-                'enabled': True, 'owner': 'client' if not standalone_attempts else 'afxx' if not client_attempt_ids else 'mixed',
-                'state': 'delegated' if not standalone_attempts else 'pending',
-                'client_attempt_ids': client_attempt_ids, 'server_confirmation': 'not_checked'})
-            if code != 0 and 'task_ids' not in receipt:
-                errors.append('AFX replay failed: ' + seed)
-            common.update_record(job / 'result.json', references=references, attempts=attempts)
-        report = replay.summarize(attempts, normalized)
-        report['errors'].extend(errors)
-        report['passed'] = not report['errors']
-        report['execution_environments'] = {a['id']: a.get('contexts', {}).get('environment', {}) for a in attempts}
-        common.update_record(job / 'result.json', **report)
+            common.update_record(job / 'result.json', references=references)
+            deadline = time.monotonic() + c['replay']['batch_timeout_seconds']
+            stage = 'submit'
+            try:
+                try:
+                    code, values = invoke(argv, c['replay']['batch_timeout_seconds'], log)
+                except subprocess.TimeoutExpired:
+                    # The CLI may have printed a receipt before its connection timed out.
+                    code, values = None, objects(log.read_text(errors='replace')) if log.exists() else []
+                entry['exit_code'] = code
+                receipt = next((v for v in reversed(values) if 'task_ids' in v or 'attempts' in v), None)
+                if receipt is None:
+                    entry['state'] = 'submission_unknown'
+                    raise common.WorkflowError('REPLAY_WAIT_TIMEOUT' if code is None else 'AFX_PROTOCOL_ERROR',
+                                               'no task/attempt receipt; inspect ' + str(log) + '; do not resubmit')
+                entry['receipt'] = receipt
+                entry['upload_owner'] = 'client' if 'task_ids' in receipt else 'afxx'
+                stage = 'wait'
+                database, identities = resolve_receipt(receipt, home, results_database(home), deadline, checkpoint)
+                if not identities:
+                    entry.update(state='skip', reason='no_autofuse_coverage')
+                    continue
+                entry.update(database=str(database), attempt_ids=identities)
+                stage = 'read'
+                current = []
+                for identity in identities:
+                    value = read_attempt(database, identity)
+                    current.append(value)
+                    attempts.append(value)
+                    if entry['upload_owner'] == 'client':
+                        client_attempt_ids.append(identity)
+                    else:
+                        standalone_attempts.append(value)
+                summary = replay.summarize(current, [normalized[index]])
+                entry.update(state='pass' if summary['passed'] else 'fail', errors=summary['errors'])
+                expected_seed, shapes = normalized[index]
+                if ({(a['seed'], a['backend']) for a in current} !=
+                        {(expected_seed, 'cpu'), (expected_seed, 'af-mlir')} or
+                        any(a['status'] == 'ok' and
+                            sorted(v['shape_index'] for v in a['shape_results']) != list(range(shapes))
+                            for a in current)):
+                    entry['state'] = 'result_unknown'
+                if code not in (0, None) and 'task_ids' not in receipt:
+                    entry.update(state='fail', error='AFX replay returned a nonzero exit code')
+            except Exception as error:
+                error_code = getattr(error, 'code', 'AFX_REPLAY_FAILED')
+                entry.update(error_code=error_code, error=str(error))
+                if stage == 'wait' and error_code == 'REPLAY_WAIT_TIMEOUT':
+                    entry['state'] = 'pending'
+                elif stage == 'wait' and isinstance(error, common.WorkflowError) and error_code == 'AFX_REPLAY_FAILED':
+                    entry['state'] = 'fail'
+                elif stage == 'read' and (isinstance(error, subprocess.TimeoutExpired) or
+                        error_code in ('AFX_COMMAND_FAILED', 'RESULT_NOT_FOUND', 'ATTEMPT_NOT_FOUND')):
+                    entry['state'] = 'result_unknown'
+                else:
+                    # Queue, protocol, authorization and unexpected infrastructure errors
+                    # cannot safely be treated as a failure of just this seed.
+                    entry.setdefault('state', 'blocked')
+                    if entry['state'] == 'submitting':
+                        entry['state'] = 'blocked'
+                    stopped = error
+                    break
+            finally:
+                common.update_record(job / 'result.json', references=references, attempts=attempts)
+        counts = {state: sum(e['state'] == state for e in references) for state in ('pass', 'fail', 'skip')}
+        unresolved = [e['seed'] for e in references if e['state'] not in counts]
+        unsubmitted = request['seeds'][len(references):]
+        complete = not unresolved and not unsubmitted
+        report = dict(attempts=attempts, counts=counts,
+                      batch={'complete': complete, 'submitted': len(references), 'total': len(request['seeds']),
+                             'unresolved': unresolved, 'unsubmitted': unsubmitted, 'stopped': stopped is not None},
+                      skipped=[{'seed': e['seed'], 'reason': e['reason']} for e in references if e['state'] == 'skip'],
+                      errors=[e.get('error', '; '.join(e.get('errors', []))) for e in references
+                              if e['state'] not in ('pass', 'skip')],
+                      passed=complete and counts['pass'] == len(request['seeds']),
+                      execution_environments={a['id']: a.get('contexts', {}).get('environment', {}) for a in attempts})
+        queued = any(e.get('upload_owner') == 'client' for e in references)
+        common.update_record(job / 'result.json', **report, upload={
+            'enabled': True, 'owner': 'client' if queued else 'afxx',
+            'state': 'delegated' if queued else 'not_applicable',
+            'client_attempt_ids': client_attempt_ids, 'server_confirmation': 'not_checked'})
         if standalone_attempts:
             common.phase(job, 'replay_upload')
             try:
                 receipt = upload_results(c, standalone_attempts)
-            except Exception:
-                common.update_record(job / 'result.json', upload={'enabled': True, 'state': 'failed'})
+            except Exception as error:
+                common.update_record(job / 'result.json', upload={'enabled': True, 'owner': 'afxx',
+                                     'state': 'failed', 'error': str(error)})
                 raise
-            common.update_record(job / 'result.json', upload={'enabled': True, 'owner': 'mixed' if client_attempt_ids else 'afxx',
-                'state': 'delegated' if client_attempt_ids else 'synced',
+            common.update_record(job / 'result.json', upload={'enabled': True, 'owner': 'mixed' if queued else 'afxx',
+                'state': 'delegated' if queued else 'synced',
                 'client_attempt_ids': client_attempt_ids, **receipt})
-        common.require_code(report['passed'], 'REPLAY_FAILED', 'fuzz replay failed; see result.json')
+        if stopped:
+            raise stopped
+        common.require_code(report['passed'], 'REPLAY_FAILED', 'fuzz replay failed, skipped or incomplete; see result.json')
     finally:
         if dump:
             common.update_record(job / 'result.json', dump_roots=sorted(path for path, stamp in dump_directories(home).items()
@@ -275,7 +332,7 @@ def main():
                             'replay requires AFX >= 0.4.1; installed: ' + installed)
         execute(Path(sys.argv[1]))
     except Exception as error:
-        common.update_record(Path(sys.argv[1]) / 'result.json', passed=False,
+        common.update_record(Path(sys.argv[1]) / 'result.json',
                              error_code=getattr(error, 'code', 'AFX_REPLAY_FAILED'), error=str(error))
         print(str(error), file=sys.stderr)
         return 2
