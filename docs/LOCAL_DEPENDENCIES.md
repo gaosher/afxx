@@ -3,7 +3,7 @@
 ## 本地启动环境
 
 | 依赖 | 要求 | 使用场景 |
-|---|---|---|
+| --- | --- | --- |
 | Python | 3.11+ | 全部本地命令 |
 | PyYAML | >=6.0,<7 | YAML 配置读取 |
 | Git | PATH 中可执行 | deploy 快照和 doctor |
@@ -26,7 +26,7 @@ npursync 由 npussh npm 包提供。npm 用于安装工具。PyYAML 可装在现
 工具预检检查 PATH 并执行版本命令，每项最多 10 秒。连接前以非交互方式运行 npussh list，最多 30 秒，验证登录和服务可用性。检查通过后，目标 NPU 的 SSH 连通性仍由实际操作确认。
 
 | 命令 | 本地连接依赖 |
-|---|---|
+| --- | --- |
 | init/update/deploy/replay/check | npussh、Node.js、ssh、npursync、rsync；deploy 另需 Git |
 | status / issue verify | npussh、Node.js、ssh |
 | doctor | 按 deploy 检查工具及登录 |

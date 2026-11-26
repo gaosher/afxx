@@ -46,7 +46,7 @@ afxx doctor
 
 完整字段说明见[配置说明](docs/CONFIGURATION.md)，默认值见[YAML 模板](afxx/resources/config.example.yaml)。
 
->`config init` 不覆盖已有文件。
+> `config init` 不覆盖已有文件。
 
 ### 2. 初始化环境
 
@@ -88,6 +88,7 @@ CLI 保持结构化 JSON：交互终端自动缩进换行，管道、重定向�
 ### 环境管理
 
 #### 1. 创建本地配置
+
 ```bash
 # 创建配置文件，默认位置 ~/.config/afxx/config.yaml
 afxx config init --source /absolute/path/graph-autofusion
@@ -95,12 +96,17 @@ afxx config init --source /absolute/path/graph-autofusion
 # 检查配置、本地依赖和登录状态。
 afxx doctor
 ```
->`config init` 不覆盖已有配置，所有命令默认读取 `~/.config/afxx/config.yaml`，使用其他配置时需要追加 `--config /absolute/path/config.yaml`。
+
+> `config init` 不覆盖已有配置，所有命令默认读取 `~/.config/afxx/config.yaml`，使用其他配置时需要追加 `--config /absolute/path/config.yaml`。
+
 #### 2. 初始化远端环境
+
 `env init` 自动准备 CANN环境、Python 3.11、uv、专用 venv、torch、匹配的 torch_npu、AF 所需依赖和 AFX。
+
 ```bash
 afxx env init [--detach]
 ```
+
 - init/update 分别自动分配 `ENV-INIT-` / `ENV-UPDATE-` 加 12 位随机十六进制后缀的任务 ID；后续查询使用返回的 ID。
 - `--detach`参数设置不跟随远端日志
 - 提交成功不代表初始化完成，应确认任务 `state=success`。
@@ -112,12 +118,15 @@ afxx status --request-id <返回的ENV开头ID>
 ```
 
 `env check` 同步返回检查结果，不生成 ID、任务目录或幂等记录；断线后直接重跑。它检查虚拟环境、Python 依赖导入、AFX 接口及最低版本要求、pip 依赖冲突，并采集实际环境。
+
 ```bash
 afxx env check
 ```
+
 #### 3. 按需更新
 
 `env update` 以当前环境清单为基础，只更新命令明确指定的组件。默认不修改本地配置文件。
+
 ```bash
 # 只查询当前版本，不更新包
 afxx env update
@@ -141,34 +150,41 @@ afxx env update --cann --ops --afx
 # 成功后将实际版本回写配置
 afxx env update --afx --save-config
 ```
+
 - `--cann`、`--torch-npu` 不带值时默认 `latest`，也可指定日期（`YYYYMMDD`）。
 - `--torch` 必须带确切版本；`--ops` 必须与 `--cann` 一起使用。
 
 > - 更新不会自动停止或重启 client。若环境正在被使用，先协调在途任务，通过 `client stop` 停止 client，再尝试更新
 > - Python 更新失败会尝试回滚，CANN 安装失败不保证自动回滚，需保留报告检查。具体限制见[环境更新说明](docs/CONFIGURATION.md#初始化和更新环境)
 
-
 ### 源码部署
 
 本地修改完成后执行：
+
 ```bash
 afxx deploy [--coordinate-client] [--request-id repair-F001]
 
 # 可先运行离线检查并生成源码快照
 afxx deploy --dry-run
 ```
+
 这一条 deploy 完成以下步骤：
 
 1. 采集远端环境，检查构建所需的 Python 依赖。
 2. 冻结本地源码快照，通过 npursync 同步到专用远端源码目录。
-  - 同步包含未提交修改和未忽略的新文件。
-  - 凭据、agent 私有配置、构建目录及依赖缓存不会作为源码同步。
-3. 执行 `bash build.sh --pkg --enable-mlir -j <build.jobs>` 编包。
-  - 源码目录和编译目录在远端复用
-4. 校验 AF run 包并升级安装，验证加载的 pyautofuse、adapter、codegen 与本轮构建产物一致。
-  - 安装前仍会检查环境占用，不会强行覆盖正在使用的库。
 
->默认实时跟随远端日志，完成后返回最终结果。`Ctrl+C` 只停止查看，不终止远端部署，可继续用 `deploy show` 查询。后台提交使用 `afxx deploy --detach`；MCP 自动使用后台提交。
+   - 同步包含未提交修改和未忽略的新文件。
+   - 凭据、agent 私有配置、构建目录及依赖缓存不会作为源码同步。
+
+3. 执行 `bash build.sh --pkg --enable-mlir -j <build.jobs>` 编包。
+
+   - 源码目录和编译目录在远端复用
+
+4. 校验 AF run 包并升级安装，验证加载的 pyautofuse、adapter、codegen 与本轮构建产物一致。
+
+   - 安装前仍会检查环境占用，不会强行覆盖正在使用的库。
+
+> 默认实时跟随远端日志，完成后返回最终结果。`Ctrl+C` 只停止查看，不终止远端部署，可继续用 `deploy show` 查询。后台提交使用 `afxx deploy --detach`；MCP 自动使用后台提交。
 
 同一修复流程手动指定相同的 `request_id`，每次 deploy 自动新增部署轮次；省略时自动创建新分组。断线后先查询，不要重复提交。
 
@@ -223,6 +239,7 @@ afxx client restart --timeout 300
 ### 用例复跑与定位
 
 #### 用例复跑
+
 replay 在远端当前安装的环境中复跑 seed。有 client 时复用其队列，没有时临时启动执行进程。
 
 ```bash
@@ -232,11 +249,13 @@ afxx replay --request-id repair-F001 --seed <seed>
 # 批量复跑：文件每行一个 seed
 afxx replay --request-id repair-F001 --seeds-file /absolute/path/seeds.txt
 ```
+
 replay 会校验当前环境中的 afx client 唯一性，多个存活 client 时直接报错。进入 client 队列的结果由 client 上传；独立执行的结果由 AFXX 调用 `afx sync once`。复跑结果统一上传；现有会话关闭上传时，先启用会话上传再复跑。
 
 多轮复跑需要归为同一组时，每次显式传入相同的 --request-id，工具自动新增 run 序号。省略该参数则每次创建新分组。断线后先查询记录，重复执行 replay 会重新提交用例。
 
 #### 复跑结果展示
+
 ```bash
 # 列出本组所有复跑记录
 # 比如：run-1、run-2、run-3
@@ -257,7 +276,9 @@ afxx replay compare --request-id repair-F001 --runs 1 2
 - 已有任务 ID 的等待超时记 pending；单例结果查询失败记 result_unknown。继续后续 seed，保留任务/attempt ID，批次标为不完整，不自动重复提交。
 - 未取得回执时停止提交，标记 submission_unknown；队列、鉴权或协议整体异常也停止。`batch.unsubmitted` 列出尚未提交的 seed。
 - 上传状态单独记录，不改变用例执行结论。pending/未知结果是本次收集时的状态，不代表远端任务已停止。
+
 `repair-F001` 的远端目录结构示意：
+
 ```text
 repair-F001/
 ├── deploy/
@@ -268,7 +289,8 @@ repair-F001/
     ├── run-1/                 基线部署后复跑
     │   └── result.json          本轮用例结果、错误诊断和证据索引
     └── run-2/                 更新包后再次复跑
-  ```
+```
+
 - 同一修复流程中，调用 deploy 和 replay 时需手动传入相同的 `--request-id` 才会被归入同一目录下，例如 `repair-F001`；工具不会自动关联。
 - 该 ID 下，deploy 和 replay 各自递增 `run`，不要求一一对应。
 - replay 和 verify 使用当前安装的包；历史部署用于追溯源码、包和日志。
@@ -295,12 +317,15 @@ afxx evidence read --request-id repair-F001 --run 1 --path <返回的文件路�
 先配置[平台连接](docs/CONFIGURATION.md#平台连接)，本地 agent token 需要相应 issue 权限。
 
 #### 1. 领取问题
+
 ```bash
 afxx issue claim --issue-id F001 --request-id claim-F001
 ```
+
 claim 必须指定 `issue_id`，领取后保存问题上下文和租约。
 
 #### 2. 理解问题
+
 ```bash
 # 获取失败摘要和全部去重 seed
 afxx issue preview --issue-id F001
@@ -312,20 +337,25 @@ afxx issue detail --issue-id F001
 # 查看关联用例
 afxx issue cases --issue-id F001
 ```
+
 需要单个用例的图信息和执行历史时，使用下文的[平台数据查询](#平台数据查询)。
 
 #### 3. 定位和修复
+
 通过[源码部署](#源码部署)、[用例复跑与定位](#用例复跑与定位)和[evidence 读取](#定位-dump-与结果)完成“部署基线 → 复现 → 定位 → 修改 → 再部署、复跑”。同一修复流程手动使用相同的 `--request-id repair-F001`。
 完整修复流程可参考[修复 skill](skills/afx-issue-repair/SKILL.md)。
 
 #### 4. 平台验证与结果查询
 
 确认最终部署成功后，按[客户端管理](#afx客户端管理)刷新执行进程。确认成功后提交验证。
+
 ```bash
 # 提交平台验证，使用当前 cann 目录中安装的包
 afxx issue verify --issue-id F001 --request-id repair-F001
 ```
+
 `issue verify` 的请求链路：
+
 ```text
 本机 AFXX
   → NPU：采集当前安装的 AF 包身份
@@ -333,9 +363,11 @@ afxx issue verify --issue-id F001 --request-id repair-F001
   → 平台创建验证任务
   → 符合条件的 client 领取并执行，上报结果
 ```
+
 重复提交同一包的验证会返回已有回执；更新包后会创建新的验证轮次。查询超时继续查同一 `round_no`，无需重新提交。
 
 `issue verify-check` 由本机直接查询平台服务器：
+
 ```bash
 # 使用 verify 返回的 round_no 查询验证及关联回归
 afxx issue verify-check --issue-id F001 --round-no <round_no>
@@ -343,7 +375,9 @@ afxx issue verify-check --issue-id F001 --round-no <round_no>
 # --wait 参数控制等待并轮询，直到结束或超时
 afxx issue verify-check --issue-id F001 --round-no <round_no> --wait --timeout 30
 ```
+
 #### 5. 获取失败结果
+
 ```bash
 # 查看对应轮次的任务，从失败任务中取得 exec_uuid
 afxx issue tasks --issue-id F001 --round-no <round_no>
@@ -351,6 +385,7 @@ afxx issue tasks --issue-id F001 --round-no <round_no>
 # 获取具体执行结果和日志
 afxx case execution --exec-uuid <exec_uuid>
 ```
+
 验证或关联回归失败时，使用对应的轮次查询失败任务，再回到定位和修复阶段。
 
 #### 6. 修复总结
@@ -367,6 +402,7 @@ submit-summary 和 release 均默认按操作、平台、issue、租约及请求
 发布需要满足平台状态、租约和权限要求，不会由 verify 自动触发。
 
 #### 其他辅助操作
+
 ```bash
 # 查找待处理问题
 afxx issue list
@@ -377,6 +413,7 @@ afxx issue renew --issue-id F001
 # 不再处理时释放租约
 afxx issue release --issue-id F001 [--request-key release-F001]
 ```
+
 完整参数见[命令参考](docs/afxx-commands.md)，平台 API 覆盖范围见[实现对照](docs/PLATFORM_API_MAPPING.md)。
 
 ### 平台数据查询
@@ -384,6 +421,7 @@ afxx issue release --issue-id F001 [--request-key release-F001]
 这些命令由本机直接查询平台，不要求先领取 issue；可见范围由平台权限决定。
 
 #### 用例与执行记录
+
 ```bash
 # 筛选失败用例
 afxx case list --backend af-mlir --status fail --limit 50
@@ -397,9 +435,11 @@ afxx case history --case-key <seed> --limit 50
 # 查看某次执行的结果和日志
 afxx case execution --exec-uuid <exec_uuid>
 ```
+
 列表返回 `next_cursor` 时，用 `--after` 继续分页。
 
 #### 平台身份与运行概况
+
 ```bash
 # 查询 token 对应的用户身份
 afxx platform me
@@ -407,10 +447,13 @@ afxx platform me
 # 查看自己的运行概况
 afxx platform summary --scope mine
 ```
+
 #### 手动复测批次
+
 ```bash
 afxx retest list
 ```
+
 查询当前用户在平台页面手动发起的复测批次及任务状态
 
 完整参数见[平台查询](docs/afxx-commands.md#平台查询与释放租约)，覆盖范围见[API 对照](docs/PLATFORM_API_MAPPING.md)。
@@ -420,10 +463,13 @@ afxx retest list
 ### Skill 安装与使用
 
 安装随 AFXX 发布的修复和总结 skill：
+
 ```bash
 afxx skills install --agent codex
 ```
+
 安装到 `~/.agents/skills/afx-issue-repair` 和 `afx-issue-summary`。
+
 - 相同内容重复安装会跳过；
 - 已有内容不同则返回 `SKILL_CONFLICT`，保留旧文件，需先备份并移走旧目录再安装。
 
@@ -436,21 +482,26 @@ Skill 定义修复流程，CLI 和 MCP 共用执行逻辑。**MCP 可选**：未
 #### 接入 MCP
 
 在本机安装：
+
 ```bash
 python3 -m pip install 'afxx[mcp]'
 ```
 
 在支持 `mcpServers` 格式的客户端中添加：
+
 ```json
 {
   "mcpServers": {
     "afxx": {
       "command": "/absolute/path/to/afxx",
-      "args": ["mcp"]
+      "args": [
+        "mcp"
+      ]
     }
   }
 }
 ```
+
 将 `command` 替换为本机 `afxx` 的绝对路径。
 
 默认读取 AFXX 配置 `~/.config/afxx/config.yaml`；指定其他配置时，将 `args` 改为 `["mcp", "--config", "/absolute/path/config.yaml"]`。
@@ -475,6 +526,7 @@ Agent 可使用以下结构化工具：
 | `afxx_operation_status` | 查询 MCP 长操作的本机调用回执及结果 |
 
 另有两个通用工具：
+
 - `afxx_help` 查看命令帮助；
 - `afxx_run` 调用尚未提供独立工具的 CLI 命令。
 
@@ -524,7 +576,7 @@ dump 也可能位于 client home 的 `debug/` 下；以 `evidence list` 返回�
 ### 记录与清理规则
 
 | 位置 | 内容 |
-|---|---|
+| --- | --- |
 | 本地 `local.state_dir/requests/` | 部署等提交的幂等记录 |
 | 本地 `local.state_dir/deploy-groups/`、`replay-groups/` | 本地加锁分配轮次及历史索引 |
 | 本地 `local.state_dir/issues/` | issue 领取记录及修复材料 |

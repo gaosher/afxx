@@ -7,7 +7,7 @@ MCP 优先使用结构化工具。长操作先选定 request_id，再提交并�
 ## 命令与完成条件
 
 | 命令 | 执行位置与返回方式 | 完成条件 |
-|---|---|---|
+| --- | --- | --- |
 | doctor | 本地校验配置、工具和 npussh 登录 | 检查通过 |
 | init / update | 提交远端任务，默认跟随日志；支持 --detach | 远端任务 success，环境清单 ready |
 | deploy | 提交远端任务，返回 job ID | status 为 success，result.json 有效 |
@@ -29,11 +29,31 @@ deploy/replay 使用修复分组 request_id 和各自自动递增的 run，通�
 所有公共命令 stdout 返回一个 JSON 对象，日志走 stderr。--help 返回帮助文本。
 
 ```json
-{"schema_version":1,"ok":true,"command":"issue preview","data":{"issue_id":"F152","snapshot":{"targets":[]}},"error":null}
+{
+  "schema_version": 1,
+  "ok": true,
+  "command": "issue preview",
+  "data": {
+    "issue_id": "F152",
+    "snapshot": {
+      "targets": []
+    }
+  },
+  "error": null
+}
 ```
 
 ```json
-{"schema_version":1,"ok":false,"command":"doctor","data":null,"error":{"code":"AUTH_REQUIRED","message":"请执行 npussh login"}}
+{
+  "schema_version": 1,
+  "ok": false,
+  "command": "doctor",
+  "data": null,
+  "error": {
+    "code": "AUTH_REQUIRED",
+    "message": "请执行 npussh login"
+  }
+}
 ```
 
 退出码 0 表示调用成功，2 表示请求失败。异步提交成功后继续查询远端任务。init/update 的最终响应为摘要，详细检查报告保存在远端任务目录。平台等待失败时 data 保留终态详情；等待超时时仅保留 issue_id、round_no 和 event=timeout。
@@ -94,7 +114,7 @@ AFX >= 0.4.1 managed client 在 NPU 常驻。verify 前由官方 init/start/stat
 自动分支依据 error.code，message 用于展示。
 
 | 错误码 | 处理 |
-|---|---|
+| --- | --- |
 | INVALID_ARGUMENT / CONFIG_INVALID | 修正参数或配置；新任务使用新 ID |
 | DEPENDENCY_MISSING / DEPENDENCY_UNUSABLE | 修复启动解释器或本地工具 |
 | AUTH_REQUIRED | 执行 npussh login |

@@ -4,7 +4,9 @@ AFXX 使用 AFX 0.4.1+ 的 `afx fuzz replay <seed> --save`，不强制指定数�
 
 ## 精确查询与归档
 
-AFXX request_id/run 保存队列路径、task ID、attempt ID、结果摘要和日志，不复制共享数据库。结果通过 `afx results list <database> --attempt <id>` 精确读取；task→attempt 尚无公开查询接口，仅在适配层只读查询队列表。队列任务由 client 上传，AFXX 标记 upload.owner=client、state=delegated，不再执行整批补传；delegated 不等于服务端已确认。仅独立执行的 attempt 由 AFXX 通过临时数据库调用 `afx sync once`，结束即清理。
+AFXX request_id/run 保存队列路径、task ID、attempt ID、结果摘要和日志，不复制共享数据库。结果通过 `afx results list <database> --attempt <id>` 精确读取；task→attempt 尚无公开查询接口，仅在适配层只读查询队列表。
+
+队列任务由 client 上传，AFXX 标记 upload.owner=client、state=delegated，不再执行整批补传；delegated 不等于服务端已确认。仅独立执行的 attempt 由 AFXX 通过临时数据库调用 `afx sync once`，结束即清理。
 
 记录原始 seed、issue_id、平台执行 UUID、request_id/run；使用 `replay show --request-id ID --run N` 查询原运行。入队或 task completed 不等于精度通过，需核对全部 backend/shape；CPU not_checked 可为正常参考状态。超时保留原回执，先查询，勿盲目重复提交。
 

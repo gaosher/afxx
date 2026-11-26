@@ -31,7 +31,7 @@ afxx config init --source /absolute/path/graph-autofusion --output ~/.config/afx
 ```
 
 | 配置项 | 默认行为 |
-|---|---|
+| --- | --- |
 | `local.source_dir` | 必填，本地 graph-autofusion 源码仓库的绝对路径 |
 | `local.state_dir` | 本机 `~/.local/state/graph-autofusion/dev_workflow/jobs` |
 | `runtime.venv_dir` | `<workflow_root>/venv` |
@@ -63,7 +63,7 @@ Python 环境锁包含 `nnsmith-autofusex==0.1.2.post1`，venv 内使用 uv 0.11
 普通 init 要求目标 venv 尚不存在，且环境状态目录没有其他环境清单。失败会保留现场和 invalid 标记。init/update 默认实时跟随远端日志，结束后输出 JSON 摘要。`--detach` 仅提交任务，后续用 status 查询。
 
 | Python 选项 | 含义 |
-|---|---|
+| --- | --- |
 | `torch_version` | 精确版本，默认 `2.10.0+cpu`；torch_npu 系列由此推导 |
 | `torch_npu.date` | latest 或 YYYYMMDD；latest 从 UTC 当天回查最多 31 天 |
 | `afx.version` | 默认 `latest`，从 PyPI 获取最新兼容正式版；可指定精确发布版本 |
@@ -102,7 +102,7 @@ Python 更新失败时尝试旧锁回滚；一旦开始 CANN 安装，不承诺�
 init 在创建 venv 前检查安装根目录。存在 `cann/set_env.sh` 和 `cann/compiler/version.info` 时复用安装；根目录不存在或为空时按配置下载安装；目录非空但标志不完整时直接报错。
 
 | CANN 选项 | 行为 |
-|---|---|
+| --- | --- |
 | `date` | latest 选择最新完整发布；YYYYMMDD 选择当天最新完整发布 |
 | `install_root` | 安装根目录覆盖 |
 | `ops` | null/auto 根据 npu-smi 完整型号查映射；指定系列直接选包；none 跳过 OPS |
@@ -158,7 +158,6 @@ AFXX request_id/run 保存队列路径、task ID、attempt ID、结果摘要和�
 `--dump` 或 `replay.dump: true` 传递给 AFX 逐任务开启采集。使用 `evidence list/read --request-id ID --run N` 按需读取远端产物；不自动复制整个共享 dump 目录。新增或发生文件变化的 worker 目录仅标为候选证据，只有诊断中的明确路径才能关联到 attempt；文件种类及保留期限由 AFX 管理，缺少 IR/kernel 时仍需报告证据缺口。
 
 seed 顺序提交；devices=auto 交给 AFX 调度，显式设备轮转传入。compile_threads 传给 AFX；batch_timeout_seconds 限制单 seed 提交及等待时间，超时保留回执，不自动重提。workers 不控制该入口的并发。
-
 
 ## 平台连接
 

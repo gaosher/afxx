@@ -9,16 +9,24 @@ description: 使用 AFXX 领取 AFX 平台 issue，复现并定位 graph-autofus
 
 ## 执行约定
 
+### 工具与配置
+
 - AFXX 在本地调用，NPU 作为执行资源。使用已配置的 `afxx`，或对应的结构化 MCP 工具；只有缺少对应工具时才用 `afxx_run`，不熟悉参数先查 `afxx_help`；不要重写同步、编包、安装或客户端复测循环。
 - 开始时查 `afxx help` 及本次需要的子命令帮助，以已安装版本为准。环境命令可能分组为 `env init/update/check`；所有命令默认读取 `~/.config/afxx/config.yaml`，用户指定配置时使用该路径；不能因复现需要就擅自替换既有环境。
 - 启动时将选定配置展开为绝对路径，展示配置路径、connection.environment、workflow_root、local.source_dir 和平台地址（不输出 token）。默认配置不存在时提示 `afxx config init --source <源码目录>` 或请求已有配置路径，不搜索环境变量或当前目录。领取阶段示例使用默认配置；用户指定其他配置时追加 `--config <绝对路径>`。创建 worktree 任务配置后，按第 2 步切换，后续示例显式携带该配置（MCP 传 `config`）。
 - 从配置定位 `local.source_dir`，在目标源码仓库读取 AGENTS.md，遵循其开发、测试、构建和提交要求。先记录原有修改，不覆盖或提交用户无关改动。
+### 授权与凭据
+
 - 用户要求执行完整修复流程时，按授权范围领取、部署、verify 和本地 commit；已有授权不重复询问。只做诊断或讨论时不发起这些写操作。不自动 push、合并或关闭 issue。
 - 开始修复时说明本次配置的平台地址和数据范围：复跑默认向该平台上传执行结果及相关诊断；dump 在远端采集、按需读取，不自动上传整个 dump 目录。
 - 用户已明确授权同一平台及数据范围后，后续修复轮次沿用授权，不重复询问；目标平台或数据范围扩大时重新核对。重试前先核对是否已提交，避免重复复跑。
 - 远端 verify 使用 `platform.remote_token_file`，AFX client 使用 `platform.client_token_file`。配置 platform 后，env init 会复用或隐藏输入本地 token，并在环境成功后同步；异步 init 用 status/wait 完成同步。修复时复用已有凭据，遇到缺失或鉴权错误报告具体字段；不要为领取问题重建环境或重新签发 token。
+### 客户端与任务记录
+
 - 每个目标 NPU 环境只维护一个 AFX client，跨 issue、worktree 和部署轮次复用同一 client home 与身份。不要为单个问题初始化新 client、生成新 source_id 或另起旧版客户端；发现重复身份时先核对已有进程和平台记录，不自动删除平台记录。
 - 一个问题的工作记录保留 issue_id、租约到期时间、基线/候选 deploy run、request-id、verify round_no、AF 包身份及证据路径。复用任务已有笔记或修复总结，不另造状态数据库、不复制 wheel/源码快照。
+### 异步操作与重试
+
 - 使用 MCP 时优先调用结构化工具。deploy、client start/stop/restart 和 issue verify 等长操作先选定工具级 request_id，提交后用 afxx_operation_status 查询返回的回执 ID（deploy/verify 自动分配，区别于修复分组）；completed 只表示 CLI 调用结束，必须检查 data.result.ok，再从其中取得 request_id/run 或 round_no 或 client running 状态。MCP 断开后继续查询原 request_id；unknown 时先核对远端，不换键盲目重试。restart 的调用记录成功后才进入 verify，不因收到 pending 回执就继续。
 - 部署断线后先查询 deploy list/show，不盲目重复提交；源码/配置改变后继续使用同一修复 request-id，每次 deploy 自动新增 run。同组、同租约、同包的 verify 重试取回原回执，包变化后生成新验证。
 
@@ -43,7 +51,9 @@ afxx issue preview --issue-id <issue-id> --full
 
 原始基线优先使用 graph-autofusion 的 `upstream/master`。确认 upstream 指向目标上游仓库，获取最新 master 并记录解析后的确切 commit SHA；本轮复现和修复固定使用这个 SHA，不随上游移动而改变基线。
 
-在该 SHA 上建立干净的独立 worktree，任务配置的 local.source_dir 指向它；首次复现前执行下面的“deploy 主线基线 → 等待成功 → replay 复现”。修复分支从同一基线继续；已有基线部署只有满足下述全部条件才可复用。保留原工作区及配置，不通过 reset、清理或切分支覆盖用户已有修改。若用户指定其他修复分支，单独记录其与基线的差异，不把它冒充上游原始基线。upstream/master 不存在或获取失败时明确报告，不能静默替换为 origin/master、缓存引用或当前工作区。
+在该 SHA 上建立干净的独立 worktree，任务配置的 local.source_dir 指向它；首次复现前执行下面的“deploy 主线基线 → 等待成功 → replay 复现”。修复分支从同一基线继续；已有基线部署只有满足下述全部条件才可复用。
+
+保留原工作区及配置，不通过 reset、清理或切分支覆盖用户已有修改。若用户指定其他修复分支，单独记录其与基线的差异，不把它冒充上游原始基线。upstream/master 不存在或获取失败时明确报告，不能静默替换为 origin/master、缓存引用或当前工作区。
 
 使用 worktree 时，复制配置并仅将 `local.source_dir` 改为 worktree 绝对路径，不覆盖默认配置。从此步开始，所有后续操作（包括 status、issue 查询和 verify）必须带 `--config "$TASK_CONFIG"`，MCP 显式传同一路径；仅 cd 到 worktree 不会切换配置。deploy 前核对源码路径，无需 env update。
 
@@ -90,7 +100,9 @@ afxx replay --config "$TASK_CONFIG" --dump --seed <原始seed> --request-id <流
 afxx replay show --config "$TASK_CONFIG" --request-id <流程request-id> --run <run>
 ```
 
-记录 replay 返回的 request_id/run，所有修复轮次复用同一流程 request_id；每次调用都会执行，不需要 --new-run。用 replay list 查看历史、replay show --run N 查看指定一次、replay compare --runs N M 对比。MCP 的 afxx_replay 直接返回 request_id/run，通过 afxx_run 调用上述查询，不查 operation_status。断线先查历史，不能盲目重复 replay。
+记录 replay 返回的 request_id/run，所有修复轮次复用同一流程 request_id；每次调用都会执行，不需要 --new-run。用 replay list 查看历史、replay show --run N 查看指定一次、replay compare --runs N M 对比。
+
+MCP 的 afxx_replay 直接返回 request_id/run，通过 afxx_run 调用上述查询，不查 operation_status。断线先查历史，不能盲目重复 replay。
 
 若 replay 在准备阶段退出，先按[准备阶段失败](references/replay-evidence.md)定位出错的子命令。目标 seed 实际执行且失败阶段和关键诊断与平台记录吻合后，才能报告已复现。
 
@@ -127,13 +139,17 @@ afxx deploy show --config "$TASK_CONFIG" --request-id <修复流程ID> --run <�
 
 ## 5. 提交并等待 verify
 
-每轮候选 deploy 成功后，首次提交该候选的 verify 前，先查询 client status。若 deploy 返回 `client_coordination.state=restored`、原状态为 running，且当前仍运行，则复用本轮已核验的恢复结果，不重复重启。恢复为 idle 或原本 stopped 时，不把它当作测试已启动；按本次测试授权启动。否则，存在唯一存活 client 时重启其实际 home；没有存活 client 时使用 client start，多个存活 client 报错时停止流程，不自行挑选或强杀：
+每轮候选 deploy 成功后，首次提交该候选的 verify 前，先查询 client status。若 deploy 返回 `client_coordination.state=restored`、原状态为 running，且当前仍运行，则复用本轮已核验的恢复结果，不重复重启。
+
+恢复为 idle 或原本 stopped 时，不把它当作测试已启动；按本次测试授权启动。否则，存在唯一存活 client 时重启其实际 home；没有存活 client 时使用 client start，多个存活 client 报错时停止流程，不自行挑选或强杀：
 
 ```bash
 afxx client restart --config "$TASK_CONFIG" --timeout 300
 ```
 
-复用已核验且仍 running 的部署恢复结果，或本次 restart/start 返回 `ok=true` 且 `data.state=running` 后，才提交下面的 verify。失败或超时时先用 `client status` 检查并处理，不继续提交，不手工 kill 或新建 client。此重启是本修复流程的必要步骤，包含等待在途任务结束；已有完整修复流程授权时无需重复确认。重启可能按平台配置恢复 fuzz，但不代表复测领取或平台派发已经正常。
+复用已核验且仍 running 的部署恢复结果，或本次 restart/start 返回 `ok=true` 且 `data.state=running` 后，才提交下面的 verify。失败或超时时先用 `client status` 检查并处理，不继续提交，不手工 kill 或新建 client。
+
+此重启是本修复流程的必要步骤，包含等待在途任务结束；已有完整修复流程授权时无需重复确认。重启可能按平台配置恢复 fuzz，但不代表复测领取或平台派发已经正常。
 
 同一候选的 verify 已提交或响应丢失时，先查询已有轮次或按原请求幂等重试，不为等待、轮询或提交重试再次重启，避免打断在途复测。
 
@@ -141,20 +157,28 @@ afxx client restart --config "$TASK_CONFIG" --timeout 300
 afxx issue verify --config "$TASK_CONFIG" --issue-id <issue-id> --request-id <修复流程ID>
 ```
 
-verify 在远端采集当前安装的 AF 身份，不选择历史部署，确保环境中唯一的 AFX client 启动，再向平台提交；已有 client 沿用 AFX 保存的凭据，首次创建时才使用 `platform.client_token_file`。保存返回的 verify round_no，`submitted` 只表示提交成功，client/session running 也不证明平台已派发或本机已领取。平台复测派发问题当前待平台侧定位；排队、领取和执行结果分别取证，不通过启动额外 client、重复提交 verify 或修改 AFX 领取逻辑绕过。
+verify 在远端采集当前安装的 AF 身份，不选择历史部署，确保环境中唯一的 AFX client 启动，再向平台提交；已有 client 沿用 AFX 保存的凭据，首次创建时才使用 `platform.client_token_file`。
+
+保存返回的 verify round_no，`submitted` 只表示提交成功，client/session running 也不证明平台已派发或本机已领取。平台复测派发问题当前待平台侧定位；排队、领取和执行结果分别取证，不通过启动额外 client、重复提交 verify 或修改 AFX 领取逻辑绕过。
 
 ```bash
 afxx issue verify-check --config "$TASK_CONFIG" --issue-id <issue-id> --round-no <verify-round-no> --wait --timeout 30
 ```
 
-agent 使用 issue verify-check 等待原验证轮次；MCP 调用 afxx_issue(action="verify-check", issue_id=..., round_no=..., wait=true, timeout=30)。这是只读检查，不续租、不重启、不重复提交；timed_out=true 时继续查询同一轮次。以 state=passed 为通过，failed/invalid/attention 均需检查，running 继续等待。只有 reason=no_regression_candidates 才记录平台未选择回归。只在阶段变化、新失败或完成时汇报。
+agent 使用 issue verify-check 等待原验证轮次；MCP 调用 afxx_issue(action="verify-check", issue_id=..., round_no=..., wait=true, timeout=30)。
+
+这是只读检查，不续租、不重启、不重复提交；timed_out=true 时继续查询同一轮次。以 state=passed 为通过，failed/invalid/attention 均需检查，running 继续等待。
+
+只有 reason=no_regression_candidates 才记录平台未选择回归。只在阶段变化、新失败或完成时汇报。
 
 - verification 未结束：继续等待。
 - verification.outcome=failed：读取该轮失败任务与执行证据，回到第 2/3 步；修改后经过新的 deploy 和 verify。
 - state=invalid：优先排查包身份、结果缺失和执行环境，不等同于代码缺陷。
 - verification.outcome=passed：转第 6 步；不能提前 commit 为已验证修复。
 
-失败任务查询、环境阻塞和客户端身份处理按 [平台定位参考](references/platform-evidence.md)。尤其第二轮 deploy 后可能遇到存活客户端的旧 AF 身份：先调用 `client status`，在已有客户端协调授权范围内使用 `client stop/restart`，不绕过检查或误报循环成功。未传 `--coordinate-client` 的 deploy 不协调 client；传入后协调失败必须先处理，不绕过恢复检查。
+失败任务查询、环境阻塞和客户端身份处理按 [平台定位参考](references/platform-evidence.md)。尤其第二轮 deploy 后可能遇到存活客户端的旧 AF 身份：先调用 `client status`，在已有客户端协调授权范围内使用 `client stop/restart`，不绕过检查或误报循环成功。
+
+未传 `--coordinate-client` 的 deploy 不协调 client；传入后协调失败必须先处理，不绕过恢复检查。
 
 ## 6. 等待关联回归
 
