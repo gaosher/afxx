@@ -14,6 +14,8 @@ description: 使用 AFXX 领取 AFX 平台 issue，复现并定位 graph-autofus
 - 启动时将选定配置展开为绝对路径，展示配置路径、connection.environment、workflow_root、local.source_dir 和平台地址（不输出 token）。默认配置不存在时提示 `afxx config init --source <源码目录>` 或请求已有配置路径，不搜索环境变量或当前目录。领取阶段示例使用默认配置；用户指定其他配置时追加 `--config <绝对路径>`。创建 worktree 任务配置后，按第 2 步切换，后续示例显式携带该配置（MCP 传 `config`）。
 - 从配置定位 `local.source_dir`，在目标源码仓库读取 AGENTS.md，遵循其开发、测试、构建和提交要求。先记录原有修改，不覆盖或提交用户无关改动。
 - 用户要求执行完整修复流程时，按授权范围领取、部署、verify 和本地 commit；已有授权不重复询问。只做诊断或讨论时不发起这些写操作。不自动 push、合并或关闭 issue。
+- 开始修复时说明本次配置的平台地址和数据范围：复跑默认向该平台上传执行结果及相关诊断；dump 在远端采集、按需读取，不自动上传整个 dump 目录。
+- 用户已明确授权同一平台及数据范围后，后续修复轮次沿用授权，不重复询问；目标平台或数据范围扩大时重新核对。重试前先核对是否已提交，避免重复复跑。
 - 远端 verify 使用 `platform.remote_token_file`，AFX client 使用 `platform.client_token_file`。配置 platform 后，env init 会复用或隐藏输入本地 token，并在环境成功后同步；异步 init 用 status/wait 完成同步。修复时复用已有凭据，遇到缺失或鉴权错误报告具体字段；不要为领取问题重建环境或重新签发 token。
 - 每个目标 NPU 环境只维护一个 AFX client，跨 issue、worktree 和部署轮次复用同一 client home 与身份。不要为单个问题初始化新 client、生成新 source_id 或另起旧版客户端；发现重复身份时先核对已有进程和平台记录，不自动删除平台记录。
 - 一个问题的工作记录保留 issue_id、租约到期时间、基线/候选 deploy run、request-id、verify round_no、AF 包身份及证据路径。复用任务已有笔记或修复总结，不另造状态数据库、不复制 wheel/源码快照。
