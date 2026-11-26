@@ -1039,3 +1039,29 @@ def test_afx_rejects_removed_source_options(cfg, removed):
     raw['python_env'] = {'afx': {removed: '/fixture/afx.whl' if removed == 'wheel' else 'a' * 64}}
     with pytest.raises(ValueError, match='unknown configuration'):
         workflow_config.normalize_config(raw)
+
+
+@pytest.mark.parametrize("directory", ["superkernel.egg-info", "super_kernel/python/superkernel.egg-info"])
+def test_sync_preserves_generated_egg_metadata(cfg, tmp_path, directory):
+    local = Path(cfg["local"]["source_dir"])
+    metadata = local / directory
+    metadata.mkdir(parents=True)
+    (metadata / "PKG-INFO").write_text("local generated metadata")
+    first = job_snapshot(cfg, tmp_path / "first")
+    manifest = workflow_common.read(first / "source.json")
+    assert not any(".egg-info" in name for name in manifest["files"])
+    remote, _ = workflow_source.sync_source(cfg, first)
+    generated = remote / directory
+    generated.mkdir(parents=True)
+    files = ["PKG-INFO", "SOURCES.txt", "dependency_links.txt", "requires.txt", "top_level.txt"]
+    for name in files:
+        (generated / name).write_text("remote build metadata")
+    (local / "build.sh").write_text("new source")
+    second = job_snapshot(cfg, tmp_path / "second")
+    workflow_source.sync_source(cfg, second)
+    assert (remote / "build.sh").read_text() == "new source"
+    assert all((generated / name).read_text() == "remote build metadata" for name in files)
+    (remote / "unknown.cpp").write_text("unmanaged source")
+    third = job_snapshot(cfg, tmp_path / "third")
+    with pytest.raises(ValueError, match="unmanaged files"):
+        workflow_source.sync_source(cfg, third)

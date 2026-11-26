@@ -150,7 +150,7 @@ def relative(value):
 def protected(value):
     p = relative(value)
     return any(
-        x in PROTECTED or x.startswith(".env") or x.endswith((".pem", ".key"))
+        x in PROTECTED or x.startswith(".env") or x.endswith((".pem", ".key", ".egg-info"))
         for x in p.parts
     )
 

@@ -178,7 +178,7 @@ afxx deploy show --request-id repair-F001          # 最新部署
 afxx deploy show --request-id repair-F001 --run 1  # 历史部署
 ```
 
-部署需要暂停并恢复目标 AFX 客户端时使用 `--coordinate-client`，详见[部署客户端协调](docs/afxx-commands.md#deploy-客户端协调)。原来停止的客户端保持停止，运行会话重新启动，不保证原队列续跑。
+部署需要暂停并恢复目标 AFX 客户端时使用 `--coordinate-client`，详见[部署客户端协调](docs/afxx-commands.md#deploy-客户端协调)。原来停止的客户端保持停止，运行会话重新启动，不保证原队列续跑。 同一 Python 环境下允许切换 CANN 路径，运行会话恢复后核对目标 AF 库；idle 只恢复 daemon，执行环境待下次启动 session 后刷新。
 
 ### AFX客户端管理
 

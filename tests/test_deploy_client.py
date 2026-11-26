@@ -11,7 +11,7 @@ def setup(cfg, tmp_path, monkeypatch):
     home = tmp_path/'client'
     home.mkdir()
     common.write(job/'request.json', {'coordinate_client': True})
-    manifest = {'python':'/execution/bin/python', 'env':{'ASCEND_HOME_PATH':str(Path(cfg['runtime']['install_root'])/'cann')}}
+    manifest = {'python':d.runtime.python(cfg), 'env':{'ASCEND_HOME_PATH':str(Path(cfg['runtime']['install_root'])/'cann')}}
     state = {'state':'running', 'daemon_running':True, 'home':str(home), 'runs':[],
              'execution_environment':manifest, 'active_runs':[], 'active_operation':None}
     calls=[]
@@ -71,10 +71,10 @@ def test_failure_before_install_restores_but_partial_install_stays_stopped(cfg,s
     assert common.read(job/'result.json')['client_coordination']['state'] == ('held_stopped' if installed else 'restored')
 
 
-def test_environment_mismatch_and_active_operation_leave_client_untouched(cfg,setup):
+def test_python_mismatch_and_active_operation_leave_client_untouched(cfg,setup):
     job,state,calls,_=setup
-    state['execution_environment']['env']['ASCEND_HOME_PATH']='/other/cann'
-    with pytest.raises(common.WorkflowError,match='CANN differs'):
+    state['execution_environment']['python']='/other/venv/bin/python'
+    with pytest.raises(common.WorkflowError,match='Python differs'):
         with d.coordinate(cfg,job): pytest.fail('must not install')
     state['active_operation']='upgrading'
     with pytest.raises(common.WorkflowError,match='active operation'):
@@ -126,7 +126,7 @@ def test_deploy_orders_build_stop_install_restore_and_keeps_reference_valid(cfg,
     monkeypatch.setattr(d.runtime,'packaged_libraries',lambda *a:{'pyautofuse.so'})
     monkeypatch.setattr(d.runtime,'check_idle',lambda *a,**k:events.append('idle-check'))
     monkeypatch.setattr(execution.workflow_source,'sync_source',lambda *a:(source,{'sha256':'snapshot','base_commit':'base'}))
-    manifest={'python':'/execution/bin/python','env':{'ASCEND_HOME_PATH':str(root/'cann')}}
+    manifest={'python':d.runtime.python(cfg),'env':{'ASCEND_HOME_PATH':str(root/'cann')}}
     state={'state':'running','daemon_running':True,'home':str(home),'execution_environment':manifest,
            'active_runs':[],'active_operation':None}
     def control(c,action,**kwargs):
@@ -178,3 +178,60 @@ def test_cli_freezes_opt_in_and_mcp_forwards_it(cfg, monkeypatch):
     monkeypatch.setattr(mcp_operations,'submit',lambda command,args,path,key:calls.append(args) or {'ok':True, 'data':{}})
     call(mcp_server.create_server('/config'), 'afxx_deploy', {'request_id':'deploy-1','coordinate_client':True})
     assert '--coordinate-client' in calls[0]
+
+
+@pytest.mark.parametrize('initial', ['running', 'idle'])
+def test_cann_switch_after_install(cfg, setup, monkeypatch, initial):
+    job, state, calls, evidence = setup
+    state.update(state=initial)
+    state['execution_environment']['env']['ASCEND_HOME_PATH'] = '/old/cann'
+    original = d.launcher.control
+    def control(c, action, **kwargs):
+        result = original(c, action, **kwargs)
+        if action == 'start':
+            assert kwargs.get('environment_override') is None
+            if not kwargs['daemon_only']:
+                state['execution_environment']['env']['ASCEND_HOME_PATH'] = str(Path(c['runtime']['install_root'])/'cann')
+        return result
+    monkeypatch.setattr(d.launcher, 'control', control)
+    with d.coordinate(cfg, job) as coordination:
+        coordination.install_started = True
+        coordination.installed = True
+        common.update_record(job/'result.json', runtime=evidence)
+    record = common.read(job/'result.json')['client_coordination']
+    assert record['state'] == 'restored'
+    assert record['execution_environment_state'] == ('verified' if initial == 'running' else 'pending_session_start')
+
+
+def test_stale_cann_after_restart_is_stopped(cfg, setup):
+    job, state, calls, evidence = setup
+    state['execution_environment']['env']['ASCEND_HOME_PATH'] = '/old/cann'
+    with pytest.raises(common.WorkflowError, match='restoration failed'):
+        with d.coordinate(cfg, job) as coordination:
+            coordination.install_started = coordination.installed = True
+            common.update_record(job/'result.json', runtime=evidence)
+    assert [action for action, _ in calls].count('stop') == 2
+    assert common.read(job/'result.json')['client_coordination']['state'] == 'restore_failed'
+
+
+def test_failure_before_install_recovers_original_cann(cfg, setup):
+    job, state, calls, _ = setup
+    state['execution_environment']['env']['ASCEND_HOME_PATH'] = '/old/cann'
+    with pytest.raises(ValueError, match='before install'):
+        with d.coordinate(cfg, job):
+            raise ValueError('before install')
+    start = next(kwargs for action, kwargs in calls if action == 'start')
+    assert start['environment_override']['ASCEND_HOME_PATH'] == '/old/cann'
+    assert common.read(job/'result.json')['client_coordination']['execution_environment_state'] == 'previous_environment_restored'
+
+
+def test_python_check_does_not_confuse_venvs_sharing_binary(cfg, setup, tmp_path):
+    job, state, calls, _ = setup
+    shared = tmp_path/'python'; shared.write_text('binary')
+    for directory in (Path(cfg['runtime']['venv_dir'])/'bin', tmp_path/'other/bin'):
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory/'python').symlink_to(shared)
+    state['execution_environment']['python'] = str(tmp_path/'other/bin/python')
+    with pytest.raises(common.WorkflowError, match='Python differs'):
+        with d.coordinate(cfg, job): pytest.fail('must not install')
+    assert all(action == 'status' for action, _ in calls)

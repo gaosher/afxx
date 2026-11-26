@@ -36,15 +36,26 @@ class Coordination:
             for r in before.get('active_runs', [])), 'DEPLOY_CLIENT_UNSUPPORTED',
             'only stable local execution sessions can be coordinated')
         manifest = before['execution_environment']
-        root = manifest.get('env', {}).get('ASCEND_HOME_PATH')
-        common.require_code(root and Path(root).resolve() ==
-            (Path(self.c['runtime']['install_root'])/'cann').resolve(),
-            'DEPLOY_CLIENT_ENVIRONMENT_MISMATCH', 'registered client CANN differs from deploy target')
+        interpreter = manifest.get('python')
+        # Resolve the venv directory, not the executable: different venvs may
+        # symlink their interpreters to the same system Python binary.
+        common.require_code(interpreter and Path(interpreter).is_absolute()
+            and Path(interpreter).parent.resolve() == Path(runtime.python(self.c)).parent.resolve(),
+            'DEPLOY_CLIENT_ENVIRONMENT_MISMATCH', 'registered client Python differs from workflow venv')
+
+    def execution_env(self, manifest):
+        env = {k:v for k,v in os.environ.items() if k not in ('PYTHONPATH','PYTHONHOME','VIRTUAL_ENV')}
+        env.update(manifest['env'])
+        return env
 
     def restore(self):
         self.save('restoring')
         common.phase(self.job, 'restore_client')
-        result = self.control('start', daemon_only=self.before['state'] == 'idle')
+        options = {'daemon_only': self.before['state'] == 'idle'}
+        if not self.installed:
+            # Installation never started: recover the previous execution context.
+            options['environment_override'] = self.execution_env(self.before['execution_environment'])
+        result = self.control('start', **options)
         common.require_code(result['state'] == self.before['state'], 'DEPLOY_CLIENT_RESTORE_FAILED',
                             'client did not return to its original execution state')
         observed = self.control('status', inspect=True)
@@ -52,15 +63,22 @@ class Coordination:
                             'client state changed during restoration')
         self.validate(observed)
         manifest = observed['execution_environment']
+        if self.before['state'] == 'idle':
+            self.save('restored', after=observed, execution_environment_state='pending_session_start')
+            return
+        expected_root = (Path(self.c['runtime']['install_root'])/'cann' if self.installed
+                         else Path(self.before['execution_environment']['env']['ASCEND_HOME_PATH']))
+        root = manifest.get('env', {}).get('ASCEND_HOME_PATH')
+        common.require_code(root and Path(root).resolve() == expected_root.resolve(),
+                            'DEPLOY_CLIENT_ENVIRONMENT_MISMATCH', 'restored client CANN differs from expected environment')
         if self.installed:
             # Probe the registered execution interpreter and env, not the submitting CLI.
-            env = {k:v for k,v in os.environ.items() if k not in ('PYTHONPATH','PYTHONHOME','VIRTUAL_ENV')}
-            env.update(manifest['env'])
+            env = self.execution_env(manifest)
             evidence = runtime.probe(self.c, env, self.job, interpreter=manifest['python'])
             deployed = common.read(self.job/'result.json')['runtime']
             common.require_code(all(evidence[k] == deployed[k] for k in ('pyautofuse','adapter','codegen')),
                                 'DEPLOY_CLIENT_ENVIRONMENT_MISMATCH', 'restored execution AF differs from deployment')
-        self.save('restored', after=observed)
+        self.save('restored', after=observed, execution_environment_state='verified' if self.installed else 'previous_environment_restored')
 
 
 @contextmanager

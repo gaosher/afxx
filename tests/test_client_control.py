@@ -234,3 +234,45 @@ def test_daemon_only_restore_does_not_start_fuzz(client):
     result = m.execute(dict(client, action='start', daemon_only=True), d.run, legacy)
     assert result['state'] == 'idle'
     assert 'start' not in d.calls
+
+
+def test_status_inspection_uses_public_env_command(client):
+    calls = []
+    manifest = {'id': 'local', 'env': {'ASCEND_HOME_PATH': '/cann'}}
+    def public(argv):
+        calls.append(argv)
+        assert argv[-2:] == ['--data-dir', client['home']]
+        if argv[:2] == ['daemon', 'status']:
+            return dict(pid=99999999, runs=[dict(id='run', state='running')])
+        if argv[:3] == ['env', 'status', 'local']:
+            return manifest
+        if argv[:3] == ['task', 'inspect', 'run']:
+            return {'spec': {'environment': {'id': 'local'}}}
+        pytest.fail('unexpected public AFX command: ' + repr(argv))
+    result = m.execute(dict(client, action='status', inspect=True), public, public)
+    assert result['execution_environment'] == manifest
+    assert len(result['active_runs']) == 1
+    assert [a[:2] for a in calls] == [['daemon', 'status'], ['env', 'status'], ['task', 'inspect']]
+
+
+@pytest.mark.parametrize('rollback', [False, True])
+def test_launcher_restart_environment_source(cfg, tmp_path, monkeypatch, rollback):
+    home = tmp_path/'home'; home.mkdir()
+    (home/'client.json').write_text('{}')
+    monkeypatch.setattr(launcher, 'selected_client', lambda: None)
+    target = {'ASCEND_HOME_PATH':'/target/cann', 'LD_LIBRARY_PATH':'/target/lib'}
+    previous = {'ASCEND_HOME_PATH':'/previous/cann', 'LD_LIBRARY_PATH':'/previous/lib'}
+    def environment(c):
+        assert not rollback
+        return dict(target)
+    monkeypatch.setattr(launcher.runtime, 'environment', environment)
+    def capture(argv, **kwargs):
+        expected = previous if rollback else target
+        assert kwargs['env']['ASCEND_HOME_PATH'] == expected['ASCEND_HOME_PATH']
+        assert kwargs['env']['LD_LIBRARY_PATH'] == expected['LD_LIBRARY_PATH']
+        assert kwargs['env']['AUTOFUSEX_HOME'] == str(home)
+        return json.dumps({'state':'idle', 'daemon_running':True})
+    monkeypatch.setattr(launcher.w, 'capture', capture)
+    result = launcher.control(cfg, 'start', home=home, daemon_only=True,
+                              environment_override=previous if rollback else None)
+    assert result['state'] == 'idle'

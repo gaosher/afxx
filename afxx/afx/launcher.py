@@ -36,7 +36,7 @@ def client_home(c):
         raise w.WorkflowError("PLATFORM_CLIENT_CONTROL_FAILED", "cannot resolve AFX client home using configured Python") from error
 
 
-def control(c, action, timeout=300, *, home=None, lock_held=False, daemon_only=False, inspect=False):
+def control(c, action, timeout=300, *, home=None, lock_held=False, daemon_only=False, inspect=False, environment_override=None):
     """Control the one selected AFX home without replacing its identity."""
     w.require_code(action in ("status", "start", "stop", "restart"), "INVALID_ARGUMENT", "invalid client action")
     try:
@@ -69,7 +69,7 @@ def control(c, action, timeout=300, *, home=None, lock_held=False, daemon_only=F
                     "PLATFORM_CLIENT_UNTRACKED",
                     f"stop the legacy AFX client before initializing managed client: {path}",
                 )
-        env = runtime.environment(c) if action in ("start", "restart") else dict(os.environ)
+        env = (dict(environment_override) if environment_override is not None else runtime.environment(c)) if action in ("start", "restart") else dict(os.environ)
         env["AUTOFUSEX_HOME"] = str(home)
         devices = c["replay"]["devices"] if initialize else None
         if initialize and devices == "auto":

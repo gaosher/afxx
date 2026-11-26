@@ -191,3 +191,5 @@ AFX 仅接受 `python_env.afx.version`（默认 `latest`），不再接受 wheel
 单个 `cann.date` 无法表达不同批次的 Toolkit 和 OPS。若选用 `--save-config` 会产生这种组合，则安装前拒绝；使用 `--cann DATE --ops --save-config` 同批更新，或省略回写参数。
 
 AFX 公共 CLI 暂未暴露完整 AF 加载身份和 NNSmith 源码校验；这些探测仍在适配层调用新版 execution/workloads 模块。client 操作与结果查询使用公开 CLI。
+
+源码同步将 `*.egg-info/` 视为 Python 打包产物：不纳入本地快照，远端已有内容保留且不触发未管理文件冲突。其他未管理源码仍会阻止同步。

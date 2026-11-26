@@ -129,7 +129,7 @@ def execute(settings, run, legacy):
     if action == 'status':
         result = view(current)
         if current and settings.get('inspect'):
-            result['execution_environment'] = legacy(['environment', 'status', 'local', '--data-dir', str(home)])
+            result['execution_environment'] = legacy(['env', 'status', 'local', '--data-dir', str(home)])
             result['active_runs'] = [legacy(['task', 'inspect', r['id'], '--data-dir', str(home)])
                 for r in current.get('runs', []) if r['state'] in ('running','paused','preparing','pausing','draining','cancelling','needs_attention')]
         return result

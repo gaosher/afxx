@@ -41,11 +41,11 @@ AFXX 的 verify 使用配置 venv/CANN 调用 AFX managed 接口，client 目录
 
 主线基线和每轮候选部署都使用 `afxx deploy --coordinate-client`（带同一任务配置）。此参数授权协调目标安装的唯一 AFX 客户端；若仍有本轮平台 verify/回归未结束，先等待终态。其他共享任务不在本次协调范围内时，不直接使用该选项停止它们。
 
-远端 worker 先同步、编包并校验包，再记录客户端状态、核对注册的 CANN 路径、停止并等待退出，检查本次待替换 AF 库的占用，然后安装和验证。安装成功后恢复原 running/idle 状态；原 stopped 保持停止。running 通过 start 新建执行会话，**不保证恢复原 run、队列进度或全部执行参数**；需要原任务精确续跑时不使用该选项。paused、过渡/异常状态、活动管理 operation、其他安装环境均在停止前报错。
+远端 worker 先同步、编包并校验包，再记录客户端状态、核对注册的 Python 属于 AFXX 配置的 venv、停止并等待退出，检查本次待替换 AF 库的占用，然后安装和验证。安装成功后恢复原 running/idle 状态；原 stopped 保持停止。running 通过 start 新建执行会话，**不保证恢复原 run、队列进度或全部执行参数**；需要原任务精确续跑时不使用该选项。paused、过渡/异常状态、活动管理 operation、不同 Python 环境均在停止前报错。CANN 路径允许不同，恢复时使用 AFXX 的目标 CANN 环境重新启动 daemon。
 
 - 编包失败不影响客户端；停止超时不安装，查询原 deploy 和 client 状态，不强杀。
 - 安装前占用检查失败时尝试恢复旧会话；安装开始后失败保持停止，不在可能混装的环境运行。
-- `client_coordination.state=restored` 表示原状态已恢复，注册执行环境的 AF 库已与本轮安装核对；unchanged 表示原本没有运行的 daemon。
+- `client_coordination.state=restored` 只表示原状态已恢复。running 成功恢复时 execution_environment_state=verified，已核对目标 CANN 和 AF 库；idle 为 pending_session_start，未启动执行会话，不代表 local 已刷新。unchanged 表示原本没有运行的 daemon。
 - `DEPLOY_CLIENT_RESTORE_FAILED` 表示安装已验证但恢复失败；报告保留安装与恢复结果，并尝试停止未验证的新会话。先处理错误，不进入 verify，不盲目重跑安装；超时/状态不明先查询现场。
 - AFXX 持有客户端生命周期锁覆盖停止到恢复，防止其他 AFXX 生命周期命令插入；**这不是 AFX 全局维护屏障**。期间不得从其他入口启动 client、replay 或其他使用目标 AF 库的任务。安装前发现残留占用则报 PID，不删除锁或跳过检查。
 

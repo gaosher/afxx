@@ -508,7 +508,7 @@ MCP deploy/verify 的本机 operation ID 自动生成，与修复分组不同；
 
 `afxx deploy --coordinate-client` 在编包及包校验后、安装前停止唯一目标 AFX 客户端，安装验证成功后恢复原运行意图；MCP `afxx_deploy` 使用 `coordinate_client=true`。省略参数不协调。无需单独 stop/start，远端 worker 不依赖本地日志连接持续在线。
 
-支持 running（重新 start 会话）、idle（只启动 daemon）、stopped（不启动）。不保证原 run/队列进度续跑；paused、过渡状态或活动管理 operation 在停止前拒绝。注册执行环境的 CANN 必须属于部署目标，恢复后使用注册的 Python/env 核对 AF 库路径和哈希。安装前失败尝试恢复旧会话，安装开始后失败保持停止；恢复失败保留已验证安装并返回 DEPLOY_CLIENT_RESTORE_FAILED，不能继续 verify。status 返回 client_coordination 和 installation_state。
+支持 running（重新 start 会话）、idle（只启动 daemon）、stopped（不启动）。不保证原 run/队列进度续跑；paused、过渡状态或活动管理 operation 在停止前拒绝。注册的 Python 必须属于 AFXX 配置的 venv，不能仅比较最终 Python 二进制（不同 venv 可能共用该文件）。CANN 路径允许不同：停止旧 daemon 后安装，使用 AFXX 配置的 CANN 环境重新启动。running 恢复后核对 local 的 CANN 路径及 AF 库路径和哈希，记录 execution_environment_state=verified；idle 只恢复 daemon，不启动 fuzz，记录 pending_session_start，不能认为 local 已刷新。安装前失败使用原注册环境尝试恢复旧会话，安装开始后失败保持停止；恢复失败保留已验证安装并返回 DEPLOY_CLIENT_RESTORE_FAILED，不能继续 verify。status 返回 client_coordination 和 installation_state。
 
 生命周期锁仅约束 AFXX 调用，不是 AFX 的全局接单屏障；协调期间其他入口不得启动任务。原本运行中的平台验证应先结束。停止/恢复失败后查同一 job 和 client status，不绕过占用检查、不强杀、不为恢复而盲目重新安装。
 
