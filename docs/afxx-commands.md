@@ -515,3 +515,14 @@ MCP deploy/verify 的本机 operation ID 自动生成，与修复分组不同；
 环境操作 `env init/update` 分别自动生成 `ENV-INIT-` / `ENV-UPDATE-` 加 12 位随机十六进制后缀的任务 ID，不接受 `--request-id`。通过返回 ID 使用 `status --request-id ID` 查询。MCP 调用记录与远端环境任务分别自动分配 ID：先用调用回执查询 `afxx_operation_status`，再用其中 CLI 结果的任务 ID 查询远端状态。
 
 `env check` 在 CLI/MCP 均同步返回检查结果，不生成任务或 MCP 调用记录；不支持 request_id、--dry-run、--detach。远端仅临时解包检查代码并在结束后清理，检查失败返回 ENV_CHECK_FAILED 和检查详情，连接中断可直接重跑。
+
+### 更新本机 skill 和 MCP
+
+```bash
+afxx skills upgrade --agent codex
+afxx mcp upgrade --agent codex
+```
+
+使用当前 Python 环境中安装的 AFXX，不从 PyPI 更新包。skill 同步包内资源并备份被替换的目录；MCP 更新 `$CODEX_HOME/config.toml`（默认 `~/.codex/config.toml`），保留其他服务、环境变量及原有 `--config` 参数，变更前备份配置。返回值包含备份路径。
+
+MCP 命令不会终止现有服务进程；更新后需重连 AFXX MCP 或重新开启客户端会话。HTTP 类型的同名服务不会自动覆盖。

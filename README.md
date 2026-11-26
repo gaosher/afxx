@@ -555,3 +555,14 @@ wheel/sdist 位于 `dist/`，包含执行模块、模板和 skill，不包含用
 [publish.yml](.github/workflows/publish.yml) 在推送 `v*` tag 时执行测试、构建、安装验证并发布 PyPI。
 
 完整接口见[命令参考](docs/afxx-commands.md)、[CLI/MCP/API 对照](docs/PLATFORM_API_MAPPING.md)和[Agent 调用约定](docs/AGENT_USAGE.md)。本项目采用 [Apache License 2.0](LICENSE)。
+
+### 更新本机 skill / MCP
+
+升级 AFXX 包后，执行以下命令同步当前包自带的 skill，并让 Codex MCP 使用当前 AFXX 所在的 Python 环境：
+
+```bash
+afxx skills upgrade --agent codex
+afxx mcp upgrade --agent codex
+```
+
+旧内容自动备份，路径显示在返回结果中。命令不会升级 AFXX 包或重启现有 MCP；完成后重连 MCP，使新版本生效。

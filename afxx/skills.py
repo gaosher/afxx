@@ -31,7 +31,7 @@ def contents(root):
     return result
 
 
-def install():
+def install(*, upgrade=False):
     source = bundled_skills()
     destination = Path.home() / ".agents" / "skills"
     destination.mkdir(parents=True, exist_ok=True)
@@ -41,12 +41,13 @@ def install():
             target = destination / name
             common.require_code(not target.is_symlink(), "SKILL_CONFLICT", f"Skill target is a symbolic link: {target}")
             if target.exists():
-                common.require_code(target.is_dir() and contents(target) == payload,
+                common.require_code(target.is_dir() and (upgrade or contents(target) == payload),
                                     "SKILL_CONFLICT", f"Existing skill differs: {target}; move it aside before reinstalling")
         installed = []
         for name, payload in payloads.items():
             target = destination / name
-            reused = target.exists()
+            reused = target.exists() and contents(target) == payload
+            backup = None
             if not reused:
                 staging = Path(tempfile.mkdtemp(prefix=".afxx-", dir=destination))
                 try:
@@ -54,9 +55,18 @@ def install():
                         path = staging / relative
                         path.parent.mkdir(parents=True, exist_ok=True)
                         path.write_bytes(content)
-                    staging.rename(target)
+                    if target.exists():
+                        backup_root = Path(tempfile.mkdtemp(prefix='afxx-skills-', dir=destination.parent))
+                        backup = backup_root / name
+                        target.rename(backup)
+                    try:
+                        staging.rename(target)
+                    except BaseException:
+                        if backup is not None:
+                            backup.rename(target)
+                        raise
                 finally:
                     if staging.exists():
                         shutil.rmtree(staging)
-            installed.append({"name": name, "path": str(target), "reused": reused})
+            installed.append({"name": name, "path": str(target), "reused": reused, "backup": str(backup) if backup else None})
     return {"agent": "codex", "skills": installed}

@@ -77,7 +77,7 @@ def response(command, data=None, error=None):
     return {
         "schema_version": 1,
         "ok": error is None,
-        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "config-", "evidence-", "skills-", "client-", "case-", "platform-", "retest-", "replay-", "deploy-")) else command,
+        "command": command.replace("-", " ", 1) if command and command.startswith(("issue-", "config-", "evidence-", "skills-", "mcp-", "client-", "case-", "platform-", "retest-", "replay-", "deploy-")) else command,
         "data": data,
         "error": None if error is None else {"code": error.code, "message": str(error)},
     }
@@ -154,7 +154,7 @@ def parse_arguments():
     for name in (*env_jobs, *jobs, *issues, *clients, *queries, "evidence-list", "evidence-read", "status", "doctor"):
         parent = commands
         leaf = name
-        if name in env_jobs or name.startswith(("issue-", "config-", "evidence-", "skills-", "client-", "case-", "platform-", "retest-")):
+        if name in env_jobs or name.startswith(("issue-", "config-", "evidence-", "skills-", "mcp-", "client-", "case-", "platform-", "retest-")):
             group = "env" if name in env_jobs else name.split("-", 1)[0]
             leaf = name if group == "env" else name.split("-", 1)[1]
             if group not in groups:
@@ -304,8 +304,15 @@ def parse_arguments():
     skill_install = skills_commands.add_parser("install", help="安装随 AFXX 发布的 skills", allow_abbrev=False)
     skill_install.set_defaults(command="skills-install")
     skill_install.add_argument("--agent", choices=["codex"], required=True)
+    skill_upgrade = skills_commands.add_parser("upgrade", help="同步当前 AFXX 自带的 skills，备份旧内容", allow_abbrev=False)
+    skill_upgrade.set_defaults(command="skills-upgrade")
+    skill_upgrade.add_argument("--agent", choices=["codex"], required=True)
     mcp_parser = commands.add_parser("mcp", help="启动 stdio MCP 服务", allow_abbrev=False)
     mcp_parser.add_argument("--config", help="默认配置文件覆盖路径")
+    mcp_commands = mcp_parser.add_subparsers(dest="action")
+    mcp_upgrade = mcp_commands.add_parser("upgrade", help="更新 Codex MCP 配置并提示重连", allow_abbrev=False)
+    mcp_upgrade.set_defaults(command="mcp-upgrade")
+    mcp_upgrade.add_argument("--agent", choices=["codex"], required=True)
     commands.add_parser("help", help="显示全部命令及功能说明", allow_abbrev=False)
     parser.set_defaults(
         issue_id=None,
@@ -339,9 +346,12 @@ def main():
     if len(sys.argv) == 3 and sys.argv[1] == "_worker":
         return workflow_jobs.worker(sys.argv[2])
     args = parse_arguments()
-    if args.command == "skills-install":
+    if args.command in ("skills-install", "skills-upgrade"):
         from afxx.skills import install
-        return install()
+        return install(upgrade=args.command == "skills-upgrade")
+    if args.command == "mcp-upgrade":
+        from afxx.integration import upgrade_mcp
+        return upgrade_mcp()
     if args.command == "config-init":
         return workflow_config.write_template(args.source, args.output)
     if args.issue_id is not None:
@@ -583,7 +593,7 @@ def main():
 
 
 def cli():
-    if len(sys.argv) > 1 and sys.argv[1] == "mcp":
+    if len(sys.argv) > 1 and sys.argv[1] == "mcp" and sys.argv[2:3] != ["upgrade"]:
         try:
             from afxx.mcp_server import main as mcp_main
         except ModuleNotFoundError as error:
@@ -595,7 +605,7 @@ def cli():
         mcp_main(sys.argv[2:])
         return 0
     command = sys.argv[1] if len(sys.argv) > 1 else None
-    if command in ("issue", "config", "evidence", "skills", "client", "case", "platform", "retest", "replay", "deploy") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
+    if command in ("issue", "config", "evidence", "skills", "mcp", "client", "case", "platform", "retest", "replay", "deploy") and len(sys.argv) > 2 and not sys.argv[2].startswith("-"):
         command += "-" + sys.argv[2]
     if command in ("_worker", "_python_check"):
         return main()
