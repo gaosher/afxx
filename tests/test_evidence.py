@@ -82,7 +82,7 @@ def test_remote_evidence_protocol_runs_without_installed_forge(scene, monkeypatc
     def remote(c, argv):
         return json.loads(subprocess.check_output([sys.executable, *argv[1:]], text=True, cwd='/tmp'))
     monkeypatch.setattr(jobs, 'remote', remote)
-    cfg = {'remote': {'state_dir': str(job.parent)}}
+    cfg = {'remote': {'state_dir': str(job.parent)}, 'local': {'state_dir': str(job.parent / 'local')}}
     assert jobs.query_evidence(cfg, job.name, 'read', path=str(path))['content'] == 'test ir'
     assert jobs.query_evidence(cfg, job.name, 'list')['files'][0]['path'] == str(path)
 

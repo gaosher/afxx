@@ -192,7 +192,7 @@ def execute(job):
         common.require_code(Path(settings.get('client_token_file') or settings['remote_token_file']).is_file(),
                             'PLATFORM_CREDENTIAL_MISSING',
                             'standalone upload requires platform.client_token_file; use --no-upload for offline replay')
-    results = Path(c['replay']['results_dir']) / job.name
+    results = Path(c['replay']['results_dir']) / common.execution_id(job)
     results.mkdir(parents=True, exist_ok=True)
     dump = c['replay']['dump']
     before = dump_directories(home) if dump else {}

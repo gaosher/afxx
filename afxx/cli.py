@@ -458,7 +458,7 @@ def main():
             workflow_common.require_code(bool(args.issue_id), "INVALID_ARGUMENT", "verify requires --issue-id")
             lease = platform.claimed(c, args.issue_id)
             return workflow_jobs.verify_current(c, args.request_id, {key: lease[key] for key in ("id", "lease_id")})
-        directory = str(Path(c["remote"]["state_dir"]) / args.job)
+        directory = str(workflow_common.remote_job(c, args.job))
         lease = platform.claimed(c, args.issue_id) if args.issue_id else None
         context = {key: lease[key] for key in ("id", "lease_id")} if lease else None
         code = "import sys,json; sys.path.insert(0,sys.argv[1]); from afxx.afx import platform as p; print(json.dumps(p.retry_remote(sys.argv[1],json.loads(sys.argv[2]))))"
@@ -475,7 +475,7 @@ def main():
         "deploy" if args.command == "doctor" else "status" if args.command.startswith("evidence-") or args.command in ("fuzz-status", "fuzz-stop") else args.command, args.dry_run
     )
     if args.command in ("fuzz-status", "fuzz-stop"):
-        directory = str(Path(c["remote"]["state_dir"]) / args.job)
+        directory = str(workflow_common.remote_job(c, args.job))
         code = "import sys,json; sys.path.insert(0,sys.argv[1]); from afxx.afx.fuzz import control; print(json.dumps(control(sys.argv[1],sys.argv[2])))"
         return workflow_jobs.remote(c, ["python3", "-c", code, directory, args.command.split("-", 1)[1]])
     if args.command == "doctor":

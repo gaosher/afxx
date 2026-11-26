@@ -66,7 +66,7 @@ def manifest(job, fallback_results):
                     skipped.append({"path": str(path), "reason": "upload_credentials"})
                     continue
                 add(path, group)
-    return {"state": "complete", "job_id": job.name, "remote_state": status["state"],
+    return {"state": "complete", "job_id": request.get("execution_id", job.name), "remote_state": status["state"],
             "roots": {k: str(v) for k, v in roots.items()}, "files": files, "skipped": skipped}
 
 
@@ -101,7 +101,7 @@ def download(c, job_id, remote):
     root.mkdir(mode=0o700, exist_ok=True)
     common.require(not root.is_symlink() and root.stat().st_uid == os.getuid()
                    and root.stat().st_mode & 0o077 == 0, "unsafe evidence cache directory")
-    remote_job = str(Path(c["remote"]["state_dir"]) / job_id)
+    remote_job = str(common.remote_job(c, job_id))
     identity = common.digest([c["connection"]["environment"], remote_job])[:16]
     destination = root / (job_id + "-" + identity)
     with common.lock(destination.with_suffix(".lock")):

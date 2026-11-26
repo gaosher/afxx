@@ -60,7 +60,7 @@ def test_remote_returns_summary_before_transport(report, tmp_path, monkeypatch):
     def remote(c, argv):
         return json.loads(subprocess.check_output([sys.executable,*argv[1:]], text=True))
     monkeypatch.setattr(jobs, 'remote', remote)
-    cfg = {'remote': {'state_dir': str(tmp_path)}}
+    cfg = {'remote': {'state_dir': str(tmp_path)}, 'local': {'state_dir': str(tmp_path / 'local')}}
     data = jobs.query_status(cfg, job.name)
     assert len(json.dumps(data)) < 2000
     assert jobs.query_status(cfg, job.name, full=True)['details']['result.json']['attempts'] == report['result.json']['attempts']

@@ -505,7 +505,7 @@ state=running 表示继续等待；passed 表示任务全部明确通过，且�
 
 超时直接返回当前进度、timed_out=true、next_action=wait，查询成功仍为 ok=true；平台任务失败也通过 data.state 表达，HTTP/协议错误才返回 ok=false。多个查询不是平台原子快照，遇到不一致应复查；失败列表不读取完整日志。旧 issue status/tasks/detail/wait 保留，旧 wait 仍有自动续租行为，修复 skill 改用只读 verify-check。
 
-deploy 和 replay 使用 request_id 分组，各自从 run=1 计数，每次调用新增一轮；底层执行目录独立，内部提交仍有幂等保护。修改代码后继续使用同一分组。断线先查询 `deploy list/show` 或 `replay list/show`，不要盲目重提。fuzz run 保持独立任务行为。
+deploy 和 replay 使用 request_id 分组，各自从 run=1 计数，每次调用新增一轮；远端目录为 `workflow-state/<request_id>/deploy/run-N/` 和 `workflow-state/<request_id>/replay/run-N/`。本地锁分配轮次，内部执行 ID 保持唯一，提交仍有幂等保护。旧记录不搬迁，查询沿用已保存的路径。修改代码后继续使用同一分组。断线先查询 `deploy list/show` 或 `replay list/show`，不要盲目重提。fuzz run 保持独立任务行为。
 
 `afxx deploy list --request-id repair-F001` 列出部署记录；`afxx deploy show --request-id repair-F001 [--run N]` 查询最新或指定部署。历史记录不选择运行包。verify 使用 `--request-id repair-F001 --issue-id F001` 读取当前安装身份；同组/租约/包的重试复用冻结请求和回执，包变化后生成新验证。
 

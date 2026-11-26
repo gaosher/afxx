@@ -8,17 +8,18 @@ import pytest
 from afxx import common, jobs, evidence_bundle as bundle
 
 
-@pytest.fixture
-def scene(tmp_path, monkeypatch):
+@pytest.fixture(params=[False, True], ids=["flat", "grouped"])
+def scene(tmp_path, monkeypatch, request):
     root=tmp_path.resolve()
     job_id='a'*32
-    job=root/'remote'/job_id;job.mkdir(parents=True)
+    relative = 'repair/replay/run-1' if request.param else job_id
+    job=root/'remote'/relative;job.mkdir(parents=True)
     results=root/'results'/job_id;(results/'dump').mkdir(parents=True)
     (job/'torch_compile_debug').mkdir()
     (job/'job.log').write_text('failure log')
     (job/'torch_compile_debug'/'graph.py').write_text('full graph')
     (job/'status.json').write_text(json.dumps({'state':'failed'}))
-    (job/'request.json').write_text(json.dumps({'command':'replay'}))
+    (job/'request.json').write_text(json.dumps({'command':'replay', 'execution_id':job_id}))
     attempt={'id':'attempt1','seed_short':'Eseed','backend':'af-mlir','status':'error',
              'shape_results':[{'shape_index':0,'correctness':'error','error_stage':'compile','error_summary':'bad type'}]}
     (job/'result.json').write_text(json.dumps({'results_dir':str(results),'attempts':[attempt]}))
@@ -26,7 +27,9 @@ def scene(tmp_path, monkeypatch):
     (results/'dump'/'kernel.so').write_bytes(b'binary\0artifact')
     (results/'sync.json').write_text('SECRET')
     (results/'dump'/'outside').symlink_to(results/'sync.json')
-    cfg={'connection':{'environment':'npu'},'remote':{'state_dir':str(job.parent)},'replay':{'results_dir':str(results.parent)}}
+    cfg={'connection':{'environment':'npu'},'local':{'state_dir':str(root/'local')},'remote':{'state_dir':str(root/'remote')},'replay':{'results_dir':str(results.parent)}}
+    if request.param:
+        common.write(root/'local'/'requests'/(common.digest(job_id)+'.json'), {'remote_relative':relative})
     monkeypatch.setattr(bundle,'cache_root',lambda:root/'cache')
     monkeypatch.setattr(bundle.shutil,'which',lambda _: '/bin/npursync')
     calls=[]

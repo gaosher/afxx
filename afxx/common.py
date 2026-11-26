@@ -22,6 +22,32 @@ def validate_job_id(value):
     return value
 
 
+def grouped_path(request, execution):
+    """Remote relative directory; allocation remains protected by the local group lock."""
+    kind = request.get("command")
+    if kind not in ("deploy", "replay") or "run" not in request:
+        return validate_job_id(execution)
+    group = validate_job_id(request.get("request_id"))
+    run = request["run"]
+    require_code(type(run) is int and run > 0, "INVALID_ARGUMENT", "run must be a positive integer")
+    return f"{group}/{kind}/run-{run}"
+
+
+def remote_job(c, execution):
+    validate_job_id(execution)
+    record = Path(c["local"]["state_dir"]) / "requests" / (digest(execution) + ".json")
+    relative = read(record).get("remote_relative", execution) if record.exists() else execution
+    parts = Path(relative).parts
+    require_code(not Path(relative).is_absolute() and all(part not in (".", "..") for part in parts),
+                 "INVALID_ARGUMENT", "invalid remote task path")
+    return Path(c["remote"]["state_dir"]) / relative
+
+
+def execution_id(job):
+    request = job / "request.json"
+    return read(request).get("execution_id", job.name) if request.exists() else job.name
+
+
 PROTECTED = {
     ".git",
     ".agents",
@@ -169,7 +195,7 @@ def phase(job, name, **extra):
     write(
         job / "status.json",
         {
-            "job": job.name,
+            "job": execution_id(job),
             "state": "running",
             "phase": name,
             "pid": os.getpid(),

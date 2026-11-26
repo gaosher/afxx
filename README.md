@@ -271,7 +271,7 @@ repair-F001/
 - 该 ID 下，deploy 和 replay 各自递增 `run`，不要求一一对应。
 - replay 和 verify 使用当前安装的包；历史部署用于追溯源码、包和日志。
 
-当前实际文件保存在远端 `workflow-state/<执行ID>/`，由本地分组索引关联到 `request_id/run`；dump 仍位于 AFX 管理的目录，通过 `evidence list/read` 访问。
+新部署和复跑实际保存在远端 `workflow-state/<request_id>/deploy/run-N/` 和 `workflow-state/<request_id>/replay/run-N/`；轮次仍由本地加锁分配。dump 仍位于 AFX 管理的目录，通过 `evidence list/read` 访问。
 
 远端文件位置见[远端目录结构](#远端目录结构)，完整查询参数见[命令参考](docs/afxx-commands.md#7-部署与复跑)。
 
@@ -464,15 +464,16 @@ Skill 定义修复流程，CLI 和 MCP 提供执行入口并共用业务实现�
 │   └── build/                 复用的编译目录
 ├── auth/                      平台凭据
 ├── workflow-env-state/        当前环境清单、依赖锁及包缓存
-├── workflow-state/<执行ID>/   init/update、deploy、replay 等执行记录
-│   ├── config.yaml            本次配置
-│   ├── result.json            执行报告；replay 包含本轮用例结果
-│   ├── job.log                执行日志
-│   └── packages/              deploy 产出的 AF run 包
+├── workflow-state/
+│   ├── ENV-INIT-<后缀>/       环境初始化记录
+│   ├── ENV-UPDATE-<后缀>/     环境更新记录
+│   └── repair-F001/
+│       ├── deploy/run-1/     配置、源码记录、日志、结果及 packages/
+│       └── replay/run-1/     配置、日志和本轮结果
 └── workflow-results/<执行ID>/ replay 结果与证据归档目录
 ```
 
-任务目录仅展示常用文件，实际内容随操作类型变化。`env check` 不创建任务目录。replay 的 `request_id/run` 是查询分组，远端目录使用内部执行 ID，直接通过 `replay show` 查询即可。
+任务目录仅展示常用文件，实际内容随操作类型变化。`env check` 不创建任务目录。deploy/replay 的远端目录与 request_id、类型和 run 对应。原有执行记录不搬迁，仍可按原索引查询。
 
 AFX client 数据目录由 AFX 自己管理，不随 workflow_root 改变；实际 home 可用 `afxx client status` 查看，常见默认布局为：
 
@@ -494,9 +495,9 @@ dump 也可能位于 client home 的 `debug/` 下；以 `evidence list` 返回�
 | 位置 | 内容 |
 |---|---|
 | 本地 `local.state_dir/requests/` | 部署等提交的幂等记录 |
-| 本地 `local.state_dir/replay-groups/` | request_id 下的 replay 历史索引 |
+| 本地 `local.state_dir/deploy-groups/`、`replay-groups/` | 本地加锁分配轮次及历史索引 |
 | 本地 `local.state_dir/issues/` | issue 领取记录及修复材料 |
-| 远端 `workflow-state/<执行ID>/` | 冻结配置、请求、状态、环境、日志、报告及本轮 AF run 包 |
+| 远端 `workflow-state/<request_id>/{deploy,replay}/run-N/` | 冻结配置、请求、状态、环境、日志、报告及本轮 AF run 包 |
 | AFX 当前 home 的 `runs/` | managed client 管理的执行队列与结果 |
 | 本机返回的 `evidence_path` | 本次 replay 下载的报告与日志 |
 

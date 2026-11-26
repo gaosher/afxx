@@ -70,7 +70,7 @@ def deploy(c, job):
                 if coordination is not None:
                     coordination.install_started = True
                 current = workflow_runtime.registry(c).with_suffix(".json")
-                workflow_common.write(current, {"state": "installing", "job": job.name})
+                workflow_common.write(current, {"state": "installing", "job": workflow_common.execution_id(job)})
                 try:
                     workflow_common.run(
                         [
@@ -101,7 +101,7 @@ def deploy(c, job):
                         )
                     record = {
                         "state": "success",
-                        "job": job.name,
+                        "job": workflow_common.execution_id(job),
                         "environment": c["connection"]["environment"],
                         "install_root": str(Path(c["runtime"]["install_root"]).resolve()),
                         "source": {
@@ -127,7 +127,7 @@ def deploy(c, job):
                     if coordination is not None:
                         coordination.installed = True
                 except BaseException:
-                    workflow_common.write(current, {"state": "invalid", "job": job.name})
+                    workflow_common.write(current, {"state": "invalid", "job": workflow_common.execution_id(job)})
                     raise
         finally:
             if coordination is not None and coordination.installed:
@@ -197,7 +197,7 @@ def frozen_config(c, manifest):
 def replay(c, job, request):
     from afxx.afx import fuzz_replay
     fuzz_replay.validate_options(c, request)
-    results = Path(c["replay"]["results_dir"]) / job.name
+    results = Path(c["replay"]["results_dir"]) / workflow_common.execution_id(job)
     results.mkdir(parents=True, exist_ok=True)
     try:
         with (

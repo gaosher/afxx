@@ -125,7 +125,7 @@ def worker(job):
         workflow_common.write(
             job / "status.json",
             {
-                "job": job.name,
+                "job": workflow_common.execution_id(job),
                 "state": "success",
                 "pid": os.getpid(),
                 "artifact": str(
@@ -154,7 +154,7 @@ def worker(job):
         workflow_common.write(
             job / "status.json",
             {
-                "job": job.name,
+                "job": workflow_common.execution_id(job),
                 "state": "failed",
                 "phase": previous.get("phase"),
                 "error": str(exc),
@@ -296,13 +296,15 @@ def phase_error(phase):
 REMOTE_JOB = r"""import fcntl,json,os,subprocess,sys,uuid
 from pathlib import Path
 p=Path(sys.argv[1]); action=sys.argv[2]
+def identity():
+ return json.loads((p/'request.json').read_text()).get('execution_id',p.name) if (p/'request.json').exists() else p.name
 def write(path,data):
  tmp=path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
  tmp.write_text(json.dumps(data)); tmp.replace(path)
 def inspect():
  status=p/'status.json'; intent=p/'launch.json'
- if not status.exists() and not intent.exists():return {'state':'not_found','job':p.name}
- data=json.loads(status.read_text()) if status.exists() else {'state':'unknown','job':p.name}
+ if not status.exists() and not intent.exists():return {'state':'not_found','job':identity()}
+ data=json.loads(status.read_text()) if status.exists() else {'state':'unknown','job':identity()}
  launch=json.loads(intent.read_text()) if intent.exists() else {}
  if data['state'] in ('queued','running','unknown'):
   pid=launch.get('pid') or data.get('pid')
@@ -345,17 +347,19 @@ if action=='follow':
   time.sleep(1)
  sys.exit(0)
 if action in ('status','view'):
- if not p.exists():print(json.dumps({'state':'not_found','job':p.name}));sys.exit(0)
+ if not p.exists():print(json.dumps({'state':'not_found','job':identity()}));sys.exit(0)
 else:p.mkdir(parents=True,exist_ok=True,mode=0o700)
 with (p/'.submit.lock').open('a') as guard:
  fcntl.flock(guard,fcntl.LOCK_EX)
+ if action in ('prepare','launch') and len(sys.argv)>3 and (p/'request.json').exists() and identity()!=sys.argv[3]:
+  print(json.dumps({'state':'failed','error_code':'REMOTE_PATH_CONFLICT','error':'remote run belongs to another execution'}));sys.exit(0)
  data=inspect()
  if action=='launch' and data['state']=='not_found':
-  write(p/'launch.json',{'state':'starting','job':p.name})
-  write(p/'status.json',{'state':'queued','job':p.name})
+  write(p/'launch.json',{'state':'starting','job':identity()})
+  write(p/'status.json',{'state':'queued','job':identity()})
   with (p/'job.log').open('ab') as log:
    child=subprocess.Popen([sys.executable,'-m','afxx.cli','_worker',str(p)],stdin=subprocess.DEVNULL,stdout=log,stderr=log,start_new_session=True,cwd=p)
-  write(p/'launch.json',{'state':'started','pid':child.pid,'job':p.name})
+  write(p/'launch.json',{'state':'started','pid':child.pid,'job':identity()})
   data=inspect()
  if action=='view':
   try:data=status_view(data,**json.loads(sys.argv[3]))
@@ -399,8 +403,9 @@ def query_job(c, job_id, action="status"):
             "python3",
             "-c",
             REMOTE_JOB,
-            str(Path(c["remote"]["state_dir"]) / job_id),
+            str(workflow_common.remote_job(c, job_id)),
             action,
+            job_id,
         ],
     )
 
@@ -433,6 +438,7 @@ def submit(c, request, request_id, dry_run):
             saved = {
                 "job": request_id,
                 "fingerprint": fingerprint,
+                "remote_relative": workflow_common.grouped_path(request, request_id),
                 "prepared": False,
             }
             workflow_common.write(record, saved)
@@ -442,7 +448,7 @@ def submit(c, request, request_id, dry_run):
             "request_id": request_id,
             "job": job_id,
             "local": str(local),
-            "remote": str(Path(c["remote"]["state_dir"]) / job_id),
+            "remote": str(workflow_common.remote_job(c, job_id)),
             "dry_run": dry_run,
             "reused": reused,
         }
@@ -452,7 +458,7 @@ def submit(c, request, request_id, dry_run):
                 workflow_common.write(local / "config.yaml", c)
                 workflow_common.write(
                     local / "request.json",
-                    dict(request, submission={"request_key": identity}),
+                    dict(request, execution_id=job_id, submission={"request_key": identity}),
                 )
                 if request["command"] == "deploy":
                     workflow_common.write(
@@ -465,6 +471,8 @@ def submit(c, request, request_id, dry_run):
             if dry_run:
                 return dict(data, state="prepared")
             status = query_job(c, job_id, "prepare")
+            workflow_common.require_code(status.get("error_code") != "REMOTE_PATH_CONFLICT",
+                                         "REMOTE_PATH_CONFLICT", "远端轮次目录已属于其他执行；请核对本地分组记录。")
             if status["state"] == "not_found":
                 workflow_common.require_code(
                     not saved.get("remote_accepted"),
@@ -498,6 +506,8 @@ def submit(c, request, request_id, dry_run):
                         "TRANSFER_FAILED", "任务上传失败；使用相同 request-id 重试。"
                     ) from error
                 status = query_job(c, job_id, "launch")
+                workflow_common.require_code(status.get("error_code") != "REMOTE_PATH_CONFLICT",
+                                             "REMOTE_PATH_CONFLICT", "远端轮次目录已属于其他执行。")
             cleanup = confirm_submission(record, saved, local, status)
             return dict(
                 data,
@@ -536,7 +546,7 @@ try:
 except (OSError, ValueError, KeyError) as error:
  print(json.dumps({'state':'failed','error_code':'EVIDENCE_UNAVAILABLE','error':str(error)}))
 """
-    value = remote(c, ["python3", "-c", code, str(Path(c["remote"]["state_dir"]) / job_id),
+    value = remote(c, ["python3", "-c", code, str(workflow_common.remote_job(c, job_id)),
                        json.dumps(dict(action=action, path=path, offset=offset, limit=limit, sha256=sha256))])
     workflow_common.require_code(value['state'] == 'success', value.get('error_code', 'EVIDENCE_UNAVAILABLE'), value.get('error', 'evidence unavailable'))
     return value['evidence']
@@ -547,7 +557,7 @@ def query_status(c, job_id, *, full=False, attempt_id=None, fields=None):
     from afxx.job_view import status_view
     from afxx.afx.replay import failure_index
     code = inspect.getsource(failure_index) + "\n" + inspect.getsource(status_view) + "\n" + REMOTE_JOB
-    data = remote(c, ["python3", "-c", code, str(Path(c["remote"]["state_dir"]) / job_id),
+    data = remote(c, ["python3", "-c", code, str(workflow_common.remote_job(c, job_id)),
                       "view", json.dumps(dict(full=full, attempt_id=attempt_id, fields=fields))])
     workflow_common.require_code("query_error" not in data, "ATTEMPT_FIELD_NOT_FOUND" if data.get("query_error", "").startswith("attempt field") else "ATTEMPT_NOT_FOUND",
                                  data.get("query_error", "attempt not found"))
